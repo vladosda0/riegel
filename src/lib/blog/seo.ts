@@ -50,7 +50,8 @@ interface AppliedTag {
   element: Element;
   created: boolean;
   originalContent: string | null;
-  /** Absent from index.html: found at mount time only because we booted on a prerender. */
+  /** Its value at mount time may be the booted page's own rather than an app-shell
+   *  default, so it must not be restored on unmount. See PRERENDER_ONLY_TAGS. */
   prerenderOnly: boolean;
 }
 
@@ -70,7 +71,9 @@ interface AppliedTag {
  * the landing page and `/` ends up declaring `canonical: /blog/<the-article>/`, which
  * tells a crawler the landing page is a duplicate of a blog post. Verified in a browser.
  *
- * Removing them restores exactly what `/` boots with when it is served for real: nothing.
+ * Removing them leaves the page with nothing — which for six of the seven is exactly what
+ * `/` boots with when it is served for real. For `canonical` it is no longer, and the note
+ * beside that entry explains why removal is still the branch we want.
  *
  * KNOWN RESIDUAL, and it is bigger than this list. `prerender-blog.mjs` also OVERWRITES, in
  * place, eight tags index.html does ship: `<title>`, `description`, `og:title`,

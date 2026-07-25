@@ -835,14 +835,22 @@ async function main() {
   await writeFile(path.join(DIST, "blog", "feed.xml"), rssXml(posts), "utf8");
   log("wrote blog/feed.xml");
 
-  // Landing shell LAST, and only on a build that actually rendered the blog.
+  // Landing shell LAST, and only on a build that actually wrote article files.
   //
   // dist/index.html is Caddy's SPA fallback, so whatever canonical it carries is
-  // inherited by every URL with no file of its own. On a failed blog fetch this
-  // script returns above, having written no /blog/ pages while sitemap.xml still
-  // advertises them: stamping the landing canonical then would hand every blog
-  // URL in the sitemap a "duplicate of /" verdict and cost us the entire blog.
-  // Reaching this line means the articles exist on disk and answer for themselves.
+  // inherited by every URL with no file of its own — including every article URL
+  // search engines have already indexed, on any build that did not write that
+  // article. Stamping the landing canonical then hands each of those URLs an
+  // explicit "duplicate of /" verdict, which deindexes the blog outright instead
+  // of merely thinning it, and consolidation is far stickier to undo than missing
+  // content. `vite build` empties dist before this runs, so the previous deploy's
+  // files are never there to cover.
+  //
+  // TWO inputs reach that state and `dataOk` only excludes the first: a fetch that
+  // THREW (returns above), and a fetch that SUCCEEDED WITH AN EMPTY LIST — an RLS
+  // change on blog_posts, a rotated publishable key, or a build pointed at the
+  // wrong Supabase project all produce a perfectly healthy `200 []`. Gate on the
+  // artifacts actually written, not on how the fetch went.
   //
   // Rendered from the pristine in-memory `template`, after every page that reads
   // it, so no page can end up with two canonicals.
@@ -852,8 +860,12 @@ async function main() {
   // Content-wise it is an empty shell to a non-JS crawler either way; the article
   // gets its own canonical the moment a deploy renders it. Closing it properly
   // means rebuilding on publish (blog-rebuild-frontend, dormant on prod today).
-  await writeFile(path.join(DIST, "index.html"), renderCanonicalShell(template, "/"), "utf8");
-  log("wrote landing canonical shell");
+  if (posts.length > 0) {
+    await writeFile(path.join(DIST, "index.html"), renderCanonicalShell(template, "/"), "utf8");
+    log("wrote landing canonical shell");
+  } else {
+    log("skipped landing canonical shell — no article files were written");
+  }
 }
 
 await main();
