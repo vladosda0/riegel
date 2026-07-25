@@ -181,14 +181,43 @@ describe("buildPortfolioCsv", () => {
     expect(csv).not.toContain("\n=HYPERLINK");
   });
 
-  it("neutralizes a formula title that starts like a negative number", () => {
-    const snap = snapshot({
-      projects: [projectRow({ title: "-1+cmd|' /C calc'!A0" })],
-    });
-    const csv = buildPortfolioCsv(snap, labels);
-    const dataLine = csv.trim().split("\r\n")[1];
+  // Built by code point so the table below carries no literal control characters.
+  const TAB = String.fromCharCode(9);
+  const CR = String.fromCharCode(13);
+  const LF = String.fromCharCode(10);
+
+  /** First CSV field of a row, unquoted, so the assertion is not coupled to quoting. */
+  const firstCell = (row: string): string => {
+    if (!row.startsWith('"')) return row.split(",")[0];
+    let out = "";
+    for (let i = 1; i < row.length; i += 1) {
+      if (row[i] === '"') {
+        if (row[i + 1] === '"') { out += '"'; i += 1; continue; }
+        break;
+      }
+      out += row[i];
+    }
+    return out;
+  };
+
+  it.each([
+    ["equals", "=1+1"],
+    ["plus", "+1+1"],
+    ["at", "@SUM(1)"],
+    ["tab", `${TAB}=1+1`],
+    ["carriage return", `${CR}=1+1`],
+    ["line feed", `${LF}=1+1`],
+    ["leading space", " =1+1"],
+    ["comma inside the payload", "=SUM(1,2)"],
     // The numeric exemption must not swallow free text that merely opens with "-<digit>".
-    expect(dataLine.startsWith("'-1+cmd")).toBe(true);
+    ["negative-number lookalike", "-1+cmd|' /C calc'!A0"],
+  ])("apostrophe-guards a formula title (%s)", (_label, title) => {
+    const snap = snapshot({ projects: [projectRow({ title })] });
+    const csv = buildPortfolioCsv(snap, labels);
+    // Everything after the header terminator is the single data row; a title may
+    // itself contain CR/LF, so do not split the body on line breaks.
+    const body = csv.slice(csv.indexOf("\r\n") + 2);
+    expect(firstCell(body)).toBe(`'${title}`);
   });
 
   it("keeps negative money cells numeric (not apostrophe-guarded as a formula)", () => {
