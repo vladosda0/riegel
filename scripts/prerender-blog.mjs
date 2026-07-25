@@ -51,7 +51,27 @@ const BLOG_TITLE = "Блог Ровно";
 const BLOG_DESCRIPTION =
   "Статьи команды Ровно о том, как вести стройку без хаоса: сметы, закупки, приёмка работ, контроль подрядчиков и ИИ на объекте.";
 
-const STATIC_ROUTES = ["/", "/blog/", "/offer", "/privacy", "/refund", "/contacts"];
+// Trailing slashes are the canonical form for everything served out of a
+// directory: Caddy resolves dist/<route>/index.html for both /offer and
+// /offer/, 308-ing the bare form to the slashed one. Advertising the bare form
+// here would put a redirecting URL in the sitemap.
+const STATIC_ROUTES = ["/", "/blog/", "/offer/", "/privacy/", "/refund/", "/contacts/"];
+
+// Public routes that ship no prerendered body but still need a self-canonical.
+//
+// Why: the app answers on several hosts (rovno.ai, www.rovno.ai, стройагент.рф)
+// and Timeweb App Platform serves the same files on all of them. index.html
+// carries a client-side www -> apex redirect, but a crawler that does not run JS
+// (YandexBot) never executes it, so without a canonical every one of those hosts
+// is an independent, indexable copy of the site.
+//
+// "/" is the shell itself; the rest become directories. Note the shell is ALSO
+// Caddy's SPA fallback, so stamping "/" into it means every unmatched route
+// (/demo, /home, /auth/*, share links) reports the landing page as its canonical.
+// That is the wanted outcome: those URLs are all byte-identical empty shells to a
+// non-JS crawler today, and consolidating them beats indexing them as duplicates.
+// Every public route with its own content is prerendered here or under /blog/.
+const CANONICAL_SHELL_ROUTES = ["/", "/offer/", "/privacy/", "/refund/", "/contacts/"];
 
 // ---------------------------------------------------------------------------
 // Small utilities
@@ -309,6 +329,36 @@ function renderPage(template, page) {
   );
 
   return html;
+}
+
+/**
+ * Drop any canonical/og:url already present in the app shell.
+ *
+ * dist/index.html is BOTH a page we stamp a canonical into and the template
+ * every blog page is rendered from. Running `npm run prerender` twice without a
+ * fresh `vite build` would otherwise feed a stamped shell back in as the
+ * template, and buildHeadTags would append a second canonical to every article —
+ * two canonicals make a crawler ignore both. Normalizing on read makes the whole
+ * script idempotent.
+ */
+function stripCanonicalTags(html) {
+  return html
+    .replace(/[ \t]*<link rel="canonical"[^>]*>\n?/g, "")
+    .replace(/[ \t]*<meta property="og:url"[^>]*>\n?/g, "");
+}
+
+/** App shell for a route that has no prerendered body: same markup as the SPA
+ *  fallback, plus the self-canonical that tells a non-JS crawler which host and
+ *  path own this document. Function replacement, per the note in renderPage. */
+function renderCanonicalShell(template, routePath) {
+  const canonical = `${SITE_ORIGIN}${routePath}`;
+  return template.replace(
+    "</head>",
+    () =>
+      `    <link rel="canonical" href="${escapeHtml(canonical)}" />\n` +
+      `    <meta property="og:url" content="${escapeHtml(canonical)}" />\n` +
+      `  </head>`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -670,7 +720,7 @@ async function main() {
     console.error("[prerender-blog] dist/index.html not found — run `vite build` first.");
     process.exit(1);
   }
-  const template = await readFile(templatePath, "utf8");
+  const template = stripCanonicalTags(await readFile(templatePath, "utf8"));
 
   let posts = [];
   let dataOk = false;
@@ -689,6 +739,18 @@ async function main() {
 
   await writeFile(path.join(DIST, "llms.txt"), llmsTxt(posts), "utf8");
   log("wrote llms.txt");
+
+  // Canonical shells. Deliberately ABOVE the blog-data gate: these routes carry
+  // no blog content, and an unreachable Supabase must not be what leaves the
+  // public pages uncanonicalized. Rendered from the in-memory pristine
+  // `template`, so overwriting dist/index.html here cannot leak a canonical into
+  // the blog pages rendered below.
+  for (const routePath of CANONICAL_SHELL_ROUTES) {
+    const dir = routePath === "/" ? DIST : path.join(DIST, ...routePath.split("/").filter(Boolean));
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, "index.html"), renderCanonicalShell(template, routePath), "utf8");
+  }
+  log(`wrote ${CANONICAL_SHELL_ROUTES.length} canonical shell page(s)`);
 
   if (!dataOk) return;
 
