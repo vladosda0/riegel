@@ -542,7 +542,7 @@
       "securityDefiner": true,
       "searchPath": "public",
       "authenticatedExecute": true,
-      "sourceMigration": "supabase/migrations/20260506120400_accept_project_invite_with_org.sql",
+      "sourceMigration": "supabase/migrations/20260725120000_invite_replay_guard.sql",
       "triggerUsages": []
     },
     {

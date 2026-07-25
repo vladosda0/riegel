@@ -17,6 +17,7 @@ Mirrored SQL and normalized JSON remain authoritative over this markdown.
 - `supabase/migrations/20260513140000_p0_derived_chat_key_for_ai_sessions.sql`
 - `supabase/migrations/20260506120000_organizations_and_membership.sql`
 - `supabase/migrations/20260506120400_accept_project_invite_with_org.sql`
+- `supabase/migrations/20260725120000_invite_replay_guard.sql`
 - `supabase/migrations/20260325100000_sensitive_visibility_and_document_classification.sql`
 - `supabase/migrations/20260406184500_track1_hr_operational_summary_role_gate.sql`
 - `supabase/migrations/20260505233155_fix_layer_a_stage_status_semantics.sql`
@@ -275,7 +276,7 @@ Indexes:
 | `public.can_manage_project(uuid)` | `boolean` | yes | `rpc` | `supabase/migrations/20260306165500_auth_bootstrap_and_domain_rpc.sql` |
 | `public.can_write_project_content(uuid)` | `boolean` | yes | `rpc` | `supabase/migrations/20260306165500_auth_bootstrap_and_domain_rpc.sql` |
 | `public.can_see_profile(uuid)` | `boolean` | yes | `rpc` | `supabase/migrations/20260306165500_auth_bootstrap_and_domain_rpc.sql` |
-| `public.accept_project_invite(text)` | `public.project_invites` | yes | `rpc` | `supabase/migrations/20260506120400_accept_project_invite_with_org.sql` |
+| `public.accept_project_invite(text)` | `public.project_invites` | yes | `rpc` | `supabase/migrations/20260725120000_invite_replay_guard.sql` |
 | `public.effective_finance_visibility(uuid)` | `text` | yes | `rpc` | `supabase/migrations/20260325100000_sensitive_visibility_and_document_classification.sql` |
 | `public.effective_internal_docs_visibility(uuid)` | `text` | yes | `rpc` | `supabase/migrations/20260325100000_sensitive_visibility_and_document_classification.sql` |
 | `public.effective_ai_access_for_profile(uuid)` | `text` | yes | `rpc` | `supabase/migrations/20260324140000_project_launch_authority.sql` |

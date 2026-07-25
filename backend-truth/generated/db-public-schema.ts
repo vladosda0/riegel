@@ -543,6 +543,10 @@ export const manifest = {
     {
       "path": "supabase/migrations/20260720120000_payment_intents_order_attempt.sql",
       "sha256": "c131c0639acc1436bcb040451adc29b38908fb61ae45f751a1fb00bd2ac5fb6b"
+    },
+    {
+      "path": "supabase/migrations/20260725120000_invite_replay_guard.sql",
+      "sha256": "0fcdbad67de9967151f23cf2d693f94749ffdbc16e620f77b286d84d1c874569"
     }
   ],
   "generated_artifacts": [
@@ -705,6 +709,7 @@ export const manifest = {
     "sql/20260713150000_change_task_status_v2.sql",
     "sql/20260716205000_payment_intents_operation_identity_key.sql",
     "sql/20260720120000_payment_intents_order_attempt.sql",
+    "sql/20260725120000_invite_replay_guard.sql",
     "generated/db-public-schema.ts",
     "generated/supabase-types.ts"
   ],
@@ -17552,7 +17557,7 @@ export const functions = {
       "securityDefiner": true,
       "searchPath": "public",
       "authenticatedExecute": true,
-      "sourceMigration": "supabase/migrations/20260506120400_accept_project_invite_with_org.sql",
+      "sourceMigration": "supabase/migrations/20260725120000_invite_replay_guard.sql",
       "triggerUsages": []
     },
     {
@@ -23358,7 +23363,7 @@ export const sourceTrace = {
       "schema": "public",
       "name": "accept_project_invite",
       "signature": "public.accept_project_invite(text)",
-      "sourceMigration": "supabase/migrations/20260506120400_accept_project_invite_with_org.sql"
+      "sourceMigration": "supabase/migrations/20260725120000_invite_replay_guard.sql"
     },
     {
       "key": "public.prepare_project_media_upload",
@@ -25447,6 +25452,7 @@ export const sourceTrace = {
         "supabase/migrations/20260513140000_p0_derived_chat_key_for_ai_sessions.sql",
         "supabase/migrations/20260506120000_organizations_and_membership.sql",
         "supabase/migrations/20260506120400_accept_project_invite_with_org.sql",
+        "supabase/migrations/20260725120000_invite_replay_guard.sql",
         "supabase/migrations/20260325100000_sensitive_visibility_and_document_classification.sql",
         "supabase/migrations/20260406184500_track1_hr_operational_summary_role_gate.sql",
         "supabase/migrations/20260505233155_fix_layer_a_stage_status_semantics.sql",
@@ -26628,6 +26634,7 @@ export const slices = {
         "supabase/migrations/20260513140000_p0_derived_chat_key_for_ai_sessions.sql",
         "supabase/migrations/20260506120000_organizations_and_membership.sql",
         "supabase/migrations/20260506120400_accept_project_invite_with_org.sql",
+        "supabase/migrations/20260725120000_invite_replay_guard.sql",
         "supabase/migrations/20260325100000_sensitive_visibility_and_document_classification.sql",
         "supabase/migrations/20260406184500_track1_hr_operational_summary_role_gate.sql",
         "supabase/migrations/20260505233155_fix_layer_a_stage_status_semantics.sql",
