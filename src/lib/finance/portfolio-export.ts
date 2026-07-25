@@ -11,12 +11,15 @@ function escapeCsv(value: string): string {
   // apostrophe before RFC-quoting. Skip plain signed numbers (e.g. "-100000.00") so
   // negative money/percent cells stay numeric rather than becoming text; the match is
   // anchored end to end so free text merely opening with "-<digit>" is still guarded.
-  // Importers strip leading whitespace before evaluating a cell, so also test a
-  // whitespace-stripped copy: that closes the whole leading space/tab/CR/LF family
-  // at once rather than listing characters one at a time. The raw test below is kept
-  // as well, so this never guards less than before.
-  const isPlainNumber = /^-?\d+(?:\.\d+)?$/.test(value);
-  const opensFormula = /^[=+\-@\t\r]/.test(value) || /^[=+\-@]/.test(value.trimStart());
+  // Importers strip leading whitespace before evaluating a cell, so the trigger is
+  // also tested behind optional leading whitespace. `\s` is the full ECMAScript
+  // WhiteSpace set (space, tab, CR, LF, VT, FF, NBSP, BOM, U+2028...), which closes
+  // that whole family at once: do NOT narrow it to an ASCII-only strip. The bare
+  // class is kept alongside it so nothing previously guarded slips through, and both
+  // tests are regexes, which coerce, so a non-string cell degrades instead of
+  // throwing and taking the whole export with it.
+  const isPlainNumber = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(value);
+  const opensFormula = /^[=+\-@\t\r]/.test(value) || /^\s*[=+\-@]/.test(value);
   const guarded = !isPlainNumber && opensFormula ? `'${value}` : value;
   if (/[",\r\n]/.test(guarded)) {
     return `"${guarded.replace(/"/g, '""')}"`;

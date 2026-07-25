@@ -185,6 +185,10 @@ describe("buildPortfolioCsv", () => {
   const TAB = String.fromCharCode(9);
   const CR = String.fromCharCode(13);
   const LF = String.fromCharCode(10);
+  const VT = String.fromCharCode(11);
+  const FF = String.fromCharCode(12);
+  const NBSP = String.fromCharCode(160);
+  const BOM_CHAR = String.fromCharCode(65279);
 
   /** First CSV field of a row, unquoted, so the assertion is not coupled to quoting. */
   const firstCell = (row: string): string => {
@@ -208,6 +212,12 @@ describe("buildPortfolioCsv", () => {
     ["carriage return", `${CR}=1+1`],
     ["line feed", `${LF}=1+1`],
     ["leading space", " =1+1"],
+    // The strip is the full ECMAScript WhiteSpace set, not just space/tab/CR/LF.
+    // A leading NBSP is a routine artifact of a title pasted from Word or a web page.
+    ["vertical tab", `${VT}=1+1`],
+    ["form feed", `${FF}=1+1`],
+    ["non-breaking space", `${NBSP}=1+1`],
+    ["byte order mark", `${BOM_CHAR}=1+1`],
     ["comma inside the payload", "=SUM(1,2)"],
     // The numeric exemption must not swallow free text that merely opens with "-<digit>".
     ["negative-number lookalike", "-1+cmd|' /C calc'!A0"],
@@ -218,6 +228,24 @@ describe("buildPortfolioCsv", () => {
     // itself contain CR/LF, so do not split the body on line breaks.
     const body = csv.slice(csv.indexOf("\r\n") + 2);
     expect(firstCell(body)).toBe(`'${title}`);
+  });
+
+  it("exports rather than throwing when a cell value is not a string", () => {
+    // The guard must stay total: a status outside the union makes the label lookup
+    // undefined, and one bad cell must not abort the whole export.
+    const snap = snapshot({ projects: [projectRow({ title: "Ok" })] });
+    (snap.projects[0] as unknown as { status: string }).status = "archived";
+    expect(() => buildPortfolioCsv(snap, labels)).not.toThrow();
+  });
+
+  it("keeps exponential-notation money numeric (toFixed emits it past 1e21)", () => {
+    // toFixed switches to exponential once the ruble value reaches 1e21, and a
+    // spreadsheet still reads "-1e+22" as a number, so the exemption must cover it
+    // or a huge money cell silently becomes apostrophe-prefixed text.
+    const snap = snapshot({ projects: [projectRow({ title: "Huge", marginCents: -1e24 })] });
+    const csv = buildPortfolioCsv(snap, labels);
+    expect(csv).toContain("-1e+22");
+    expect(csv).not.toContain("'-1e+22");
   });
 
   it("keeps negative money cells numeric (not apostrophe-guarded as a formula)", () => {
