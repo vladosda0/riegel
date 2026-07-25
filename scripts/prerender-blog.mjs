@@ -65,13 +65,11 @@ const STATIC_ROUTES = ["/", "/blog/", "/offer/", "/privacy/", "/refund/", "/cont
 // (YandexBot) never executes it, so without a canonical every one of those hosts
 // is an independent, indexable copy of the site.
 //
-// "/" is the shell itself; the rest become directories. Note the shell is ALSO
-// Caddy's SPA fallback, so stamping "/" into it means every unmatched route
-// (/demo, /home, /auth/*, share links) reports the landing page as its canonical.
-// That is the wanted outcome: those URLs are all byte-identical empty shells to a
-// non-JS crawler today, and consolidating them beats indexing them as duplicates.
-// Every public route with its own content is prerendered here or under /blog/.
-const CANONICAL_SHELL_ROUTES = ["/", "/offer/", "/privacy/", "/refund/", "/contacts/"];
+// These four are 1:1 files, so they are written unconditionally. The landing "/"
+// is NOT in this list: it is dist/index.html, which doubles as Caddy's SPA
+// fallback, so its canonical is inherited by every URL that has no file of its
+// own. That makes WHEN it is written load-bearing — see the write in main().
+const LEGAL_SHELL_ROUTES = ["/offer/", "/privacy/", "/refund/", "/contacts/"];
 
 // ---------------------------------------------------------------------------
 // Small utilities
@@ -347,17 +345,25 @@ function stripCanonicalTags(html) {
     .replace(/[ \t]*<meta property="og:url"[^>]*>\n?/g, "");
 }
 
-/** App shell for a route that has no prerendered body: same markup as the SPA
- *  fallback, plus the self-canonical that tells a non-JS crawler which host and
- *  path own this document. Function replacement, per the note in renderPage. */
+/**
+ * App shell for a route that has no prerendered body: same markup as the SPA
+ * fallback, plus the self-canonical that tells a non-JS crawler which host and
+ * path own this document. Function replacement, per the note in renderPage.
+ *
+ * Canonical ONLY, deliberately no og:url. dist/index.html is Caddy's catch-all,
+ * so an og:url there would be served for /share/estimate/<id>, /invite/accept/
+ * <token> and /promo/redeem too, and the platforms that treat og:url as the
+ * object's permanent id would point every shared preview card at the marketing
+ * home page instead of the thing that was shared. canonical does not have that
+ * failure mode (search engines consolidating those URLs onto "/" is wanted), and
+ * a scraper with no og:url just uses the URL it fetched, which is already right.
+ * Blog pages still get og:url from buildHeadTags: those are real 1:1 documents.
+ */
 function renderCanonicalShell(template, routePath) {
   const canonical = `${SITE_ORIGIN}${routePath}`;
   return template.replace(
     "</head>",
-    () =>
-      `    <link rel="canonical" href="${escapeHtml(canonical)}" />\n` +
-      `    <meta property="og:url" content="${escapeHtml(canonical)}" />\n` +
-      `  </head>`,
+    () => `    <link rel="canonical" href="${escapeHtml(canonical)}" />\n  </head>`,
   );
 }
 
@@ -740,17 +746,15 @@ async function main() {
   await writeFile(path.join(DIST, "llms.txt"), llmsTxt(posts), "utf8");
   log("wrote llms.txt");
 
-  // Canonical shells. Deliberately ABOVE the blog-data gate: these routes carry
-  // no blog content, and an unreachable Supabase must not be what leaves the
-  // public pages uncanonicalized. Rendered from the in-memory pristine
-  // `template`, so overwriting dist/index.html here cannot leak a canonical into
-  // the blog pages rendered below.
-  for (const routePath of CANONICAL_SHELL_ROUTES) {
-    const dir = routePath === "/" ? DIST : path.join(DIST, ...routePath.split("/").filter(Boolean));
+  // Legal shells are 1:1 files: each answers exactly one URL and nothing else, so
+  // an unreachable Supabase must not be what leaves them uncanonicalized. Safe
+  // above the gate for the same reason the landing shell is not.
+  for (const routePath of LEGAL_SHELL_ROUTES) {
+    const dir = path.join(DIST, ...routePath.split("/").filter(Boolean));
     await mkdir(dir, { recursive: true });
     await writeFile(path.join(dir, "index.html"), renderCanonicalShell(template, routePath), "utf8");
   }
-  log(`wrote ${CANONICAL_SHELL_ROUTES.length} canonical shell page(s)`);
+  log(`wrote ${LEGAL_SHELL_ROUTES.length} legal shell page(s)`);
 
   if (!dataOk) return;
 
@@ -830,6 +834,26 @@ async function main() {
 
   await writeFile(path.join(DIST, "blog", "feed.xml"), rssXml(posts), "utf8");
   log("wrote blog/feed.xml");
+
+  // Landing shell LAST, and only on a build that actually rendered the blog.
+  //
+  // dist/index.html is Caddy's SPA fallback, so whatever canonical it carries is
+  // inherited by every URL with no file of its own. On a failed blog fetch this
+  // script returns above, having written no /blog/ pages while sitemap.xml still
+  // advertises them: stamping the landing canonical then would hand every blog
+  // URL in the sitemap a "duplicate of /" verdict and cost us the entire blog.
+  // Reaching this line means the articles exist on disk and answer for themselves.
+  //
+  // Rendered from the pristine in-memory `template`, after every page that reads
+  // it, so no page can end up with two canonicals.
+  //
+  // RESIDUAL: an article published AFTER this build is served by the fallback
+  // until the next deploy, and so reports "/" as its canonical for that window.
+  // Content-wise it is an empty shell to a non-JS crawler either way; the article
+  // gets its own canonical the moment a deploy renders it. Closing it properly
+  // means rebuilding on publish (blog-rebuild-frontend, dormant on prod today).
+  await writeFile(path.join(DIST, "index.html"), renderCanonicalShell(template, "/"), "utf8");
+  log("wrote landing canonical shell");
 }
 
 await main();
