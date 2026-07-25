@@ -203,9 +203,13 @@ describe("supabase activity source getProjectEvents", () => {
     await source.getProjectEvents("project-1", 2);
 
     // created_at ties for rows written by one transaction, and a LIMIT would then
-    // return an arbitrary member of the tie group.
-    expect(chain.order).toHaveBeenCalledWith("created_at", { ascending: false });
-    expect(chain.order).toHaveBeenCalledWith("id", { ascending: false });
+    // return an arbitrary member of the tie group. Assert PRECEDENCE, not just
+    // presence: if id came first it would become the primary key and the query
+    // would return arbitrary rows instead of the newest ones.
+    expect(chain.order.mock.calls).toEqual([
+      ["created_at", { ascending: false }],
+      ["id", { ascending: false }],
+    ]);
   });
 
   it.each([[0], [-1], [2.5], [Number.POSITIVE_INFINITY], [Number.NaN]])(
