@@ -181,6 +181,16 @@ describe("buildPortfolioCsv", () => {
     expect(csv).not.toContain("\n=HYPERLINK");
   });
 
+  it("neutralizes a formula title that starts like a negative number", () => {
+    const snap = snapshot({
+      projects: [projectRow({ title: "-1+cmd|' /C calc'!A0" })],
+    });
+    const csv = buildPortfolioCsv(snap, labels);
+    const dataLine = csv.trim().split("\r\n")[1];
+    // The numeric exemption must not swallow free text that merely opens with "-<digit>".
+    expect(dataLine.startsWith("'-1+cmd")).toBe(true);
+  });
+
   it("keeps negative money cells numeric (not apostrophe-guarded as a formula)", () => {
     const snap = snapshot({
       projects: [projectRow({ title: "Loss maker", marginCents: -100_000, marginPct: -20, toBePaidCents: -5_000 })],
