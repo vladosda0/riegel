@@ -294,14 +294,49 @@ export function trackEventOncePerSession(
  * build time, so when no counter is configured esbuild dead-code-eliminates
  * this whole loader from the bundle — no `mc.yandex.ru` request, no init.
  *
- * Session replay is deliberately disabled below: it records PII and is gated
- * behind a separate consent + field-masking workstream (152-ФЗ). Only
- * clickmap / accurateTrackBounce / trackLinks remain on.
+ * Session replay (Вебвизор) is ON as of 2026-07-25, but only in its
+ * behaviour-only form: the counter setting "Записывать все поля" is OFF, so
+ * recordings capture clicks / scrolls / navigation and never the text users
+ * type (client names, addresses, amounts). That is the field-masking half of
+ * the 152-ФЗ gate this comment previously described. The consent half is
+ * still open — see docs/observability/setup.md §5.
+ *
+ * Own / agent test visits are excluded two ways: the counter's "Не учитывать
+ * мои визиты" filter (covers browsers logged into a Yandex account with
+ * counter access) and the `?no-analytics=1` opt-out below (covers everything
+ * else, including mobile and clean agent browsers).
  */
+/** localStorage key marking this browser as excluded from analytics. */
+const ANALYTICS_OPT_OUT_KEY = "rovno-analytics-opt-out";
+
+/**
+ * Own/agent test traffic must not land in the product funnel. Visiting any
+ * page with `?no-analytics=1` marks this browser permanently; `?no-analytics=0`
+ * clears the mark. Checked before the tag is bootstrapped, so an opted-out
+ * browser never loads tag.js at all — and because `trackEvent` and
+ * `MetrikaPageviewTracker` both bail when `window.ym` is not a function, a
+ * single early return here suppresses goals, pageviews and Вебвизор together.
+ *
+ * Fails OPEN: if storage is unavailable (private mode, quota), we keep
+ * tracking rather than silently losing a real visitor.
+ */
+export function isAnalyticsOptedOut(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const param = new URLSearchParams(window.location.search).get("no-analytics");
+    if (param === "1") localStorage.setItem(ANALYTICS_OPT_OUT_KEY, "1");
+    else if (param === "0") localStorage.removeItem(ANALYTICS_OPT_OUT_KEY);
+    return localStorage.getItem(ANALYTICS_OPT_OUT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export function initMetrika(): void {
   if (!import.meta.env.VITE_METRIKA_COUNTER_ID) return;
   if (METRIKA_COUNTER_ID === null) return;
   if (typeof window === "undefined" || typeof document === "undefined") return;
+  if (isAnalyticsOptedOut()) return;
 
   const counterId = METRIKA_COUNTER_ID;
   const src = `https://mc.yandex.ru/metrika/tag.js?id=${counterId}`;
@@ -333,7 +368,14 @@ export function initMetrika(): void {
   }
 
   ym(counterId, "init", {
-    webvisor: false,
+    // Session recording. The dashboard toggle alone records nothing — the tag
+    // must also be initialised with this flag (it was `false` from the
+    // Mixpanel→Metrika migration, which is why the Вебвизор report stayed
+    // empty). Field CONTENTS are deliberately NOT recorded: the counter
+    // setting "Записывать все поля" is off, so recordings carry behaviour
+    // only and never the client names / addresses / amounts users type
+    // (152-ФЗ, same reasoning as the Sentry scrubber).
+    webvisor: true,
     clickmap: true,
     accurateTrackBounce: true,
     trackLinks: true,
