@@ -848,8 +848,10 @@ async function main() {
   //
   // TWO inputs reach that state and `dataOk` only excludes the first: a fetch that
   // THREW (returns above), and a fetch that SUCCEEDED WITH AN EMPTY LIST — an RLS
-  // change on blog_posts, a rotated publishable key, or a build pointed at the
-  // wrong Supabase project all produce a perfectly healthy `200 []`. Gate on the
+  // change on blog_posts, or a build pointed at a project that has no published
+  // rows, both produce a perfectly healthy `200 []`. (This repo's own .env.local
+  // returns exactly that today.) A bad or rotated key is NOT one of them: that is
+  // a 401, which throws and is already covered by `dataOk`. So gate on the
   // artifacts actually written, not on how the fetch went.
   //
   // Rendered from the pristine in-memory `template`, after every page that reads
