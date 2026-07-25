@@ -160,6 +160,7 @@ It is an allowlist-specific extractor for the source migrations below, not a gen
 - `supabase/migrations/20260716205000_payment_intents_operation_identity_key.sql`
 - `supabase/migrations/20260720120000_payment_intents_order_attempt.sql`
 - `supabase/migrations/20260725120000_invite_replay_guard.sql`
+- `supabase/migrations/20260725190000_profiles_locale_default_ru.sql`
 
 ## Exclusions
 
