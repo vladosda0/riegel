@@ -452,5 +452,7 @@ describe("use-activity-source hooks", () => {
       expect(screen.getByTestId("recent-project-1")).toHaveTextContent("evt-1a|evt-1b");
     });
     expect(screen.getByTestId("recent-project-2")).toHaveTextContent("evt-2a|evt-2b");
+    expect(source.getProjectEvents).toHaveBeenCalledWith("project-1", 2);
+    expect(source.getProjectEvents).toHaveBeenCalledWith("project-2", 2);
   });
 });

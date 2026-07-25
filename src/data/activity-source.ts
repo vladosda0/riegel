@@ -33,7 +33,7 @@ export interface ActivityNotificationsResult {
 
 export interface ActivitySource {
   mode: WorkspaceMode["kind"];
-  getProjectEvents: (projectId: string) => Promise<Event[]>;
+  getProjectEvents: (projectId: string, limit?: number) => Promise<Event[]>;
   getCurrentUserNotifications: () => Promise<ActivityNotificationsResult>;
   getCurrentUserUnreadNotificationCount: () => Promise<number>;
 }
@@ -297,8 +297,9 @@ function createBrowserNotificationsResult(mode: "demo" | "local"): ActivityNotif
 function createBrowserActivitySource(mode: "demo" | "local"): ActivitySource {
   return {
     mode,
-    async getProjectEvents(projectId: string) {
-      return store.getEvents(projectId);
+    async getProjectEvents(projectId: string, limit?: number) {
+      const events = store.getEvents(projectId);
+      return typeof limit === "number" ? events.slice(0, limit) : events;
     },
     async getCurrentUserNotifications() {
       return createBrowserNotificationsResult(mode);
@@ -412,12 +413,14 @@ function createSupabaseActivitySource(
 ): ActivitySource {
   return {
     mode: "supabase",
-    async getProjectEvents(projectId: string) {
-      const { data, error } = await supabase
+    async getProjectEvents(projectId: string, limit?: number) {
+      const query = supabase
         .from("activity_events")
         .select("id, project_id, actor_profile_id, entity_type, entity_id, action_type, payload, created_at")
         .eq("project_id", projectId)
         .order("created_at", { ascending: false });
+
+      const { data, error } = await (typeof limit === "number" ? query.limit(limit) : query);
 
       if (error) {
         throw error;

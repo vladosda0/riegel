@@ -222,7 +222,7 @@ export function useProjectsRecentEventsMap(
     queryFn: async () => {
       const source = await getActivitySource(supabaseMode ?? undefined);
       const entries = await Promise.all(normalizedProjectIds.map(async (projectId) => (
-        [projectId, (await source.getProjectEvents(projectId)).slice(0, perProjectLimit)] as const
+        [projectId, (await source.getProjectEvents(projectId, perProjectLimit)).slice(0, perProjectLimit)] as const
       )));
       return Object.fromEntries(entries);
     },

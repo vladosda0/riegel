@@ -1,9 +1,28 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getEventGroupTimestampMs } from "@/lib/event-activity-timestamp";
 import {
+  getActivitySource,
   mapActivityEventRowToEvent,
   mapNotificationRowToActivityNotification,
 } from "@/data/activity-source";
+
+type MockSupabaseClient = {
+  from: (table: string) => unknown;
+};
+
+const supabaseRef = vi.hoisted(() => ({
+  current: null as MockSupabaseClient | null,
+}));
+
+vi.mock("@/integrations/supabase/client", () => ({
+  get supabase() {
+    return supabaseRef.current;
+  },
+}));
+
+function setMockSupabase(client: MockSupabaseClient | null) {
+  supabaseRef.current = client;
+}
 
 function activityEventRow(
   overrides: Partial<Parameters<typeof mapActivityEventRowToEvent>[0]> = {},
@@ -138,5 +157,41 @@ describe("activity-source helpers", () => {
       objectId: "task-22",
       actionType: "task_updated",
     });
+  });
+});
+
+describe("supabase activity source getProjectEvents", () => {
+  function createEventsChain(rows: ReturnType<typeof activityEventRow>[]) {
+    const chain = {
+      select: vi.fn(() => chain),
+      eq: vi.fn(() => chain),
+      order: vi.fn(() => chain),
+      limit: vi.fn(() => chain),
+      then: (resolve: (value: { data: unknown; error: null }) => unknown) =>
+        Promise.resolve({ data: rows, error: null }).then(resolve),
+    };
+
+    return chain;
+  }
+
+  it("pushes the caller cap into the query instead of transferring every project event", async () => {
+    const chain = createEventsChain([activityEventRow()]);
+    setMockSupabase({ from: vi.fn(() => chain) });
+
+    const source = await getActivitySource({ kind: "supabase", profileId: "profile-1" });
+    const events = await source.getProjectEvents("project-1", 2);
+
+    expect(chain.limit).toHaveBeenCalledWith(2);
+    expect(events).toHaveLength(1);
+  });
+
+  it("leaves the query unbounded when no cap is given", async () => {
+    const chain = createEventsChain([activityEventRow()]);
+    setMockSupabase({ from: vi.fn(() => chain) });
+
+    const source = await getActivitySource({ kind: "supabase", profileId: "profile-1" });
+    await source.getProjectEvents("project-1");
+
+    expect(chain.limit).not.toHaveBeenCalled();
   });
 });
