@@ -492,7 +492,7 @@
       "schema": "public",
       "name": "accept_project_invite",
       "signature": "public.accept_project_invite(text)",
-      "sourceMigration": "supabase/migrations/20260506120400_accept_project_invite_with_org.sql"
+      "sourceMigration": "supabase/migrations/20260725120000_invite_replay_guard.sql"
     },
     {
       "key": "public.prepare_project_media_upload",
@@ -2581,6 +2581,7 @@
         "supabase/migrations/20260513140000_p0_derived_chat_key_for_ai_sessions.sql",
         "supabase/migrations/20260506120000_organizations_and_membership.sql",
         "supabase/migrations/20260506120400_accept_project_invite_with_org.sql",
+        "supabase/migrations/20260725120000_invite_replay_guard.sql",
         "supabase/migrations/20260325100000_sensitive_visibility_and_document_classification.sql",
         "supabase/migrations/20260406184500_track1_hr_operational_summary_role_gate.sql",
         "supabase/migrations/20260505233155_fix_layer_a_stage_status_semantics.sql",

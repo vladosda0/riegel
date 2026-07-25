@@ -539,6 +539,10 @@
     {
       "path": "supabase/migrations/20260720120000_payment_intents_order_attempt.sql",
       "sha256": "c131c0639acc1436bcb040451adc29b38908fb61ae45f751a1fb00bd2ac5fb6b"
+    },
+    {
+      "path": "supabase/migrations/20260725120000_invite_replay_guard.sql",
+      "sha256": "0fcdbad67de9967151f23cf2d693f94749ffdbc16e620f77b286d84d1c874569"
     }
   ],
   "generated_artifacts": [
@@ -701,6 +705,7 @@
     "sql/20260713150000_change_task_status_v2.sql",
     "sql/20260716205000_payment_intents_operation_identity_key.sql",
     "sql/20260720120000_payment_intents_order_attempt.sql",
+    "sql/20260725120000_invite_replay_guard.sql",
     "generated/db-public-schema.ts",
     "generated/supabase-types.ts"
   ],
