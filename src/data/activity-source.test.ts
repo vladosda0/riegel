@@ -1,9 +1,28 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getEventGroupTimestampMs } from "@/lib/event-activity-timestamp";
 import {
+  getActivitySource,
   mapActivityEventRowToEvent,
   mapNotificationRowToActivityNotification,
 } from "@/data/activity-source";
+
+type MockSupabaseClient = {
+  from: (table: string) => unknown;
+};
+
+const supabaseRef = vi.hoisted(() => ({
+  current: null as MockSupabaseClient | null,
+}));
+
+vi.mock("@/integrations/supabase/client", () => ({
+  get supabase() {
+    return supabaseRef.current;
+  },
+}));
+
+function setMockSupabase(client: MockSupabaseClient | null) {
+  supabaseRef.current = client;
+}
 
 function activityEventRow(
   overrides: Partial<Parameters<typeof mapActivityEventRowToEvent>[0]> = {},
@@ -139,4 +158,72 @@ describe("activity-source helpers", () => {
       actionType: "task_updated",
     });
   });
+});
+
+describe("supabase activity source getProjectEvents", () => {
+  function createEventsChain(rows: ReturnType<typeof activityEventRow>[]) {
+    const chain = {
+      select: vi.fn(() => chain),
+      eq: vi.fn(() => chain),
+      order: vi.fn(() => chain),
+      limit: vi.fn(() => chain),
+      then: (resolve: (value: { data: unknown; error: null }) => unknown) =>
+        Promise.resolve({ data: rows, error: null }).then(resolve),
+    };
+
+    return chain;
+  }
+
+  it("pushes the caller cap into the query instead of transferring every project event", async () => {
+    const chain = createEventsChain([activityEventRow()]);
+    setMockSupabase({ from: vi.fn(() => chain) });
+
+    const source = await getActivitySource({ kind: "supabase", profileId: "profile-1" });
+    const events = await source.getProjectEvents("project-1", 2);
+
+    expect(chain.limit).toHaveBeenCalledWith(2);
+    expect(events).toHaveLength(1);
+  });
+
+  it("leaves the query unbounded when no cap is given", async () => {
+    const chain = createEventsChain([activityEventRow()]);
+    setMockSupabase({ from: vi.fn(() => chain) });
+
+    const source = await getActivitySource({ kind: "supabase", profileId: "profile-1" });
+    await source.getProjectEvents("project-1");
+
+    expect(chain.limit).not.toHaveBeenCalled();
+  });
+
+  it("orders by a tiebreaker so the capped top-N is stable across ties", async () => {
+    const chain = createEventsChain([activityEventRow()]);
+    setMockSupabase({ from: vi.fn(() => chain) });
+
+    const source = await getActivitySource({ kind: "supabase", profileId: "profile-1" });
+    await source.getProjectEvents("project-1", 2);
+
+    // created_at ties for rows written by one transaction, and a LIMIT would then
+    // return an arbitrary member of the tie group. Assert PRECEDENCE, not just
+    // presence: if id came first it would become the primary key and the query
+    // would return arbitrary rows instead of the newest ones.
+    expect(chain.order.mock.calls).toEqual([
+      ["created_at", { ascending: false }],
+      ["id", { ascending: false }],
+    ]);
+  });
+
+  it.each([[0], [-1], [2.5], [Number.POSITIVE_INFINITY], [Number.NaN]])(
+    "ignores a cap that is not a positive integer (%p)",
+    async (badLimit) => {
+      const chain = createEventsChain([activityEventRow()]);
+      setMockSupabase({ from: vi.fn(() => chain) });
+
+      const source = await getActivitySource({ kind: "supabase", profileId: "profile-1" });
+      await source.getProjectEvents("project-1", badLimit);
+
+      // postgrest-js writes the value into the query string verbatim, so a bad cap
+      // would 400 and blank the feed; unbounded merely costs bandwidth.
+      expect(chain.limit).not.toHaveBeenCalled();
+    },
+  );
 });
