@@ -299,7 +299,9 @@ function createBrowserActivitySource(mode: "demo" | "local"): ActivitySource {
     mode,
     async getProjectEvents(projectId: string, limit?: number) {
       const events = store.getEvents(projectId);
-      return typeof limit === "number" ? events.slice(0, limit) : events;
+      // Same contract as the supabase source: only a positive integer caps.
+      const bounded = typeof limit === "number" && Number.isInteger(limit) && limit > 0;
+      return bounded ? events.slice(0, limit) : events;
     },
     async getCurrentUserNotifications() {
       return createBrowserNotificationsResult(mode);
@@ -418,9 +420,17 @@ function createSupabaseActivitySource(
         .from("activity_events")
         .select("id, project_id, actor_profile_id, entity_type, entity_id, action_type, payload, created_at")
         .eq("project_id", projectId)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        // created_at defaults to the transaction clock, so rows written by one
+        // transaction tie exactly. Without a tiebreaker a LIMIT could return an
+        // arbitrary member of a tie group, making the top-N unstable run to run.
+        .order("id", { ascending: false });
 
-      const { data, error } = await (typeof limit === "number" ? query.limit(limit) : query);
+      // Validate rather than trust the caller: postgrest-js writes the value into
+      // the query string verbatim, so a fractional or Infinite limit would 400 and
+      // blank the feed, where falling back to unbounded merely costs bandwidth.
+      const bounded = typeof limit === "number" && Number.isInteger(limit) && limit > 0;
+      const { data, error } = await (bounded ? query.limit(limit) : query);
 
       if (error) {
         throw error;

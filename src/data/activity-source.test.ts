@@ -194,4 +194,32 @@ describe("supabase activity source getProjectEvents", () => {
 
     expect(chain.limit).not.toHaveBeenCalled();
   });
+
+  it("orders by a tiebreaker so the capped top-N is stable across ties", async () => {
+    const chain = createEventsChain([activityEventRow()]);
+    setMockSupabase({ from: vi.fn(() => chain) });
+
+    const source = await getActivitySource({ kind: "supabase", profileId: "profile-1" });
+    await source.getProjectEvents("project-1", 2);
+
+    // created_at ties for rows written by one transaction, and a LIMIT would then
+    // return an arbitrary member of the tie group.
+    expect(chain.order).toHaveBeenCalledWith("created_at", { ascending: false });
+    expect(chain.order).toHaveBeenCalledWith("id", { ascending: false });
+  });
+
+  it.each([[0], [-1], [2.5], [Number.POSITIVE_INFINITY], [Number.NaN]])(
+    "ignores a cap that is not a positive integer (%p)",
+    async (badLimit) => {
+      const chain = createEventsChain([activityEventRow()]);
+      setMockSupabase({ from: vi.fn(() => chain) });
+
+      const source = await getActivitySource({ kind: "supabase", profileId: "profile-1" });
+      await source.getProjectEvents("project-1", badLimit);
+
+      // postgrest-js writes the value into the query string verbatim, so a bad cap
+      // would 400 and blank the feed; unbounded merely costs bandwidth.
+      expect(chain.limit).not.toHaveBeenCalled();
+    },
+  );
 });

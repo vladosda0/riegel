@@ -226,7 +226,14 @@ export function useProjectsRecentEventsMap(
       )));
       return Object.fromEntries(entries);
     },
-    enabled: Boolean(supabaseMode && normalizedProjectIds.length > 0 && perProjectLimit > 0),
+    // Integer, not merely > 0: the cap reaches the query string verbatim, so a
+    // fractional or Infinite value would be rejected and blank the whole feed.
+    enabled: Boolean(
+      supabaseMode
+      && normalizedProjectIds.length > 0
+      && Number.isInteger(perProjectLimit)
+      && perProjectLimit > 0,
+    ),
     staleTime: ACTIVITY_QUERY_STALE_TIME_MS,
   });
 
