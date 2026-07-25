@@ -219,9 +219,14 @@ describe("buildPortfolioCsv", () => {
     ["non-breaking space", `${NBSP}=1+1`],
     ["byte order mark", `${BOM_CHAR}=1+1`],
     ["comma inside the payload", "=SUM(1,2)"],
+    // A bare TAB or CR is guarded even when what follows is not a formula, because
+    // an importer that strips it would expose whatever comes next. These two are the
+    // only rows that exercise the bare trigger class on its own.
+    ["bare tab, non-formula tail", `${TAB}Hello`],
+    ["bare carriage return, non-formula tail", `${CR}Hello`],
     // The numeric exemption must not swallow free text that merely opens with "-<digit>".
     ["negative-number lookalike", "-1+cmd|' /C calc'!A0"],
-  ])("apostrophe-guards a formula title (%s)", (_label, title) => {
+  ])("apostrophe-guards a formula-trigger title (%s)", (_label, title) => {
     const snap = snapshot({ projects: [projectRow({ title })] });
     const csv = buildPortfolioCsv(snap, labels);
     // Everything after the header terminator is the single data row; a title may
@@ -230,12 +235,17 @@ describe("buildPortfolioCsv", () => {
     expect(firstCell(body)).toBe(`'${title}`);
   });
 
-  it("exports rather than throwing when a cell value is not a string", () => {
-    // The guard must stay total: a status outside the union makes the label lookup
-    // undefined, and one bad cell must not abort the whole export.
+  it("renders an empty cell when a status label lookup misses", () => {
+    // A status outside the union makes labels.status[...] undefined. That one cell
+    // must degrade to empty rather than aborting the whole export, and the row must
+    // keep its field count so the CSV stays parseable.
     const snap = snapshot({ projects: [projectRow({ title: "Ok" })] });
     (snap.projects[0] as unknown as { status: string }).status = "archived";
-    expect(() => buildPortfolioCsv(snap, labels)).not.toThrow();
+    let csv = "";
+    expect(() => { csv = buildPortfolioCsv(snap, labels); }).not.toThrow();
+    const body = csv.slice(csv.indexOf("\r\n") + 2);
+    expect(body.trim().split(",")).toHaveLength(10);
+    expect(body.startsWith("Ok,,")).toBe(true);
   });
 
   it("keeps exponential-notation money numeric (toFixed emits it past 1e21)", () => {

@@ -15,9 +15,11 @@ function escapeCsv(value: string): string {
   // also tested behind optional leading whitespace. `\s` is the full ECMAScript
   // WhiteSpace set (space, tab, CR, LF, VT, FF, NBSP, BOM, U+2028...), which closes
   // that whole family at once: do NOT narrow it to an ASCII-only strip. The bare
-  // class is kept alongside it so nothing previously guarded slips through, and both
-  // tests are regexes, which coerce, so a non-string cell degrades instead of
-  // throwing and taking the whole export with it.
+  // class is kept alongside it so a leading tab/CR is still guarded when what follows
+  // is not itself a trigger. Both tests are regexes, which coerce, so the one
+  // non-string a cell can actually be (an undefined label lookup) degrades to an
+  // empty cell instead of aborting the export. Other non-string shapes are NOT
+  // supported: they would still throw on .replace below.
   const isPlainNumber = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(value);
   const opensFormula = /^[=+\-@\t\r]/.test(value) || /^\s*[=+\-@]/.test(value);
   const guarded = !isPlainNumber && opensFormula ? `'${value}` : value;
