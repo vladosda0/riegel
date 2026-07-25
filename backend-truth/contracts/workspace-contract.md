@@ -41,7 +41,7 @@ Mirrored SQL and normalized JSON remain authoritative over this markdown.
 | `email` | `text` | yes |   | no |
 | `full_name` | `text` | yes |   | no |
 | `avatar_url` | `text` | yes |   | no |
-| `locale` | `text` | no | `'en'` | no |
+| `locale` | `text` | no | `'ru'` | no |
 | `timezone` | `text` | no | `'UTC'` | no |
 | `plan` | `text` | no | `'free'` | no |
 | `credits_free` | `integer` | no | `0` | no |

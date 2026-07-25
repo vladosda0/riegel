@@ -547,6 +547,10 @@ export const manifest = {
     {
       "path": "supabase/migrations/20260725120000_invite_replay_guard.sql",
       "sha256": "0fcdbad67de9967151f23cf2d693f94749ffdbc16e620f77b286d84d1c874569"
+    },
+    {
+      "path": "supabase/migrations/20260725190000_profiles_locale_default_ru.sql",
+      "sha256": "ca64826384de333d6ee17a02658312350074a25a3727d56f9a354108ce9778f6"
     }
   ],
   "generated_artifacts": [
@@ -710,6 +714,7 @@ export const manifest = {
     "sql/20260716205000_payment_intents_operation_identity_key.sql",
     "sql/20260720120000_payment_intents_order_attempt.sql",
     "sql/20260725120000_invite_replay_guard.sql",
+    "sql/20260725190000_profiles_locale_default_ru.sql",
     "generated/db-public-schema.ts",
     "generated/supabase-types.ts"
   ],
@@ -808,7 +813,7 @@ export const tables = {
           "sqlType": "text",
           "tsType": "\"ru\" | \"en\" | \"de\" | \"fr\"",
           "nullable": false,
-          "defaultSql": "'en'",
+          "defaultSql": "'ru'",
           "primaryKey": false,
           "unique": false,
           "references": null

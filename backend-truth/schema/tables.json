@@ -63,7 +63,7 @@
           "sqlType": "text",
           "tsType": "\"ru\" | \"en\" | \"de\" | \"fr\"",
           "nullable": false,
-          "defaultSql": "'en'",
+          "defaultSql": "'ru'",
           "primaryKey": false,
           "unique": false,
           "references": null
