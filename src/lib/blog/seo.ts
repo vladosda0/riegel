@@ -50,12 +50,20 @@ interface AppliedTag {
   element: Element;
   created: boolean;
   originalContent: string | null;
-  /** Absent from index.html: found at mount time only because we booted on a prerender. */
+  /** Its value at mount time may be the booted page's own rather than an app-shell
+   *  default, so it must not be restored on unmount. See PRERENDER_ONLY_TAGS. */
   prerenderOnly: boolean;
 }
 
 /**
- * Head tags that `index.html` does NOT ship, but `scripts/prerender-blog.mjs` DOES.
+ * Head tags whose value at mount time cannot be trusted to be an app-shell default.
+ *
+ * This used to read "tags index.html does NOT ship", and for most of the list that
+ * is still the reason. It stopped being the whole truth once prerender-blog.mjs
+ * began stamping a self-canonical into the shell as well (the www.rovno.ai
+ * duplicate-host fix): `canonical` is now sometimes a shell default and sometimes
+ * the booted page's own, and nothing in the DOM distinguishes them. It stays on
+ * this list because the two failure modes are asymmetric — see the note beside it.
  *
  * For these, "the value that was there when this component mounted" is not the app
  * shell's default — it is the STATIC SNAPSHOT OF THE PAGE WE BOOTED ON. Restoring it on
@@ -63,7 +71,9 @@ interface AppliedTag {
  * the landing page and `/` ends up declaring `canonical: /blog/<the-article>/`, which
  * tells a crawler the landing page is a duplicate of a blog post. Verified in a browser.
  *
- * Removing them restores exactly what `/` boots with when it is served for real: nothing.
+ * Removing them leaves the page with nothing — which for six of the seven is exactly what
+ * `/` boots with when it is served for real. For `canonical` it is no longer, and the note
+ * beside that entry explains why removal is still the branch we want.
  *
  * KNOWN RESIDUAL, and it is bigger than this list. `prerender-blog.mjs` also OVERWRITES, in
  * place, eight tags index.html does ship: `<title>`, `description`, `og:title`,
@@ -83,6 +93,13 @@ interface AppliedTag {
  * landing route managing its own head. Neither belongs in this PR.
  */
 const PRERENDER_ONLY_TAGS: TagSelector[] = [
+  // `canonical` STAYS here even though the shell now ships one of its own (see
+  // the note above): removal is the fail-safe branch. The DOM cannot tell whose
+  // canonical it found, and the two mistakes are not equal. Restoring after a
+  // boot on /blog/a/ re-declares the next route a duplicate of that article —
+  // the browser-verified bug the seo.test.ts case below exists to prevent.
+  // Removing after a boot on the landing shell merely leaves that session with
+  // no canonical, i.e. exactly what every page had before the shell carried one.
   { kind: "link", rel: "canonical" },
   { kind: "meta", attr: "name", key: "robots" },
   { kind: "meta", attr: "property", key: "og:url" },

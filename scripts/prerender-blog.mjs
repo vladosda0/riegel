@@ -51,7 +51,25 @@ const BLOG_TITLE = "Блог Ровно";
 const BLOG_DESCRIPTION =
   "Статьи команды Ровно о том, как вести стройку без хаоса: сметы, закупки, приёмка работ, контроль подрядчиков и ИИ на объекте.";
 
-const STATIC_ROUTES = ["/", "/blog/", "/offer", "/privacy", "/refund", "/contacts"];
+// Trailing slashes are the canonical form for everything served out of a
+// directory: Caddy resolves dist/<route>/index.html for both /offer and
+// /offer/, 308-ing the bare form to the slashed one. Advertising the bare form
+// here would put a redirecting URL in the sitemap.
+const STATIC_ROUTES = ["/", "/blog/", "/offer/", "/privacy/", "/refund/", "/contacts/"];
+
+// Public routes that ship no prerendered body but still need a self-canonical.
+//
+// Why: the app answers on several hosts (rovno.ai, www.rovno.ai, стройагент.рф)
+// and Timeweb App Platform serves the same files on all of them. index.html
+// carries a client-side www -> apex redirect, but a crawler that does not run JS
+// (YandexBot) never executes it, so without a canonical every one of those hosts
+// is an independent, indexable copy of the site.
+//
+// These four are 1:1 files, so they are written unconditionally. The landing "/"
+// is NOT in this list: it is dist/index.html, which doubles as Caddy's SPA
+// fallback, so its canonical is inherited by every URL that has no file of its
+// own. That makes WHEN it is written load-bearing — see the write in main().
+const LEGAL_SHELL_ROUTES = ["/offer/", "/privacy/", "/refund/", "/contacts/"];
 
 // ---------------------------------------------------------------------------
 // Small utilities
@@ -309,6 +327,44 @@ function renderPage(template, page) {
   );
 
   return html;
+}
+
+/**
+ * Drop any canonical/og:url already present in the app shell.
+ *
+ * dist/index.html is BOTH a page we stamp a canonical into and the template
+ * every blog page is rendered from. Running `npm run prerender` twice without a
+ * fresh `vite build` would otherwise feed a stamped shell back in as the
+ * template, and buildHeadTags would append a second canonical to every article —
+ * two canonicals make a crawler ignore both. Normalizing on read makes the whole
+ * script idempotent.
+ */
+function stripCanonicalTags(html) {
+  return html
+    .replace(/[ \t]*<link rel="canonical"[^>]*>\n?/g, "")
+    .replace(/[ \t]*<meta property="og:url"[^>]*>\n?/g, "");
+}
+
+/**
+ * App shell for a route that has no prerendered body: same markup as the SPA
+ * fallback, plus the self-canonical that tells a non-JS crawler which host and
+ * path own this document. Function replacement, per the note in renderPage.
+ *
+ * Canonical ONLY, deliberately no og:url. dist/index.html is Caddy's catch-all,
+ * so an og:url there would be served for /share/estimate/<id>, /invite/accept/
+ * <token> and /promo/redeem too, and the platforms that treat og:url as the
+ * object's permanent id would point every shared preview card at the marketing
+ * home page instead of the thing that was shared. canonical does not have that
+ * failure mode (search engines consolidating those URLs onto "/" is wanted), and
+ * a scraper with no og:url just uses the URL it fetched, which is already right.
+ * Blog pages still get og:url from buildHeadTags: those are real 1:1 documents.
+ */
+function renderCanonicalShell(template, routePath) {
+  const canonical = `${SITE_ORIGIN}${routePath}`;
+  return template.replace(
+    "</head>",
+    () => `    <link rel="canonical" href="${escapeHtml(canonical)}" />\n  </head>`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -670,7 +726,7 @@ async function main() {
     console.error("[prerender-blog] dist/index.html not found — run `vite build` first.");
     process.exit(1);
   }
-  const template = await readFile(templatePath, "utf8");
+  const template = stripCanonicalTags(await readFile(templatePath, "utf8"));
 
   let posts = [];
   let dataOk = false;
@@ -689,6 +745,16 @@ async function main() {
 
   await writeFile(path.join(DIST, "llms.txt"), llmsTxt(posts), "utf8");
   log("wrote llms.txt");
+
+  // Legal shells are 1:1 files: each answers exactly one URL and nothing else, so
+  // an unreachable Supabase must not be what leaves them uncanonicalized. Safe
+  // above the gate for the same reason the landing shell is not.
+  for (const routePath of LEGAL_SHELL_ROUTES) {
+    const dir = path.join(DIST, ...routePath.split("/").filter(Boolean));
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, "index.html"), renderCanonicalShell(template, routePath), "utf8");
+  }
+  log(`wrote ${LEGAL_SHELL_ROUTES.length} legal shell page(s)`);
 
   if (!dataOk) return;
 
@@ -768,6 +834,40 @@ async function main() {
 
   await writeFile(path.join(DIST, "blog", "feed.xml"), rssXml(posts), "utf8");
   log("wrote blog/feed.xml");
+
+  // Landing shell LAST, and only on a build that actually wrote article files.
+  //
+  // dist/index.html is Caddy's SPA fallback, so whatever canonical it carries is
+  // inherited by every URL with no file of its own — including every article URL
+  // search engines have already indexed, on any build that did not write that
+  // article. Stamping the landing canonical then hands each of those URLs an
+  // explicit "duplicate of /" verdict, which deindexes the blog outright instead
+  // of merely thinning it, and consolidation is far stickier to undo than missing
+  // content. `vite build` empties dist before this runs, so the previous deploy's
+  // files are never there to cover.
+  //
+  // TWO inputs reach that state and `dataOk` only excludes the first: a fetch that
+  // THREW (returns above), and a fetch that SUCCEEDED WITH AN EMPTY LIST — an RLS
+  // change on blog_posts, or a build pointed at a project that has no published
+  // rows, both produce a perfectly healthy `200 []`. (This repo's own .env.local
+  // returns exactly that today.) A bad or rotated key is NOT one of them: that is
+  // a 401, which throws and is already covered by `dataOk`. So gate on the
+  // artifacts actually written, not on how the fetch went.
+  //
+  // Rendered from the pristine in-memory `template`, after every page that reads
+  // it, so no page can end up with two canonicals.
+  //
+  // RESIDUAL: an article published AFTER this build is served by the fallback
+  // until the next deploy, and so reports "/" as its canonical for that window.
+  // Content-wise it is an empty shell to a non-JS crawler either way; the article
+  // gets its own canonical the moment a deploy renders it. Closing it properly
+  // means rebuilding on publish (blog-rebuild-frontend, dormant on prod today).
+  if (posts.length > 0) {
+    await writeFile(path.join(DIST, "index.html"), renderCanonicalShell(template, "/"), "utf8");
+    log("wrote landing canonical shell");
+  } else {
+    log("skipped landing canonical shell — no article files were written");
+  }
 }
 
 await main();

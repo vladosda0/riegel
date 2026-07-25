@@ -156,9 +156,10 @@ describe("prerendered head tags do not leak across a client-side navigation", ()
 
   it("a prerendered CANONICAL is removed, not restored — it names the page we booted on", () => {
     // Caught in a real browser: hard-load the prerendered /blog/a/, SPA-navigate away, and
-    // the next route still declared `canonical: https://rovno.ai/blog/a/`. index.html ships
-    // NO canonical, so the one found at mount time is the article's own, and "restoring" it
-    // tells a crawler the landing page is a duplicate of a blog post.
+    // the next route still declared `canonical: https://rovno.ai/blog/a/`. The canonical
+    // found at mount time here is the prerendered article's own, and "restoring" it tells a
+    // crawler the landing page is a duplicate of a blog post. (The shell ships a canonical
+    // of its own nowadays, but the DOM cannot tell the two apart — removal is the safe branch.)
     // An earlier version of THIS test asserted the leak as intended behaviour.
     const canonical = document.createElement("link");
     canonical.setAttribute("rel", "canonical");
