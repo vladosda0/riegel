@@ -83,6 +83,79 @@ function removeEarlyHandlers(): void {
 }
 
 /**
+ * Message patterns produced by scripts we do not ship.
+ *
+ * `window.webkit.messageHandlers` is the WKWebView native bridge. In-app
+ * browsers (Threads, VK, Telegram) inject their own shim that calls it on
+ * `pagehide` without checking it exists. Verified against a real production
+ * event: iPhone / "Mobile Safari UI/WKWebView", frames `sendPageHideMessage`
+ * → `sendDataToNative`. Those frames are injected INLINE into the document,
+ * so they report our own origin — `denyUrls` cannot catch them and matching
+ * the message is the only reliable handle.
+ */
+const THIRD_PARTY_MESSAGE_PATTERNS: readonly RegExp[] = [/webkit\.messageHandlers/i];
+
+/** Stack frames served from these origins are never our bundle. */
+const THIRD_PARTY_FRAME_PREFIXES: readonly string[] = [
+  "chrome-extension://",
+  "moz-extension://",
+  "safari-extension://",
+  "safari-web-extension://",
+];
+
+interface SentryFrameLike {
+  filename?: unknown;
+}
+interface SentryExceptionLike {
+  value?: unknown;
+  stacktrace?: { frames?: unknown };
+}
+
+function matchesNoisePattern(text: unknown): boolean {
+  return typeof text === "string" && THIRD_PARTY_MESSAGE_PATTERNS.some((re) => re.test(text));
+}
+
+/**
+ * True when an event comes from an injected third-party script rather than
+ * from our code. Such events are unactionable: we cannot fix a bridge shim
+ * that a social app's in-app browser installs, and they crowd out real
+ * regressions plus burn the GlitchTip quota.
+ *
+ * Applied in `beforeSend` rather than `ignoreErrors` so it is one testable
+ * pure function covering every path into the SDK, including the early-buffer
+ * replay in `initErrorTracking`.
+ */
+export function isThirdPartyNoise(event: Record<string, unknown>): boolean {
+  try {
+    if (matchesNoisePattern(event.message)) return true;
+
+    const values = (event.exception as { values?: unknown } | undefined)?.values;
+    if (!Array.isArray(values)) return false;
+
+    return values.some((raw) => {
+      const value = raw as SentryExceptionLike;
+      if (matchesNoisePattern(value?.value)) return true;
+
+      const frames = value?.stacktrace?.frames;
+      if (!Array.isArray(frames)) return false;
+
+      // Any frame from an extension origin means the throw did not originate
+      // in our bundle, whatever the message says.
+      return frames.some((frame) => {
+        const filename = (frame as SentryFrameLike)?.filename;
+        return (
+          typeof filename === "string" &&
+          THIRD_PARTY_FRAME_PREFIXES.some((prefix) => filename.startsWith(prefix))
+        );
+      });
+    });
+  } catch {
+    // Never let the filter itself drop or break a real report.
+    return false;
+  }
+}
+
+/**
  * Kick off error tracking. Called once from main.tsx BEFORE render; returns
  * immediately (the SDK chunk downloads in parallel with the app rendering).
  * No-op without a DSN.
@@ -107,8 +180,11 @@ export function initErrorTracking(): void {
         // PostgREST / edge-function error messages carry useful detail past
         // Sentry's 250-char default.
         maxValueLength: 1000,
-        beforeSend: (event) =>
-          scrubEventSafe(event as unknown as Record<string, unknown>) as typeof event | null,
+        beforeSend: (event) => {
+          const raw = event as unknown as Record<string, unknown>;
+          if (isThirdPartyNoise(raw)) return null;
+          return scrubEventSafe(raw) as typeof event | null;
+        },
         ignoreErrors: [
           // Benign browser noise, standard Sentry hygiene.
           "ResizeObserver loop limit exceeded",
