@@ -7,6 +7,7 @@ import { AuthCard } from "@/components/auth/AuthCard";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { clearDemoSession, hasCompletedOnboarding, setAuthRole } from "@/lib/auth-state";
+import { setAnalyticsUserId, trackEventOncePerUser } from "@/lib/analytics";
 import { clearAiSidebarSessionPreference } from "@/lib/ai-sidebar-session";
 
 type VerifyOtpType = "signup" | "recovery" | "invite" | "email_change" | "magiclink";
@@ -59,9 +60,26 @@ export default function AuthConfirm() {
         clearAiSidebarSessionPreference();
         setAuthRole("owner");
 
+        // The confirmation email carries TWO links: the button goes through
+        // GoTrue's verify endpoint to /auth/callback, the fallback text link
+        // lands here. Both are real confirmations, so both have to report the
+        // funnel or `email_verified` silently undercounts by however many
+        // people use the fallback. Mirrors AuthCallback exactly, including
+        // setting the analytics user id before the once-per-user guard so it
+        // keys on the real id rather than "anonymous".
+        if (userId) {
+          setAnalyticsUserId(userId);
+          // Once per user, same reasoning as AuthCallback: re-opening the
+          // email would otherwise re-report the verification.
+          trackEventOncePerUser("email_verified", { user_id: userId });
+        }
+
         // Check onboarding status
-        const destination = await hasCompletedOnboarding(userId) ? "/home" : "/onboarding";
-        navigate(destination, { replace: true });
+        const completedOnboarding = await hasCompletedOnboarding(userId);
+        if (userId && !completedOnboarding) {
+          trackEventOncePerUser("first_login", { user_id: userId, via: "email_confirm" });
+        }
+        navigate(completedOnboarding ? "/home" : "/onboarding", { replace: true });
       } catch (error) {
         const message = error instanceof Error ? error.message : "";
         let key = "auth.confirm.error";

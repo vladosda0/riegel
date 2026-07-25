@@ -310,12 +310,21 @@ export function trackEventOncePerSession(
 const ANALYTICS_OPT_OUT_KEY = "rovno-analytics-opt-out";
 
 /**
- * Own/agent test traffic must not land in the product funnel. Visiting any
- * page with `?no-analytics=1` marks this browser permanently; `?no-analytics=0`
- * clears the mark. Checked before the tag is bootstrapped, so an opted-out
- * browser never loads tag.js at all — and because `trackEvent` and
- * `MetrikaPageviewTracker` both bail when `window.ym` is not a function, a
- * single early return here suppresses goals, pageviews and Вебвизор together.
+ * Own/agent test traffic must not land in the product funnel. LOADING a page
+ * with `?no-analytics=1` marks this browser; `?no-analytics=0` clears the
+ * mark. Once marked, the browser stays excluded until cleared.
+ *
+ * Scope, precisely:
+ *  - Read only from `initMetrika()` at bootstrap, so the param takes effect on
+ *    a full page load. Carrying it through a client-side SPA navigation does
+ *    nothing until the next load — paste the URL into the address bar.
+ *  - Covers Metrika ENTIRELY: the early return runs before `window.ym` is
+ *    defined, and every reader (`trackEvent`, `setAnalyticsUserId`,
+ *    `MetrikaPageviewTracker`) bails when it is not a function, so goals,
+ *    pageviews and Вебвизор all stop together.
+ *  - Deliberately does NOT gate Sentry/GlitchTip. An error hit while testing
+ *    is a real error worth keeping; only the product funnel needs protecting
+ *    from our own traffic.
  *
  * Fails OPEN: if storage is unavailable (private mode, quota), we keep
  * tracking rather than silently losing a real visitor.

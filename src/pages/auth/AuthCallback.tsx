@@ -7,7 +7,7 @@ import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { clearAiSidebarSessionPreference } from "@/lib/ai-sidebar-session";
 import { clearDemoSession, hasCompletedOnboarding, setAuthRole } from "@/lib/auth-state";
-import { setAnalyticsUserId, trackEvent, trackEventOncePerUser } from "@/lib/analytics";
+import { setAnalyticsUserId, trackEventOncePerUser } from "@/lib/analytics";
 
 export default function AuthCallback() {
   const { t } = useTranslation();
@@ -16,7 +16,44 @@ export default function AuthCallback() {
   useEffect(() => {
     let cancelled = false;
 
+    const rejectLink = () => {
+      // A failed link must never leave the visitor holding somebody else's
+      // session, so drop the simulated role back to guest as the old
+      // sign-out path used to. getAuthRole() defaults to "owner" when the
+      // key is absent, so not touching it is NOT equivalent.
+      setAuthRole("guest");
+      toast({
+        title: t("auth.confirm.errorTitle"),
+        description: t("auth.confirm.invalidLink"),
+        variant: "destructive",
+      });
+      navigate("/auth/login", { replace: true });
+    };
+
     const finalize = async () => {
+      // A dead link (expired / already used) does NOT clear a session this
+      // browser already had: auth-js explicitly keeps the stored session when
+      // a URL login fails, and leaves `error` / `error_code` in the URL
+      // because it only strips the hash on the success path. Reading the
+      // session alone therefore cannot tell "this link worked" from "this
+      // link failed and someone was already signed in here" — on a shared
+      // device that would greet person B with "Email confirmed" and drop them
+      // inside person A's account. So the error params are authoritative and
+      // are checked BEFORE the session.
+      const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+      const search = new URLSearchParams(window.location.search);
+      const linkFailed =
+        params.has("error") ||
+        params.has("error_code") ||
+        search.has("error") ||
+        search.has("error_code");
+
+      if (linkFailed) {
+        if (cancelled) return;
+        rejectLink();
+        return;
+      }
+
       // supabase-js has already parsed the confirmation link's tokens out of
       // the URL fragment by the time this effect runs, so the session is
       // simply read back here. Clicking the link IS the sign-in: we keep the
@@ -32,35 +69,29 @@ export default function AuthCallback() {
 
       if (cancelled) return;
 
-      // No session means the link was already used, expired, or somebody
-      // opened /auth/callback directly. Never drop such a visitor into the
-      // app — send them to the login form with an explanation.
+      // No session and no error params: the route was opened directly, or the
+      // tokens were unusable. Either way there is nothing to confirm.
       if (!session?.user) {
-        toast({
-          title: t("auth.confirm.errorTitle"),
-          description: t("auth.confirm.invalidLink"),
-          variant: "destructive",
-        });
-        navigate("/auth/login", { replace: true });
+        rejectLink();
         return;
       }
 
       const user = session.user;
 
-      // Known caveat (accepted, unchanged): this fires on ANY session present
-      // at /auth/callback, not strictly a genuine confirmation. The route is
-      // only linked from confirmation emails, so the over-count path is an
-      // already-authenticated user navigating here by hand — rare, and
-      // email_verified is a directional funnel signal.
-      trackEvent("email_verified", { user_id: user.id });
-
       clearDemoSession();
       clearAiSidebarSessionPreference();
       setAuthRole("owner");
 
-      // Set the analytics user id first so the once-per-user guard below keys
-      // on the real id (mirrors Login.tsx).
+      // Set the analytics user id first so the once-per-user guards below key
+      // on the real id rather than "anonymous" (mirrors Login.tsx).
       setAnalyticsUserId(user.id);
+
+      // Once per user, NOT a bare trackEvent. Now that the session survives,
+      // reopening the same confirmation email from the inbox — routine on a
+      // phone — re-enters this route with a live session and would re-report
+      // the verification, inflating the exact funnel step this exists to
+      // measure.
+      trackEventOncePerUser("email_verified", { user_id: user.id });
 
       // Confirming the link is now this user's first entry into the product,
       // so first_login belongs here rather than on a password form they no

@@ -59,6 +59,9 @@ describe("AuthCallback", () => {
     sessionStorage.clear();
     vi.clearAllMocks();
     signOutMock.mockResolvedValue({ error: null });
+    // The component reads window.location directly for the link's error
+    // params; MemoryRouter does not touch it, so reset it per test.
+    window.history.replaceState({}, "", "/auth/callback");
   });
 
   it("keeps the confirmed session instead of signing the user out", async () => {
@@ -104,12 +107,28 @@ describe("AuthCallback", () => {
     renderCallback();
 
     await waitFor(() => {
-      expect(trackEvent).toHaveBeenCalledWith("email_verified", { user_id: "user-3" });
+      expect(trackEventOncePerUser).toHaveBeenCalledWith("email_verified", { user_id: "user-3" });
       expect(trackEventOncePerUser).toHaveBeenCalledWith("first_login", {
         user_id: "user-3",
         via: "email_confirm",
       });
     });
+  });
+
+  // Regression: the session now survives, so re-opening the same confirmation
+  // email — routine on a phone — re-enters this route with a live session.
+  // A bare trackEvent would re-report the verification and inflate the very
+  // funnel step this route exists to measure.
+  it("reports email_verified through the once-per-user guard, not a bare event", async () => {
+    getSessionMock.mockResolvedValue({ data: { session: { user: { id: "user-3b" } } } });
+    hasCompletedOnboardingMock.mockResolvedValue(true);
+
+    renderCallback();
+
+    await waitFor(() => {
+      expect(trackEventOncePerUser).toHaveBeenCalledWith("email_verified", { user_id: "user-3b" });
+    });
+    expect(trackEvent).not.toHaveBeenCalled();
   });
 
   it("does not report first_login when onboarding is already complete", async () => {
@@ -121,7 +140,10 @@ describe("AuthCallback", () => {
     await waitFor(() => {
       expect(screen.getByTestId("location")).toHaveTextContent("/home");
     });
-    expect(trackEventOncePerUser).not.toHaveBeenCalled();
+    expect(trackEventOncePerUser).not.toHaveBeenCalledWith(
+      "first_login",
+      expect.anything(),
+    );
   });
 
   it("sends a used or expired link back to login without entering the app", async () => {
@@ -138,6 +160,53 @@ describe("AuthCallback", () => {
     expect(toast).toHaveBeenCalledWith(
       expect.objectContaining({ variant: "destructive" }),
     );
+  });
+
+  /**
+   * The one that matters. auth-js deliberately KEEPS a previously stored
+   * session when a URL login fails, and leaves `error` / `error_code` in the
+   * URL. Trusting the session alone would greet person B with "Email
+   * confirmed" and drop them inside person A's account on a shared device.
+   */
+  it("rejects a failed link even when this browser already holds a session", async () => {
+    setAuthRole("owner");
+    window.history.replaceState({}, "", "/auth/callback#error=access_denied&error_code=otp_expired");
+    getSessionMock.mockResolvedValue({
+      data: { session: { user: { id: "somebody-elses-account" } } },
+    });
+    hasCompletedOnboardingMock.mockResolvedValue(true);
+
+    renderCallback();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/auth/login");
+    });
+    expect(getAuthRole()).toBe("guest");
+    expect(trackEventOncePerUser).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(expect.objectContaining({ variant: "destructive" }));
+  });
+
+  it("rejects a failed link reported through the query string too", async () => {
+    window.history.replaceState({}, "", "/auth/callback?error_code=otp_expired");
+    getSessionMock.mockResolvedValue({ data: { session: { user: { id: "user-x" } } } });
+
+    renderCallback();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/auth/login");
+    });
+    expect(trackEventOncePerUser).not.toHaveBeenCalled();
+  });
+
+  it("downgrades the simulated role to guest when the link is rejected", async () => {
+    setAuthRole("owner");
+    getSessionMock.mockResolvedValue({ data: { session: null } });
+
+    renderCallback();
+
+    await waitFor(() => {
+      expect(getAuthRole()).toBe("guest");
+    });
   });
 
   it("treats a failing getSession as a bad link rather than crashing", async () => {

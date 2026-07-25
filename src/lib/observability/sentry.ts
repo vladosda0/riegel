@@ -139,15 +139,19 @@ export function isThirdPartyNoise(event: Record<string, unknown>): boolean {
       const frames = value?.stacktrace?.frames;
       if (!Array.isArray(frames)) return false;
 
-      // Any frame from an extension origin means the throw did not originate
-      // in our bundle, whatever the message says.
-      return frames.some((frame) => {
-        const filename = (frame as SentryFrameLike)?.filename;
-        return (
-          typeof filename === "string" &&
-          THIRD_PARTY_FRAME_PREFIXES.some((prefix) => filename.startsWith(prefix))
-        );
-      });
+      // ONLY the frame the error was actually thrown from decides — Sentry
+      // orders frames oldest-first, so that is the last one carrying a
+      // filename, which is also what Sentry's own denyUrls matches. Checking
+      // "any frame" would be strictly broader and would silently discard a
+      // real regression in our bundle whose stack merely passes THROUGH an
+      // extension: password managers, translators and ad blockers routinely
+      // wrap addEventListener/fetch and leave an extension frame behind.
+      for (let i = frames.length - 1; i >= 0; i--) {
+        const filename = (frames[i] as SentryFrameLike)?.filename;
+        if (typeof filename !== "string" || filename === "") continue;
+        return THIRD_PARTY_FRAME_PREFIXES.some((prefix) => filename.startsWith(prefix));
+      }
+      return false;
     });
   } catch {
     // Never let the filter itself drop or break a real report.

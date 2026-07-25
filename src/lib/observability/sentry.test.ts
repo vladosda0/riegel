@@ -76,6 +76,74 @@ describe("isThirdPartyNoise", () => {
     }
   });
 
+  /**
+   * The case that separates "any frame" from Sentry's own denyUrls semantics.
+   * Password managers, translators and ad blockers wrap addEventListener and
+   * fetch, so a genuine regression in our bundle routinely carries one
+   * extension frame lower in the stack. Dropping it would defeat the entire
+   * point of the module.
+   */
+  it("keeps our own error when the stack merely passes through an extension", () => {
+    const event = {
+      exception: {
+        values: [
+          {
+            value: "Cannot read properties of undefined (reading 'total')",
+            stacktrace: {
+              frames: [
+                { filename: "chrome-extension://abcdef/inject.js", function: "wrappedListener" },
+                { filename: "https://rovno.ai/assets/index-abc.js", function: "useEstimateTotals" },
+              ],
+            },
+          },
+        ],
+      },
+    };
+
+    expect(isThirdPartyNoise(event)).toBe(false);
+  });
+
+  it("still drops an error thrown from an extension below our frames", () => {
+    const event = {
+      exception: {
+        values: [
+          {
+            value: "Something exploded",
+            stacktrace: {
+              frames: [
+                { filename: "https://rovno.ai/assets/index-abc.js", function: "boot" },
+                { filename: "chrome-extension://abcdef/inject.js", function: "thrower" },
+              ],
+            },
+          },
+        ],
+      },
+    };
+
+    expect(isThirdPartyNoise(event)).toBe(true);
+  });
+
+  it("ignores frames without a usable filename when deciding", () => {
+    const event = {
+      exception: {
+        values: [
+          {
+            value: "Something exploded",
+            stacktrace: {
+              frames: [
+                { filename: "chrome-extension://abcdef/inject.js" },
+                { filename: "" },
+                { function: "anonymous" },
+              ],
+            },
+          },
+        ],
+      },
+    };
+
+    expect(isThirdPartyNoise(event)).toBe(true);
+  });
+
   it("keeps an error whose frames are all ours", () => {
     const event = {
       exception: {
