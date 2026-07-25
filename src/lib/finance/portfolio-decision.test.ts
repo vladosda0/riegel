@@ -181,6 +181,83 @@ describe("buildPortfolioCsv", () => {
     expect(csv).not.toContain("\n=HYPERLINK");
   });
 
+  // Built by code point so the table below carries no literal control characters.
+  const TAB = String.fromCharCode(9);
+  const CR = String.fromCharCode(13);
+  const LF = String.fromCharCode(10);
+  const VT = String.fromCharCode(11);
+  const FF = String.fromCharCode(12);
+  const NBSP = String.fromCharCode(160);
+  const BOM_CHAR = String.fromCharCode(65279);
+
+  /** First CSV field of a row, unquoted, so the assertion is not coupled to quoting. */
+  const firstCell = (row: string): string => {
+    if (!row.startsWith('"')) return row.split(",")[0];
+    let out = "";
+    for (let i = 1; i < row.length; i += 1) {
+      if (row[i] === '"') {
+        if (row[i + 1] === '"') { out += '"'; i += 1; continue; }
+        break;
+      }
+      out += row[i];
+    }
+    return out;
+  };
+
+  it.each([
+    ["equals", "=1+1"],
+    ["plus", "+1+1"],
+    ["at", "@SUM(1)"],
+    ["tab", `${TAB}=1+1`],
+    ["carriage return", `${CR}=1+1`],
+    ["line feed", `${LF}=1+1`],
+    ["leading space", " =1+1"],
+    // The strip is the full ECMAScript WhiteSpace set, not just space/tab/CR/LF.
+    // A leading NBSP is a routine artifact of a title pasted from Word or a web page.
+    ["vertical tab", `${VT}=1+1`],
+    ["form feed", `${FF}=1+1`],
+    ["non-breaking space", `${NBSP}=1+1`],
+    ["byte order mark", `${BOM_CHAR}=1+1`],
+    ["comma inside the payload", "=SUM(1,2)"],
+    // A bare TAB or CR is guarded even when what follows is not a formula, because
+    // an importer that strips it would expose whatever comes next. These two are the
+    // only rows that exercise the bare trigger class on its own.
+    ["bare tab, non-formula tail", `${TAB}Hello`],
+    ["bare carriage return, non-formula tail", `${CR}Hello`],
+    // The numeric exemption must not swallow free text that merely opens with "-<digit>".
+    ["negative-number lookalike", "-1+cmd|' /C calc'!A0"],
+  ])("apostrophe-guards a formula-trigger title (%s)", (_label, title) => {
+    const snap = snapshot({ projects: [projectRow({ title })] });
+    const csv = buildPortfolioCsv(snap, labels);
+    // Everything after the header terminator is the single data row; a title may
+    // itself contain CR/LF, so do not split the body on line breaks.
+    const body = csv.slice(csv.indexOf("\r\n") + 2);
+    expect(firstCell(body)).toBe(`'${title}`);
+  });
+
+  it("renders an empty cell when a status label lookup misses", () => {
+    // A status outside the union makes labels.status[...] undefined. That one cell
+    // must degrade to empty rather than aborting the whole export, and the row must
+    // keep its field count so the CSV stays parseable.
+    const snap = snapshot({ projects: [projectRow({ title: "Ok" })] });
+    (snap.projects[0] as unknown as { status: string }).status = "archived";
+    let csv = "";
+    expect(() => { csv = buildPortfolioCsv(snap, labels); }).not.toThrow();
+    const body = csv.slice(csv.indexOf("\r\n") + 2);
+    expect(body.trim().split(",")).toHaveLength(10);
+    expect(body.startsWith("Ok,,")).toBe(true);
+  });
+
+  it("keeps exponential-notation money numeric (toFixed emits it past 1e21)", () => {
+    // toFixed switches to exponential once the ruble value reaches 1e21, and a
+    // spreadsheet still reads "-1e+22" as a number, so the exemption must cover it
+    // or a huge money cell silently becomes apostrophe-prefixed text.
+    const snap = snapshot({ projects: [projectRow({ title: "Huge", marginCents: -1e24 })] });
+    const csv = buildPortfolioCsv(snap, labels);
+    expect(csv).toContain("-1e+22");
+    expect(csv).not.toContain("'-1e+22");
+  });
+
   it("keeps negative money cells numeric (not apostrophe-guarded as a formula)", () => {
     const snap = snapshot({
       projects: [projectRow({ title: "Loss maker", marginCents: -100_000, marginPct: -20, toBePaidCents: -5_000 })],
