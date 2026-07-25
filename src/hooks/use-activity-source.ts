@@ -65,7 +65,13 @@ function createProjectEventsMap(
   return Object.fromEntries(
     projectIds.map((projectId) => {
       const events = store.getEvents(projectId);
-      return [projectId, typeof perProjectLimit === "number" ? events.slice(0, perProjectLimit) : events];
+      // This, not the browser ActivitySource, is what actually caps demo/local.
+      // Use the same positive-integer predicate as the supabase path, or the two
+      // modes disagree: 2.5 would render 2 rows here and none in supabase mode.
+      const bounded = typeof perProjectLimit === "number"
+        && Number.isInteger(perProjectLimit)
+        && perProjectLimit > 0;
+      return [projectId, bounded ? events.slice(0, perProjectLimit) : events];
     }),
   );
 }

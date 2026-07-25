@@ -299,7 +299,9 @@ function createBrowserActivitySource(mode: "demo" | "local"): ActivitySource {
     mode,
     async getProjectEvents(projectId: string, limit?: number) {
       const events = store.getEvents(projectId);
-      // Same contract as the supabase source: only a positive integer caps.
+      // Same positive-integer contract as the supabase source. Note the live
+      // demo/local capping happens in createProjectEventsMap, not here: the hooks
+      // read the store directly in browser mode, so this path is parity only.
       const bounded = typeof limit === "number" && Number.isInteger(limit) && limit > 0;
       return bounded ? events.slice(0, limit) : events;
     },
