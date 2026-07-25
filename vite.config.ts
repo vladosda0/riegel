@@ -14,14 +14,35 @@ function resolveAppRelease(): string {
   const fromEnv = process.env.VITE_COMMIT_SHA?.trim();
   if (fromEnv) return fromEnv;
   try {
-    return (
-      execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] })
-        .toString()
-        .trim() || "unknown"
-    );
-  } catch {
-    return "unknown";
+    // `-c safe.directory=*`: build containers normally run as a different user
+    // than the one owning the checkout, and plain `git rev-parse` then aborts
+    // with "detected dubious ownership in repository" — which used to be
+    // swallowed silently and is the most likely reason prod events were tagged
+    // release=unknown.
+    const sha = execSync("git -c safe.directory='*' rev-parse --short HEAD", {
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+      .toString()
+      .trim();
+    if (sha) return sha;
+    warnUnknownRelease("`git rev-parse` returned an empty string");
+  } catch (error) {
+    warnUnknownRelease(error instanceof Error ? error.message : String(error));
   }
+  return "unknown";
+}
+
+/**
+ * Loud on purpose. A silent "unknown" cost us release grouping and any hope of
+ * readable stack traces on prod without anyone noticing; the next build that
+ * hits this prints the reason straight into the build log. Never throws — a
+ * missing SHA must not fail the build.
+ */
+function warnUnknownRelease(reason: string): void {
+  console.warn(
+    `[build] release SHA unresolved — errors will be reported as release=unknown. ` +
+      `Set VITE_COMMIT_SHA in the build environment. Reason: ${reason}`,
+  );
 }
 
 // Vitest + @vitejs/plugin-react-swc can stall at high CPU while transforming
