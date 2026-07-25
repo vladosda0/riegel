@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -19,16 +19,6 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const nextUrl = searchParams.get("next");
-  const confirmed = searchParams.get("confirmed") === "1";
-
-  useEffect(() => {
-    if (confirmed) {
-      toast({
-        title: t("auth.login.emailConfirmedTitle"),
-        description: t("auth.login.emailConfirmedDescription"),
-      });
-    }
-  }, [confirmed, t]);
 
   const resolveDestination = (completedOnboarding: boolean): string => {
     if (nextUrl && nextUrl.startsWith("/")) return nextUrl;
