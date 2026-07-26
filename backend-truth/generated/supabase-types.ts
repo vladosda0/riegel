@@ -2549,10 +2549,6 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-        "__debug_org_rls_state2": {
-          Args: Record<PropertyKey, never>
-          Returns: Json
-        }
         "_ai_chat_key_namespace": {
           Args: Record<PropertyKey, never>
           Returns: string

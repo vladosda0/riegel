@@ -1886,20 +1886,6 @@
     },
     {
       "schema": "public",
-      "name": "__debug_org_rls_state2",
-      "signature": "public.__debug_org_rls_state2()",
-      "args": [],
-      "returnType": "jsonb",
-      "language": "sql",
-      "volatility": "stable",
-      "securityDefiner": true,
-      "searchPath": "public, pg_catalog",
-      "authenticatedExecute": true,
-      "sourceMigration": "supabase/migrations/20260507160000_org_policy_resilience.sql",
-      "triggerUsages": []
-    },
-    {
-      "schema": "public",
       "name": "import_documents_to_project",
       "signature": "public.import_documents_to_project(uuid, text, uuid[], text)",
       "args": [

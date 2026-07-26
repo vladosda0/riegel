@@ -866,13 +866,6 @@
       "sourceMigration": "supabase/migrations/20260508120000_fix_orgs_select_policy_returning_and_guc_name.sql"
     },
     {
-      "key": "public.__debug_org_rls_state2",
-      "schema": "public",
-      "name": "__debug_org_rls_state2",
-      "signature": "public.__debug_org_rls_state2()",
-      "sourceMigration": "supabase/migrations/20260507160000_org_policy_resilience.sql"
-    },
-    {
       "key": "public.import_documents_to_project",
       "schema": "public",
       "name": "import_documents_to_project",
