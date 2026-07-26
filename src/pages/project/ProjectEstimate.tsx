@@ -119,8 +119,10 @@ import { getPlanningSource } from "@/data/planning-source";
 import { addEvent, getUserById } from "@/data/store";
 import { createWorkspaceProjectInvite, sendWorkspaceProjectInviteEmail } from "@/data/workspace-source";
 import {
+  computeEffectiveDiscountBps,
+  computeEffectiveMarkupBps,
+  computeEffectiveTaxBps,
   computeLineTotals,
-  clampBps,
   computeProjectTotals,
   computeStageTotals,
   displayLineClientAmounts,
@@ -343,40 +345,36 @@ function buildHierarchyNumbers(
 }
 
 /**
- * Display-side twins of computeEffectiveDiscountBps / computeEffectiveMarkupBps /
- * computeEffectiveTaxBps: same resolution order, and the SAME clampBps, imported
- * from pricing rather than reimplemented.
+ * Display-side wrappers over the pricing resolvers. They exist only to adapt the
+ * call shape: the screen has a bare `projectXBps` number where pricing wants the
+ * project object.
  *
- * A hand-rolled `Math.max(0, Math.min(10_000, raw))` was tried here first and
- * drifted immediately, because clampBps also rounds and maps non-finite to 0.
- * That version printed 100% for an Infinity that pricing charged as 0%, "NaN%"
- * for a NaN, and 12.506% for a value charged as 12.51%. Whatever is shown in the
- * table and written to the CSV must be the number the client is actually charged,
- * so there is one clamp, not two.
+ * They DELEGATE rather than reimplement, deliberately. Two earlier revisions of
+ * this PR wrote the resolution rule out a second time here and it drifted both
+ * times: first with no clamp at all (an out-of-band value printed raw while
+ * pricing charged the clamped figure), then with a hand-rolled
+ * `Math.max(0, Math.min(10_000, raw))` that still missed clampBps's rounding and
+ * non-finite guard, so Infinity printed 100% against a charged 0% and 1250.6
+ * printed 12.506% against a charged 12.51%.
  *
- * The UI cannot produce an out-of-range value (the editors parse through
- * toBpsFromPercent, which clamps), so this guards against out-of-band data only.
+ * Whatever the table, the CSV and the PDF show must be the number the client is
+ * actually charged. Delegation makes that structural instead of a promise: there
+ * is one resolution rule and one clamp, and pricing.test.ts covers them.
  *
- * The discount twin also has the same deliberate absence of a stage tier: it used
+ * The discount resolver also has the deliberate absence of a stage tier: it used
  * to take a stage and discard it as `_stage`, advertising a capability neither
  * side implements (#207).
  */
 function effectiveDiscountForDisplay(line: EstimateV2ResourceLine, projectDiscountBps: number): number {
-  const raw = line.discountBpsOverride != null && line.discountBpsOverride > 0
-    ? line.discountBpsOverride
-    : projectDiscountBps;
-  return clampBps(raw);
+  return computeEffectiveDiscountBps(line, { discountBps: projectDiscountBps });
 }
 
 function effectiveMarkupForDisplay(line: EstimateV2ResourceLine, projectMarkupBps: number): number {
-  return clampBps(line.markupBps > 0 ? line.markupBps : projectMarkupBps);
+  return computeEffectiveMarkupBps(line, { markupBps: projectMarkupBps });
 }
 
 function effectiveTaxForDisplay(line: EstimateV2ResourceLine, projectTaxBps: number): number {
-  const raw = line.taxBpsOverride != null && line.taxBpsOverride > 0
-    ? line.taxBpsOverride
-    : projectTaxBps;
-  return clampBps(raw);
+  return computeEffectiveTaxBps(line, { taxBps: projectTaxBps });
 }
 
 function estimateStatusLabelKey(status: EstimateExecutionStatus): string {
@@ -1551,7 +1549,7 @@ export default function ProjectEstimate() {
               unit: line.unit,
               costUnitCents: line.costUnitCents,
               costTotalCents: lineTotals.costTotalCents,
-              markupBps: line.markupBps > 0 ? line.markupBps : estimateProject.markupBps,
+              markupBps: effectiveMarkupForDisplay(line, estimateProject.markupBps),
               discountBps: effectiveDiscountForDisplay(line, estimateProject.discountBps),
               clientUnitCents: clientAmounts.clientUnitCents,
               clientTotalCents: clientAmounts.clientTotalCents,

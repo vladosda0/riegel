@@ -72,6 +72,12 @@ describe("resolveProposalFastFail", () => {
     expect(result).not.toBeNull();
     expect(result?.reason).toBe("unknown_proposal_type");
     expect(result?.titleKey).toBe("ai.sidebar.toast.unknownProposalType.title");
+    // The two translatability loops below iterate ALL_TYPES, which by
+    // construction holds only in-union members, and no in-union member can
+    // produce this reason. Without this assertion the suite stays green if the
+    // token's i18n mapping is deleted, and the permanent feed entry silently
+    // loses its explanation: exactly the defect the first review round found.
+    expect(proposalFailureReasonKey(result!.reason)).not.toBeNull();
   });
 
   it("always returns a reason together with both toast keys", () => {
@@ -107,6 +113,7 @@ describe("proposalFailureReasonKey", () => {
     ["execution_failed", "ai.sidebar.proposal.failureReason.executionFailed"],
     ["unsupported_proposal_type", "ai.sidebar.proposal.failureReason.unsupportedProposalType"],
     ["unsupported_in_supabase_mode", "ai.sidebar.proposal.failureReason.unsupportedInSupabaseMode"],
+    ["unknown_proposal_type", "ai.sidebar.proposal.failureReason.unknownProposalType"],
   ])("maps the known reason %s", (reason, key) => {
     expect(proposalFailureReasonKey(reason)).toBe(key);
   });

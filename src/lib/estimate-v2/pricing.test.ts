@@ -8,6 +8,8 @@ import type {
 } from "@/types/estimate-v2";
 import {
   computeEffectiveDiscountBps,
+  computeEffectiveMarkupBps,
+  computeEffectiveTaxBps,
   computeClientUnitCents,
   computeLineTotals,
   computeProjectTotals,
@@ -84,6 +86,33 @@ describe("estimate-v2 pricing", () => {
     const line = createLine({ discountBpsOverride: 2500 });
 
     expect(computeEffectiveDiscountBps(line, project)).toBe(2500);
+  });
+
+  it("inherits the project markup and tax when the line value is zero or unset", () => {
+    // This is the rule the estimate CSV and the PDF payload print. Both used to
+    // emit the RAW line.markupBps, so a line at 0 showed 0% while it was in fact
+    // charged the project markup. They now go through this resolver, so the rule
+    // needs a test of its own rather than only being exercised through totals.
+    const project = createProject({ markupBps: 2500, taxBps: 2000 });
+    expect(computeEffectiveMarkupBps(createLine({ markupBps: 0 }), project)).toBe(2500);
+    expect(computeEffectiveMarkupBps(createLine({ markupBps: 1000 }), project)).toBe(1000);
+    expect(computeEffectiveTaxBps(createLine({ taxBpsOverride: null }), project)).toBe(2000);
+    expect(computeEffectiveTaxBps(createLine({ taxBpsOverride: 0 }), project)).toBe(2000);
+    expect(computeEffectiveTaxBps(createLine({ taxBpsOverride: 500 }), project)).toBe(500);
+  });
+
+  it("clamps an out-of-band persisted rate on every resolver, so display cannot diverge from what is charged", () => {
+    // The client hydration path reads these straight from the database with no
+    // clamp, so a value outside [0, 10000] is reachable and self-sustaining. What
+    // the table, the CSV and the PDF show must be what computeClientUnitCents
+    // actually applies. Non-finite maps to 0, fractions round.
+    const project = createProject({ discountBps: 0, markupBps: 0, taxBps: 0 });
+    expect(computeEffectiveMarkupBps(createLine({ markupBps: 50_000 }), project)).toBe(10_000);
+    expect(computeEffectiveMarkupBps(createLine({ markupBps: Number.POSITIVE_INFINITY }), project)).toBe(0);
+    expect(computeEffectiveMarkupBps(createLine({ markupBps: Number.NaN }), project)).toBe(0);
+    expect(computeEffectiveMarkupBps(createLine({ markupBps: 1250.6 }), project)).toBe(1251);
+    expect(computeEffectiveDiscountBps(createLine({ discountBpsOverride: 20_000 }), project)).toBe(10_000);
+    expect(computeEffectiveTaxBps(createLine({ taxBpsOverride: 20_000 }), project)).toBe(10_000);
   });
 
   it("ignores a non-zero stage discount, which is persisted but never priced (#207)", () => {

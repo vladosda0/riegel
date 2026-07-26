@@ -60,12 +60,13 @@ const BPS_BASE = 10_000;
 const QTY_MILLI_BASE = 1_000;
 
 /**
- * Exported so the display-side helpers in ProjectEstimate use THIS clamp rather
- * than a hand-rolled one. A second copy drifted immediately: it omitted both the
- * non-finite guard and the rounding, so an out-of-band Infinity printed 100% while
- * pricing charged 0%, and a fractional bps printed and charged different figures.
+ * Deliberately NOT exported. The display side must not reach for the clamp on its
+ * own: callers that need an effective rate call computeEffective{Discount,Markup,
+ * Tax}Bps, which apply this AND the resolution rule together. Handing out the
+ * clamp alone is how ProjectEstimate ended up with a second copy of the
+ * resolution rule that drifted twice (see the wrappers there).
  */
-export function clampBps(value: number): number {
+function clampBps(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(BPS_BASE, Math.round(value)));
 }
