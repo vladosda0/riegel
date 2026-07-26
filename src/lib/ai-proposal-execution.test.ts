@@ -3,15 +3,21 @@ import { describe, expect, it } from "vitest";
 import { proposalFailureReasonKey, resolveProposalFastFail } from "@/lib/ai-proposal-execution";
 import type { AIProposalType } from "@/types/ai";
 
-// The complete AIProposalType union. Kept as a typed literal so adding a member
-// to the union without deciding its fast-fail behaviour fails typecheck here.
-const ALL_TYPES: AIProposalType[] = [
-  "add_task",
-  "update_estimate",
-  "add_procurement",
-  "generate_document",
-  "create_project",
-];
+// The complete AIProposalType union.
+//
+// Derived through `satisfies Record<AIProposalType, true>` rather than annotated
+// as `AIProposalType[]`. The array annotation does NOT force exhaustiveness (an
+// earlier revision of this file claimed it did; a standalone tsc probe with a
+// sixth member added showed the file still compiles), so a new union member would
+// silently drop out of every loop below, including the one that claims to cover
+// the whole domain. The Record form fails the build until it is listed here.
+const ALL_TYPES = Object.keys({
+  add_task: true,
+  update_estimate: true,
+  add_procurement: true,
+  generate_document: true,
+  create_project: true,
+} satisfies Record<AIProposalType, true>) as AIProposalType[];
 
 const WORKSPACE_KINDS = ["demo", "local", "supabase", "guest", "pending-supabase"];
 
@@ -43,13 +49,29 @@ describe("resolveProposalFastFail", () => {
     }
   });
 
-  it("covers the full proposal-type domain with no unhandled member", () => {
-    // Every member resolves to either a fast-fail or a proceed, and never throws.
+  it("covers the full proposal-type domain with a well-formed answer for every member", () => {
+    // An earlier revision asserted only `.not.toThrow()`, which this function has
+    // no way to fail: it is two ifs and a return. Assert the SHAPE instead, so the
+    // test actually discriminates.
+    expect(ALL_TYPES).toHaveLength(5);
     for (const type of ALL_TYPES) {
       for (const kind of WORKSPACE_KINDS) {
-        expect(() => resolveProposalFastFail(type, kind)).not.toThrow();
+        const result = resolveProposalFastFail(type, kind);
+        if (result === null) continue;
+        expect(typeof result.reason, `${type}/${kind}`).toBe("string");
+        expect(proposalFailureReasonKey(result.reason), result.reason).not.toBeNull();
       }
     }
+  });
+
+  it("gives an unknown proposal type its own message, not the estimate one", () => {
+    // Proposals are data, so the union is a compile-time claim only. Telling a
+    // user their ESTIMATE cannot be updated when the type was something the build
+    // does not recognise would be a lie.
+    const result = resolveProposalFastFail("mystery_type" as AIProposalType, "demo");
+    expect(result).not.toBeNull();
+    expect(result?.reason).toBe("unknown_proposal_type");
+    expect(result?.titleKey).toBe("ai.sidebar.toast.unknownProposalType.title");
   });
 
   it("always returns a reason together with both toast keys", () => {

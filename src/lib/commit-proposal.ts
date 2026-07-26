@@ -255,8 +255,13 @@ function buildPayloadWithSource(payload: Record<string, unknown>, source?: "ai" 
  * runs, and the user is told «Изменения применены». That is #175 reproduced
  * exactly, and neither the type system nor the suite would notice.
  *
- * The `never` assignment makes the compiler refuse an unhandled member, so the
- * next type has to make this decision explicitly.
+ * The `never` assignment makes the COMPILER refuse an unhandled member, so the
+ * next type has to make this decision explicitly. That protection is
+ * compile-time ONLY. At runtime `type` can still be any string (proposals are
+ * data), so the default branch returns a hard `false` rather than the `never`
+ * value: `return exhaustive` would hand back the string itself, which is truthy,
+ * and the predicate would be fail-open again for exactly the unknown input the
+ * switch was meant to catch.
  */
 export function isProposalTypeApplicable(type: AIProposal["type"]): boolean {
   switch (type) {
@@ -268,10 +273,12 @@ export function isProposalTypeApplicable(type: AIProposal["type"]): boolean {
     case "update_estimate":
       return false;
     default: {
-      // Returned rather than merely declared so no-unused-vars stays happy; a
-      // `never` value is assignable to boolean and is unreachable anyway.
+      // Declared for the compile-time exhaustiveness check, voided so
+      // no-unused-vars stays quiet, and NOT returned: at runtime it is the raw
+      // string, which is truthy.
       const exhaustive: never = type;
-      return exhaustive;
+      void exhaustive;
+      return false;
     }
   }
 }

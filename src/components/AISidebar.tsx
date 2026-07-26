@@ -1218,9 +1218,10 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
           setProposalQueue((prev) => (prev
             ? {
                 ...prev,
-                // 0, not 1: nothing was attempted. The transient queue badge and
-                // the permanent feed entry must not disagree about the same
-                // non-attempt.
+                // 0, not 1: nothing was attempted, matching the `attempts: 0` the
+                // event records. Note retryByItemId currently has no reader
+                // anywhere in the repo, so this particular value is inert; it is
+                // kept consistent so it does not become wrong if one is added.
                 retryByItemId: { ...prev.retryByItemId, [queueItem.id]: 0 },
                 executionErrorByItemId: {
                   ...prev.executionErrorByItemId,

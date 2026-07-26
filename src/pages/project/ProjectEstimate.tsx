@@ -120,6 +120,7 @@ import { addEvent, getUserById } from "@/data/store";
 import { createWorkspaceProjectInvite, sendWorkspaceProjectInviteEmail } from "@/data/workspace-source";
 import {
   computeLineTotals,
+  clampBps,
   computeProjectTotals,
   computeStageTotals,
   displayLineClientAmounts,
@@ -342,32 +343,40 @@ function buildHierarchyNumbers(
 }
 
 /**
- * Display-side twin of computeEffectiveDiscountBps. Same resolution order, same
- * clamp, and the same deliberate absence of a stage tier: it took a stage and
- * discarded it as `_stage`, which advertised a capability neither side
- * implements (#207).
+ * Display-side twins of computeEffectiveDiscountBps / computeEffectiveMarkupBps /
+ * computeEffectiveTaxBps: same resolution order, and the SAME clampBps, imported
+ * from pricing rather than reimplemented.
  *
- * The clamp matters because without it the two sides disagree: pricing clamps to
- * 10000 bps, so an out-of-range persisted value would be CHARGED as 100% while
- * this table and the CSV discount column printed the raw figure. The UI cannot
- * produce such a value (both editors parse through toBpsFromPercent, which
- * clamps), so this guards against out-of-band data only.
+ * A hand-rolled `Math.max(0, Math.min(10_000, raw))` was tried here first and
+ * drifted immediately, because clampBps also rounds and maps non-finite to 0.
+ * That version printed 100% for an Infinity that pricing charged as 0%, "NaN%"
+ * for a NaN, and 12.506% for a value charged as 12.51%. Whatever is shown in the
+ * table and written to the CSV must be the number the client is actually charged,
+ * so there is one clamp, not two.
+ *
+ * The UI cannot produce an out-of-range value (the editors parse through
+ * toBpsFromPercent, which clamps), so this guards against out-of-band data only.
+ *
+ * The discount twin also has the same deliberate absence of a stage tier: it used
+ * to take a stage and discard it as `_stage`, advertising a capability neither
+ * side implements (#207).
  */
 function effectiveDiscountForDisplay(line: EstimateV2ResourceLine, projectDiscountBps: number): number {
   const raw = line.discountBpsOverride != null && line.discountBpsOverride > 0
     ? line.discountBpsOverride
     : projectDiscountBps;
-  return Math.max(0, Math.min(10_000, raw));
+  return clampBps(raw);
 }
 
 function effectiveMarkupForDisplay(line: EstimateV2ResourceLine, projectMarkupBps: number): number {
-  if (line.markupBps > 0) return line.markupBps;
-  return projectMarkupBps;
+  return clampBps(line.markupBps > 0 ? line.markupBps : projectMarkupBps);
 }
 
 function effectiveTaxForDisplay(line: EstimateV2ResourceLine, projectTaxBps: number): number {
-  if (line.taxBpsOverride != null && line.taxBpsOverride > 0) return line.taxBpsOverride;
-  return projectTaxBps;
+  const raw = line.taxBpsOverride != null && line.taxBpsOverride > 0
+    ? line.taxBpsOverride
+    : projectTaxBps;
+  return clampBps(raw);
 }
 
 function estimateStatusLabelKey(status: EstimateExecutionStatus): string {
@@ -2260,7 +2269,10 @@ export default function ProjectEstimate() {
               line.unit,
               money(line.costUnitCents, estimateProject.currency),
               money(lineTotals.costTotalCents, estimateProject.currency),
-              fromBpsToPercent(line.markupBps),
+              // Through the helper, like the on-screen cell: the raw line.markupBps
+              // skipped both the project-inheritance rule (a line at 0 shows 0%
+              // while it is actually charged the project markup) and the clamp.
+              fromBpsToPercent(effectiveMarkupForDisplay(line, estimateProject.markupBps)),
               fromBpsToPercent(effectiveDiscountForDisplay(line, estimateProject.discountBps)),
               clientUnitStr,
               clientTotalStr,

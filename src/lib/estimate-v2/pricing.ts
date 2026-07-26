@@ -59,7 +59,13 @@ export type EstimateLineClientDisplayMode = "detail" | "summary" | "none";
 const BPS_BASE = 10_000;
 const QTY_MILLI_BASE = 1_000;
 
-function clampBps(value: number): number {
+/**
+ * Exported so the display-side helpers in ProjectEstimate use THIS clamp rather
+ * than a hand-rolled one. A second copy drifted immediately: it omitted both the
+ * non-finite guard and the rounding, so an out-of-band Infinity printed 100% while
+ * pricing charged 0%, and a fractional bps printed and charged different figures.
+ */
+export function clampBps(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(BPS_BASE, Math.round(value)));
 }

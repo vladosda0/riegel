@@ -34,10 +34,22 @@ export function resolveProposalFastFail(
   // Cannot be applied in ANY mode: commitProposal holds no mutator for the type
   // and returns unavailable rather than claiming a success it never delivered.
   if (!isProposalTypeApplicable(proposalType)) {
+    // Two different situations share this gate. update_estimate is a KNOWN
+    // not-yet-built feature and deserves the specific message. Anything else
+    // reaching here is a type the build does not recognise at all (proposals are
+    // data, so the union is a compile-time claim, not a runtime guarantee), and
+    // telling that user their ESTIMATE cannot be updated would be a lie.
+    if (proposalType === "update_estimate") {
+      return {
+        reason: "unsupported_proposal_type",
+        titleKey: "ai.sidebar.toast.estimateUnavailable.title",
+        descriptionKey: "ai.sidebar.toast.estimateUnavailable.description",
+      };
+    }
     return {
-      reason: "unsupported_proposal_type",
-      titleKey: "ai.sidebar.toast.estimateUnavailable.title",
-      descriptionKey: "ai.sidebar.toast.estimateUnavailable.description",
+      reason: "unknown_proposal_type",
+      titleKey: "ai.sidebar.toast.unknownProposalType.title",
+      descriptionKey: "ai.sidebar.toast.unknownProposalType.description",
     };
   }
 
@@ -69,6 +81,7 @@ const PROPOSAL_FAILURE_REASON_KEYS = new Map<string, string>([
   ["execution_failed", "ai.sidebar.proposal.failureReason.executionFailed"],
   ["unsupported_proposal_type", "ai.sidebar.proposal.failureReason.unsupportedProposalType"],
   ["unsupported_in_supabase_mode", "ai.sidebar.proposal.failureReason.unsupportedInSupabaseMode"],
+  ["unknown_proposal_type", "ai.sidebar.proposal.failureReason.unknownProposalType"],
 ]);
 
 /** i18n key for a persisted failure reason, or null when it must not be shown. */
