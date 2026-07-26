@@ -89,6 +89,7 @@ import {
   useWorkspaceProjectState,
 } from "@/hooks/use-workspace-source";
 import { trackEvent } from "@/lib/analytics";
+import { buildCsvDocument } from "@/lib/csv";
 import { useTierQuota } from "@/hooks/useTierQuota";
 import { showTierLimitPaywallByType } from "@/lib/tier-limit-error";
 import {
@@ -417,15 +418,6 @@ function formatDayIndex(dayIndex: number | null): string {
   return dayRangeFormatter.format(new Date(fromDayIndex(dayIndex)));
 }
 
-function buildCsv(rows: string[][]): string {
-  return rows
-    .map((row) => row.map((cell) => {
-      const normalized = cell.replace(/"/g, '""');
-      if (/[",\n]/.test(normalized)) return `"${normalized}"`;
-      return normalized;
-    }).join(","))
-    .join("\n");
-}
 
 const RESOURCE_TYPE_OPTIONS: Array<{ value: ResourceLineType; labelKey: string }> = [
   { value: "material", labelKey: "estimate.resource.type.material" },
@@ -2293,7 +2285,9 @@ export default function ProjectEstimate() {
     rows.push([t("estimate.csv.taxAmount"), money(uiTaxAmountCents, estimateProject.currency)]);
     rows.push([t("estimate.csv.totalIncVat"), money(uiTotalIncVatCents, estimateProject.currency)]);
 
-    const csv = buildCsv(rows);
+    // Stage/work/line titles and units are unfiltered free text, so every cell
+    // goes through the shared guard rather than a local quoting rule (#195).
+    const csv = buildCsvDocument(rows);
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
