@@ -35,6 +35,8 @@ const LANGUAGES: { value: string; label: string; disabled?: boolean }[] = [
   { value: "en", label: "English" },
   { value: "de", label: "Deutsch", disabled: true },
   { value: "fr", label: "Français", disabled: true },
+  // Not in the profiles.locale CHECK, which admits only ru/en/de/fr, so this one
+  // would be rejected by the database if it were ever selectable.
   { value: "es", label: "Español", disabled: true },
 ];
 

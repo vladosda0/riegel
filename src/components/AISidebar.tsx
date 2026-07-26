@@ -108,6 +108,7 @@ import {
   commitPhotoConsultActions,
   commitProposal,
   filterPhotoConsultProposalChangesBySeam,
+  isProposalTypeApplicable,
   type PhotoConsultApplyAction,
 } from "@/lib/commit-proposal";
 import { toast } from "@/hooks/use-toast";
@@ -1198,13 +1199,21 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       let attempt = 0;
       let success = false;
       let lastError = t("ai.sidebar.toast.executionFailed.title");
+      // Set by a fast-fail branch below, which has already shown a SPECIFIC toast
+      // explaining why the type cannot run. The generic !success handler must not
+      // then fire its own: use-toast keeps TOAST_LIMIT = 1, so the later dispatch
+      // replaces the earlier one and the user would only ever see "не удалось
+      // выполнить" with none of the reason. It also records how many attempts
+      // really happened, which for a fast-fail is zero, not five.
+      let unavailableReason: string | null = null;
 
       while (attempt < 5 && !success) {
-        // update_estimate cannot be applied in ANY mode: commitProposal holds no
-        // estimate mutator and now returns unavailable instead of claiming a
-        // success it never delivered (#175). Fail fast so the user does not sit
-        // through five fake retry animations before a generic error.
-        if (queueItem.proposal.type === "update_estimate") {
+        // Cannot be applied in ANY mode: commitProposal holds no mutator for this
+        // type and returns unavailable instead of claiming a success it never
+        // delivered (#175). Fail fast so the user does not sit through five fake
+        // retry animations before a generic error. Shares its predicate with the
+        // library guard so the two cannot drift apart.
+        if (!isProposalTypeApplicable(queueItem.proposal.type)) {
           lastError = t("ai.sidebar.toast.estimateUnavailable.description");
           setProposalQueue((prev) => (prev
             ? {
@@ -1221,6 +1230,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
             description: lastError,
             variant: "destructive",
           });
+          unavailableReason = "unsupported_proposal_type";
           break;
         }
 
@@ -1241,6 +1251,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
             description: lastError,
             variant: "destructive",
           });
+          unavailableReason = "unsupported_in_supabase_mode";
           break;
         }
 
@@ -1316,16 +1327,24 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
           payload: {
             summary: queueItem.proposal.summary,
             status: "failed",
-            reason: "execution_failed",
-            attempts: 5,
+            // A fast-fail never entered the retry loop, so `attempt` is 0. This
+            // used to be the literal 5, which permanently recorded five failed
+            // retries of an operation that was never attempted once.
+            reason: unavailableReason ?? "execution_failed",
+            attempts: attempt,
             source: "ai",
           },
         });
-        toast({
-          title: t("ai.sidebar.toast.executionFailed.title"),
-          description: t("ai.sidebar.toast.executionFailed.description", { summary: queueItem.proposal.summary }),
-          variant: "destructive",
-        });
+        // Only when no fast-fail branch already explained the failure: the toast
+        // limit is 1, so dispatching here would silently replace the specific
+        // message with a generic one.
+        if (!unavailableReason) {
+          toast({
+            title: t("ai.sidebar.toast.executionFailed.title"),
+            description: t("ai.sidebar.toast.executionFailed.description", { summary: queueItem.proposal.summary }),
+            variant: "destructive",
+          });
+        }
       }
     }
 

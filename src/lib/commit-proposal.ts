@@ -237,6 +237,19 @@ function buildPayloadWithSource(payload: Record<string, unknown>, source?: "ai" 
   return source ? { ...payload, source } : payload;
 }
 
+/**
+ * Whether commitProposal can actually apply this proposal type, as opposed to
+ * merely being permitted to.
+ *
+ * `update_estimate` is mapped and permission-checked but writes nothing: this
+ * module holds no estimate mutator (rovno #175). The single predicate exists so
+ * the library guard and the AISidebar fast-fail cannot drift apart. Wiring real
+ * estimate writes means changing this ONE place, and both guards follow.
+ */
+export function isProposalTypeApplicable(type: AIProposal["type"]): boolean {
+  return type !== "update_estimate";
+}
+
 export function commitProposal(proposal: AIProposal, options: CommitProposalOptions = {}): CommitResult {
   // Handle create_project specially — no existing project context needed
   if (proposal.type === "create_project") {
@@ -292,7 +305,8 @@ export function commitProposal(proposal: AIProposal, options: CommitProposalOpti
     };
   }
 
-  // update_estimate is mapped and permission-checked, but NOTHING here writes to
+  // See isProposalTypeApplicable: update_estimate is mapped and
+  // permission-checked, but NOTHING here writes to
   // an estimate store: this module imports no estimate mutator at all, and no
   // event subscriber closes the gap (the only consumers of estimate_created are
   // display-only). It used to fall through, emit estimate_created, push result
@@ -306,7 +320,7 @@ export function commitProposal(proposal: AIProposal, options: CommitProposalOpti
   // means mutating the estimate store here the way add_task, add_procurement and
   // generate_document mutate theirs. Note this is also the only mapped type with
   // no unavailability handling in AISidebar, which is why it read as working.
-  if (proposal.type === "update_estimate") {
+  if (!isProposalTypeApplicable(proposal.type)) {
     return {
       success: false,
       error: "Applying AI estimate changes is not available yet.",

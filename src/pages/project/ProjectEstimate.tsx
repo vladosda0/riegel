@@ -89,7 +89,7 @@ import {
   useWorkspaceProjectState,
 } from "@/hooks/use-workspace-source";
 import { trackEvent } from "@/lib/analytics";
-import { buildCsvDocument } from "@/lib/csv";
+import { buildCsvDocument, CSV_BOM } from "@/lib/csv";
 import { useTierQuota } from "@/hooks/useTierQuota";
 import { showTierLimitPaywallByType } from "@/lib/tier-limit-error";
 import {
@@ -341,7 +341,12 @@ function buildHierarchyNumbers(
   return { stageNumberById, workNumberById };
 }
 
-function effectiveDiscountForDisplay(line: EstimateV2ResourceLine, _stage: EstimateV2Stage, projectDiscountBps: number): number {
+/**
+ * Display-side twin of computeEffectiveDiscountBps. Same resolution, same
+ * deliberate absence of a stage tier: it took a stage and discarded it as
+ * `_stage`, which advertised a capability neither side implements (#207).
+ */
+function effectiveDiscountForDisplay(line: EstimateV2ResourceLine, projectDiscountBps: number): number {
   if (line.discountBpsOverride != null && line.discountBpsOverride > 0) return line.discountBpsOverride;
   return projectDiscountBps;
 }
@@ -417,7 +422,6 @@ function formatDayIndex(dayIndex: number | null): string {
   if (dayIndex == null) return "—";
   return dayRangeFormatter.format(new Date(fromDayIndex(dayIndex)));
 }
-
 
 const RESOURCE_TYPE_OPTIONS: Array<{ value: ResourceLineType; labelKey: string }> = [
   { value: "material", labelKey: "estimate.resource.type.material" },
@@ -1530,7 +1534,7 @@ export default function ProjectEstimate() {
               costUnitCents: line.costUnitCents,
               costTotalCents: lineTotals.costTotalCents,
               markupBps: line.markupBps > 0 ? line.markupBps : estimateProject.markupBps,
-              discountBps: effectiveDiscountForDisplay(line, stage, estimateProject.discountBps),
+              discountBps: effectiveDiscountForDisplay(line, estimateProject.discountBps),
               clientUnitCents: clientAmounts.clientUnitCents,
               clientTotalCents: clientAmounts.clientTotalCents,
               discountedClientTotalCents,
@@ -2248,7 +2252,7 @@ export default function ProjectEstimate() {
               money(line.costUnitCents, estimateProject.currency),
               money(lineTotals.costTotalCents, estimateProject.currency),
               fromBpsToPercent(line.markupBps),
-              fromBpsToPercent(effectiveDiscountForDisplay(line, stage, estimateProject.discountBps)),
+              fromBpsToPercent(effectiveDiscountForDisplay(line, estimateProject.discountBps)),
               clientUnitStr,
               clientTotalStr,
             ]);
@@ -2264,7 +2268,7 @@ export default function ProjectEstimate() {
             line.unit,
             money(line.costUnitCents, estimateProject.currency),
             money(lineTotals.costTotalCents, estimateProject.currency),
-            fromBpsToPercent(effectiveDiscountForDisplay(line, stage, estimateProject.discountBps)),
+            fromBpsToPercent(effectiveDiscountForDisplay(line, estimateProject.discountBps)),
             clientUnitStr,
             clientTotalStr,
           ]);
@@ -2288,7 +2292,11 @@ export default function ProjectEstimate() {
     // Stage/work/line titles and units are unfiltered free text, so every cell
     // goes through the shared guard rather than a local quoting rule (#195).
     const csv = buildCsvDocument(rows);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    // UTF-8 BOM, which the portfolio export already emits. Without it Excel reads
+    // a double-clicked .csv as the system ANSI codepage and every Cyrillic
+    // stage/work/line title garbles, which on a Russian-UI product is most of the
+    // file. Only the more exposed of the two exporters was missing it.
+    const blob = new Blob([CSV_BOM + csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -3250,7 +3258,7 @@ export default function ProjectEstimate() {
                                               <TableCell className="w-[92px] py-1.5 pr-2 align-top">
                                                 {canEditEstimate ? (
                                                   <InlineEditableNumber
-                                                    value={effectiveDiscountForDisplay(line, stage, estimateProject.discountBps)}
+                                                    value={effectiveDiscountForDisplay(line, estimateProject.discountBps)}
                                                     onCommit={(nextValue) => updateLine(pid, line.id, { discountBpsOverride: nextValue > 0 ? nextValue : null })}
                                                     formatDisplay={(value) => `${fromBpsToPercent(value)}%`}
                                                     formatInput={(value) => fromBpsToPercent(value)}
@@ -3258,7 +3266,7 @@ export default function ProjectEstimate() {
                                                   />
                                                 ) : (
                                                   <div className="min-h-7 whitespace-nowrap px-1 py-0.5 text-right text-sm tabular-nums text-foreground">
-                                                    {`${fromBpsToPercent(effectiveDiscountForDisplay(line, stage, estimateProject.discountBps))}%`}
+                                                    {`${fromBpsToPercent(effectiveDiscountForDisplay(line, estimateProject.discountBps))}%`}
                                                   </div>
                                                 )}
                                               </TableCell>

@@ -3,10 +3,8 @@
 
 // The formula-injection guard and the quoting rule live in @/lib/csv so this
 // exporter and the estimate exporter cannot drift apart again (rovno #195).
-import { buildCsvRow } from "@/lib/csv";
+import { buildCsvRow, CSV_BOM } from "@/lib/csv";
 import type { PortfolioFinanceSnapshot, PortfolioProjectRow } from "@/lib/finance/portfolio-read-model";
-
-const BOM = "﻿";
 
 function moneyCell(cents: number | null): string {
   // Full rubles with 2 decimals; dot decimal so spreadsheets parse it as a number.
@@ -66,7 +64,7 @@ export function buildPortfolioCsv(snapshot: PortfolioFinanceSnapshot, labels: Cs
   ]);
 
   const lines = snapshot.projects.map((project) => rowFor(project, labels));
-  return BOM + [header, ...lines].join("\r\n") + "\r\n";
+  return CSV_BOM + [header, ...lines].join("\r\n") + "\r\n";
 }
 
 export type { CsvLabels as PortfolioCsvLabels };

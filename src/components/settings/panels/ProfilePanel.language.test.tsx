@@ -82,8 +82,10 @@ describe("ProfilePanel interface language", () => {
   });
 
   it("falls back to Русский for a locale that is not a real bundle", () => {
-    // de/fr/es are disabled placeholders the DB CHECK still admits, and an
-    // undefined locale is possible too. Either way the control must agree with
+    // de/fr are disabled placeholders the DB CHECK still admits (it is
+    // `locale in ('ru','en','de','fr')`, so the `es` entry in LANGUAGES is a
+    // value the database would reject outright), and an undefined locale is
+    // possible too. Either way the control must agree with
     // the Russian UI that i18n boots, or Save can never enable: selecting the
     // language already shown is not a dirty change.
     currentUser.locale = "de";

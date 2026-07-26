@@ -15,6 +15,14 @@
 // to move in the same change.
 
 /**
+ * UTF-8 byte order mark. Prepend it to any CSV a user downloads: without it,
+ * Excel reads a double-clicked .csv as the system ANSI codepage and Cyrillic
+ * content garbles. Kept here rather than per-exporter so a new export cannot
+ * forget it, which is exactly what happened to the estimate CSV.
+ */
+export const CSV_BOM = "﻿";
+
+/**
  * Escape one cell for CSV, neutralizing spreadsheet formula injection.
  *
  * A cell starting with `=` `+` `-` `@` (or tab/CR) is evaluated as a formula by
