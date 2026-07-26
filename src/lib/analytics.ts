@@ -294,12 +294,20 @@ export function trackEventOncePerSession(
  * build time, so when no counter is configured esbuild dead-code-eliminates
  * this whole loader from the bundle — no `mc.yandex.ru` request, no init.
  *
- * Session replay (Вебвизор) is ON as of 2026-07-25, but only in its
- * behaviour-only form: the counter setting "Записывать все поля" is OFF, so
- * recordings capture clicks / scrolls / navigation and never the text users
- * type (client names, addresses, amounts). That is the field-masking half of
- * the 152-ФЗ gate this comment previously described. The consent half is
- * still open — see docs/observability/setup.md §5.
+ * Session replay (Вебвизор) is ON as of 2026-07-25. Know exactly what that
+ * means before touching it: Вебвизор replays the RENDERED DOM, so whatever is
+ * on screen — project titles, counterparties, addresses, amounts — is captured
+ * and sent to Yandex. The counter setting "Записывать все поля" is OFF, which
+ * suppresses the contents of form INPUTS only (passwords included); it does
+ * NOT mask displayed text. Nothing in the app carries `ym-hide-content`, so
+ * nothing is masked today.
+ *
+ * That exposure is disclosed in the privacy policy (src/pages/legal/Privacy.tsx
+ * §9) and was accepted deliberately by the operator on 2026-07-26 under a filed
+ * 152-ФЗ processing notification. If you ever need to narrow it, the mechanism
+ * is a `ym-hide-content` class on the sensitive containers (estimates,
+ * procurement, HR), which keeps the acquisition funnel recorded while dropping
+ * client data. Keep Privacy.tsx §9 in sync with whatever this does.
  *
  * Own / agent test visits are excluded two ways: the counter's "Не учитывать
  * мои визиты" filter (covers browsers logged into a Yandex account with
