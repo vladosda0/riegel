@@ -407,3 +407,60 @@ describe("delete-safeguards", () => {
     expect(assessment.startedEntries.map((entry) => entry.kind)).toEqual(["work", "task"]);
   });
 });
+
+describe("delete-safeguards with a partially received order", () => {
+  // Latent hole: while `partially_received` was excluded from the applied-order set, an
+  // estimate line with a real part-delivery scored supplierOrderedQty 0 AND inStockQty 0, so
+  // NEITHER guard fired and the line could be deleted, orphaning stock already on site.
+  it("still warns when the linked order is partially received", () => {
+    const materialLine = line({
+      id: "line-material",
+      title: "Concrete",
+      type: "material",
+      qtyMilli: 12_000,
+    });
+    const linkedProcurement = procurementItem({
+      id: "proc-linked",
+      name: "Concrete",
+      requiredQty: 12,
+      sourceEstimateV2LineId: materialLine.id,
+    });
+
+    const assessment = assessResourceDelete(materialLine, {
+      projectId,
+      stages: [stage()],
+      works: [work()],
+      lines: [materialLine],
+      tasks: [],
+      procurementItems: [linkedProcurement],
+      orders: [
+        order({
+          status: "partially_received",
+          lines: [{
+            id: "order-line-1",
+            orderId: "order-1",
+            procurementItemId: linkedProcurement.id,
+            qty: 10,
+            receivedQty: 4,
+            unit: "pcs",
+            plannedUnitPrice: 100,
+            actualUnitPrice: 100,
+          }],
+        }),
+      ],
+      hrItems: [],
+      hrPayments: [],
+      locations: [defaultLocation],
+    });
+
+    expect(assessment.initialStep).toBe("financial");
+    expect(assessment.financial.summary.partiallyOrderedCount).toBe(1);
+    expect(assessment.financial.summary.inStockCount).toBe(1);
+    expect(assessment.financial.procurement[0]).toMatchObject({
+      procurementItemId: "proc-linked",
+      orderedState: "partial",
+      inStock: true,
+      inStockQty: 4,
+    });
+  });
+});

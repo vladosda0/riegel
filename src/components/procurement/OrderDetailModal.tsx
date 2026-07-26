@@ -9,6 +9,7 @@ import { useLocations } from "@/hooks/use-inventory-data";
 import { useReceiveCrossProjectTransfer } from "@/hooks/use-cross-project-transfer";
 import { useToast } from "@/hooks/use-toast";
 import { useWorkspaceMode, useWorkspaceProjectsState } from "@/hooks/use-workspace-source";
+import { isOpenOrderStatus } from "@/lib/procurement-fulfillment";
 import { fmtCost } from "@/lib/procurement-utils";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -310,13 +311,13 @@ export function OrderDetailModal({
             {order?.status === "placed" && !isSupabaseMode && (
               <Button type="button" variant="destructive" onClick={onVoidOrder}>{t("procurement.orderDetail.voidOrder")}</Button>
             )}
-            {order?.status === "placed" && isSupabaseMode && order.kind === "supplier" && (
+            {order != null && isOpenOrderStatus(order.status) && isSupabaseMode && order.kind === "supplier" && (
               <Button type="button" variant="destructive" disabled>{t("procurement.orderDetail.voidOrder")}</Button>
             )}
             {order?.kind === "stock" && order?.status === "received" && !isSupabaseMode && (
               <Button type="button" variant="destructive" onClick={onVoidOrder}>{t("procurement.orderDetail.voidAllocation")}</Button>
             )}
-            {order?.kind === "supplier" && order.status === "placed" && (
+            {order?.kind === "supplier" && isOpenOrderStatus(order.status) && (
               <Button type="button" onClick={() => setReceiveOpen(true)}>{t("procurement.action.receive")}</Button>
             )}
             {canReceiveCrossProjectTransfer && (

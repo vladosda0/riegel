@@ -502,7 +502,8 @@ describe("orders-source helpers", () => {
     expect(stockOrder).toEqual({
       id: "order-stock",
       projectId: "project-1",
-      status: "placed",
+      // The row's 'partially_received' is preserved rather than flattened into 'placed'.
+      status: "partially_received",
       kind: "stock",
       supplierName: "Warehouse",
       deliverToLocationId: "location-b",
@@ -745,7 +746,8 @@ describe("supabase order writes", () => {
       }),
     ]);
     expect(database.tables.orders[0].status).toBe("partially_received");
-    expect(partiallyReceived.status).toBe("placed");
+    // The half-delivered state now survives the round trip back into the client model.
+    expect(partiallyReceived.status).toBe("partially_received");
     expect(partiallyReceived.lines.find((line) => line.id === "line-1")?.receivedQty).toBe(5);
     expect(partiallyReceived.lines.find((line) => line.id === "line-2")?.receivedQty).toBe(2);
 
@@ -1015,5 +1017,38 @@ describe("mergeOperationalRpcLinesOntoExistingOrderLines", () => {
     const merged = mergeOperationalRpcLinesOntoExistingOrderLines(existing, rpc, procItemTypeById);
     expect(merged[0]?.itemType).toBe("tool");
     expect(merged[0]?.receivedQty).toBe(2);
+  });
+});
+
+describe("order row status mapping", () => {
+  // Enumerated over the full DB status domain. Collapsing 'partially_received' into 'placed'
+  // here is what previously made the state unreachable in the client model, so every
+  // «Частично получено» label and every partially-received branch downstream was dead code.
+  it.each([
+    ["draft", "draft"],
+    ["placed", "placed"],
+    ["partially_received", "partially_received"],
+    ["received", "received"],
+    ["cancelled", "voided"],
+  ] as const)("maps the %s row status to %s", (rowStatus, expected) => {
+    const [shaped] = shapeOrdersWithDetails({
+      orderRows: [orderRow({ id: "order-x", status: rowStatus })],
+      lineRows: [],
+      movementRows: [],
+      procurementItemRows: [],
+    });
+
+    expect(shaped.status).toBe(expected);
+  });
+
+  it("falls back to placed for an unrecognised row status", () => {
+    const [shaped] = shapeOrdersWithDetails({
+      orderRows: [orderRow({ id: "order-x", status: "some_future_state" as never })],
+      lineRows: [],
+      movementRows: [],
+      procurementItemRows: [],
+    });
+
+    expect(shaped.status).toBe("placed");
   });
 });

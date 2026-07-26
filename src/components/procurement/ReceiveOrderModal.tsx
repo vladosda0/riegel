@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { getOrdersSource } from "@/data/orders-source";
+import { isOpenOrderStatus } from "@/lib/procurement-fulfillment";
 import { useProcurementV2 } from "@/hooks/use-mock-data";
 import { inventoryQueryKeys, useLocations } from "@/hooks/use-inventory-data";
 import {
@@ -73,7 +74,8 @@ export function ReceiveOrderModal({
   const submit = async () => {
     if (!order) return;
     if (receiveInFlightRef.current) return;
-    if (order.status !== "placed") {
+    // A part-delivered order still has quantity outstanding, so it stays receivable.
+    if (!isOpenOrderStatus(order.status)) {
       toast({ title: t("procurement.receiveOrder.notReceivable"), variant: "destructive" });
       return;
     }
@@ -208,7 +210,7 @@ export function ReceiveOrderModal({
           <Button
             type="button"
             onClick={submit}
-            disabled={!order || order.status !== "placed" || receiveInFlight}
+            disabled={!order || !isOpenOrderStatus(order.status) || receiveInFlight}
           >
             {receiveInFlight ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
             {receiveInFlight ? t("procurement.receiveModal.receiving") : t("procurement.action.receive")}

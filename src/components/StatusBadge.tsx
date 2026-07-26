@@ -24,6 +24,9 @@ const statusStyles: Record<StatusVariant, Record<string, string>> = {
   procurement: {
     "To buy": "bg-warning/15 text-warning-foreground",
     "Ordered": "bg-info/15 text-info",
+    // A part-delivered order is still in flight, so it shares the 'Ordered' tint rather than
+    // falling through to the grey default, which reads as voided.
+    "Partially received": "bg-info/15 text-info",
     "In stock": "bg-success/15 text-success",
     "Voided": "bg-muted text-muted-foreground",
     "Not purchased": "bg-muted text-muted-foreground",

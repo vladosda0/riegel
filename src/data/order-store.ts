@@ -8,7 +8,7 @@ import {
   getProcurementItemById,
   updateProcurementItem,
 } from "@/data/procurement-store";
-import { toInventoryKey } from "@/lib/procurement-fulfillment";
+import { isOpenOrderStatus, toInventoryKey } from "@/lib/procurement-fulfillment";
 import { onDemoSessionDeactivated } from "@/lib/auth-state";
 import type {
   Order,
@@ -213,12 +213,12 @@ export function listOrdersByProject(projectId: string): OrderWithLines[] {
 
 export function listPlacedSupplierOrders(projectId: string): OrderWithLines[] {
   return listOrdersByProject(projectId)
-    .filter((order) => order.kind === "supplier" && order.status === "placed");
+    .filter((order) => order.kind === "supplier" && isOpenOrderStatus(order.status));
 }
 
 export function listPlacedSupplierOrdersAllProjects(): OrderWithLines[] {
   return orders
-    .filter((order) => order.kind === "supplier" && order.status === "placed")
+    .filter((order) => order.kind === "supplier" && isOpenOrderStatus(order.status))
     .map(withLines)
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }

@@ -133,6 +133,7 @@ import {
   combinePlanFact,
   computeFactFromDataSources,
   computePlannedFromEstimateV2,
+  hasActualFinancialData as hasActualFinancialDataFor,
 } from "@/lib/estimate-v2/rollups";
 import { fromDayIndex, toDayIndex } from "@/lib/estimate-v2/schedule";
 import { computeEac, computeFinishedAccuracy } from "@/lib/estimate-v2/finance-insights";
@@ -1655,14 +1656,7 @@ export default function ProjectEstimate() {
   const isInWork = estimateProject.estimateStatus === "in_work";
 
   const hasActualFinancialData = useMemo(
-    () => (
-      hrPayments.length > 0
-      || orders.some((order) => (
-        order.kind === "supplier"
-        && (order.status === "placed" || order.status === "received")
-        && order.lines.length > 0
-      ))
-    ),
+    () => hasActualFinancialDataFor({ hrPaymentCount: hrPayments.length, orders }),
     [hrPayments.length, orders],
   );
 

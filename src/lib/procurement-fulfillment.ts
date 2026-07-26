@@ -3,9 +3,36 @@ import type {
   InventoryLocation,
   OrderLine,
   OrderReceiveEvent,
+  OrderStatus,
   OrderWithLines,
   ProcurementItemV2,
 } from "@/types/entities";
+
+/**
+ * The order exists operationally: placed, not voided, not a draft — so its lines represent
+ * real committed quantities and real money.
+ *
+ * `partially_received` is the state between `placed` and `received` and belongs here with
+ * them. Omitting it silently zeroes spend, on-hand stock, procurement KPIs and the estimate
+ * delete guards for a half-delivered order, which reads as "clean" because every individual
+ * status check looks reasonable in isolation.
+ *
+ * Domain note: this is the CLIENT model (`OrderStatus`). The Supabase row domain is a
+ * different set (`cancelled` where this has `voided`) and is checked separately by
+ * `orderRowStatusAllowsOperationalLineHydration` in `@/data/orders-source`.
+ */
+export function isAppliedOrderStatus(status: OrderStatus): boolean {
+  return status === "placed" || status === "partially_received" || status === "received";
+}
+
+/**
+ * An applied order that still has unreceived quantity outstanding, i.e. money that is
+ * committed but not yet delivered. `received` is excluded because a fully received order
+ * has nothing open left; `partially_received` is included because it does.
+ */
+export function isOpenOrderStatus(status: OrderStatus): boolean {
+  return status === "placed" || status === "partially_received";
+}
 
 export interface InStockItemByLocation {
   procurementItemId: string;
@@ -64,7 +91,7 @@ export interface ProcurementHeaderKpis {
 }
 
 function isAppliedOrder(order: OrderWithLines): boolean {
-  return order.status === "placed" || order.status === "received";
+  return isAppliedOrderStatus(order.status);
 }
 
 function unitPriceForItem(item: ProcurementItemV2): number {
@@ -102,7 +129,7 @@ export function computeRemainingRequestedQty(
 
 export function computeOrderedOpenQty(requestId: string, orders: OrderWithLines[]): number {
   return orders
-    .filter((order) => order.kind === "supplier" && order.status === "placed")
+    .filter((order) => order.kind === "supplier" && isOpenOrderStatus(order.status))
     .flatMap((order) => order.lines)
     .filter((line) => line.procurementItemId === requestId)
     .reduce((sum, line) => sum + Math.max(line.qty - line.receivedQty, 0), 0);
@@ -495,7 +522,7 @@ export function computeTabChipTotals(
   // transfer is a real placed order in this project, so it belongs in the "ordered" tally.
   const orderedOrders = orders.filter((order) =>
     order.projectId === projectId
-    && order.status === "placed"
+    && isOpenOrderStatus(order.status)
     && (order.kind === "supplier" || order.transferDirection != null));
   const itemById = new Map(items.map((item) => [item.id, item]));
   const ordered: TabChipStat = {

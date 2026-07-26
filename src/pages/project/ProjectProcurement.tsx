@@ -79,7 +79,9 @@ import {
   computePurchasePriceVariance,
   computeRemainingRequestedQty,
   computeTabChipTotals,
+  isAppliedOrderStatus,
   isEstimateLinkedProcurementItem,
+  isOpenOrderStatus,
   toInventoryKey,
 } from "@/lib/procurement-fulfillment";
 import { fmtCost } from "@/lib/procurement-utils";
@@ -293,7 +295,7 @@ export default function ProjectProcurement() {
   const { items: baseItems, isLoading: isProcurementItemsLoading } = useProjectProcurementItemsState(pid);
   const orders = useOrders(pid);
   const hasPlacedSupplierOrderLines = useMemo(
-    () => orders.some((o) => o.kind === "supplier" && o.status === "placed" && o.lines.length > 0),
+    () => orders.some((o) => o.kind === "supplier" && isOpenOrderStatus(o.status) && o.lines.length > 0),
     [orders],
   );
   const locations = useLocations(pid);
@@ -790,7 +792,7 @@ export default function ProjectProcurement() {
     orders
       .filter((order) => (
         order.kind === "supplier"
-        && (order.status === "placed" || order.status === "received")
+        && isAppliedOrderStatus(order.status)
       ))
       .filter((order) => {
         if (!search.trim()) return true;
