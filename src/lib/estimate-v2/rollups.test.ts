@@ -318,4 +318,75 @@ describe("estimate-v2 rollups", () => {
 
     expect(fact.spentAbovePlannedCents).toBe(12_000);
   });
+
+  it("counts partially received supplier orders as spend", () => {
+    const fact = __private.computeFactFromData({
+      procurementItems: [
+        {
+          id: "p-1",
+          projectId: "project",
+          stageId: null,
+          categoryId: null,
+          type: "material",
+          name: "M",
+          spec: null,
+          unit: "pcs",
+          requiredByDate: null,
+          requiredQty: 10,
+          orderedQty: 10,
+          receivedQty: 4,
+          plannedUnitPrice: 100,
+          actualUnitPrice: null,
+          supplier: null,
+          supplierPreferred: null,
+          locationPreferredId: null,
+          lockedFromEstimate: false,
+          sourceEstimateItemId: null,
+          sourceEstimateV2LineId: null,
+          orphaned: false,
+          orphanedAt: null,
+          orphanedReason: null,
+          linkUrl: null,
+          notes: null,
+          attachments: [],
+          createdFrom: "manual",
+          linkedTaskIds: [],
+          archived: false,
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-01T00:00:00.000Z",
+        },
+      ],
+      orders: [{
+        id: "o-1",
+        projectId: "project",
+        status: "partially_received",
+        kind: "supplier",
+        supplierName: "S",
+        deliverToLocationId: null,
+        fromLocationId: null,
+        toLocationId: null,
+        dueDate: null,
+        deliveryDeadline: null,
+        invoiceAttachment: null,
+        note: null,
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+        lines: [{
+          id: "ol-1",
+          orderId: "o-1",
+          procurementItemId: "p-1",
+          qty: 10,
+          receivedQty: 4,
+          unit: "pcs",
+          plannedUnitPrice: 100,
+          actualUnitPrice: null,
+        }],
+      }],
+      hrItems: [],
+      hrPayments: [],
+    });
+
+    expect(fact.spentCents).toBe(100_000);
+    expect(fact.spentByTypeCents.material).toBe(100_000);
+  });
 });

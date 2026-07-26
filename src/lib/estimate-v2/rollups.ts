@@ -65,6 +65,10 @@ function toCents(value: number): number {
   return Math.max(0, Math.round(value * 100));
 }
 
+function orderStatusCountsAsSpend(status: OrderWithLines["status"]): boolean {
+  return status === "placed" || status === "partially_received" || status === "received";
+}
+
 function paidByHrItemId(hrPayments: HRPayment[]): Map<string, number> {
   const map = new Map<string, number>();
   hrPayments.forEach((payment) => {
@@ -86,7 +90,7 @@ export function computeFactFromDataSources(input: {
   let spentAbovePlannedCents = 0;
 
   const procurementItemsById = new Map(input.procurementItems.map((item) => [item.id, item]));
-  const supplierOrders = input.orders.filter((order) => order.kind === "supplier" && (order.status === "placed" || order.status === "received"));
+  const supplierOrders = input.orders.filter((order) => order.kind === "supplier" && orderStatusCountsAsSpend(order.status));
 
   supplierOrders.forEach((order) => {
     order.lines.forEach((line) => {
