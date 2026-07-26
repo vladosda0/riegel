@@ -31,6 +31,12 @@ export interface EstimateV2Stage {
   projectId: string;
   title: string;
   order: number;
+  /**
+   * Persisted to `project_stages.discount_bps` but NOT applied to pricing.
+   * `computeEffectiveDiscountBps` resolves line override then project only. No UI
+   * writes this, so real rows are 0; the demo seed carries non-zero values that
+   * do nothing. See rovno #207 before wiring a stage-discount control.
+   */
   discountBps: number;
   /** Canonical-library link (system_stage_article_id). Set when this stage came from the rovno.ai library. */
   systemStageArticleId?: string | null;
@@ -44,6 +50,7 @@ export interface EstimateV2Work {
   stageId: string;
   title: string;
   order: number;
+  /** Not applied to pricing, and not even resolved. Same story as the stage tier: see rovno #207. */
   discountBps: number;
   plannedStart: string | null;
   plannedEnd: string | null;

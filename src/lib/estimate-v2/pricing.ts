@@ -90,9 +90,26 @@ function emptyBreakdownByType(): Record<ResourceLineType, number> {
   };
 }
 
+/**
+ * Resolve the discount for a line: line override, else project.
+ *
+ * There is deliberately NO stage or work tier here. `EstimateV2Stage.discountBps`
+ * and `EstimateV2Work.discountBps` exist in the model, are hydrated from
+ * `project_stages.discount_bps`, are written back on every snapshot save, and are
+ * seeded non-zero in the demo data, but nothing has ever read them for pricing.
+ * No UI writes them either, so production rows are all 0 and no displayed number
+ * is wrong today.
+ *
+ * This function previously took the stage and discarded it as `_stage`, which
+ * advertised a capability it did not implement: the next person to wire a
+ * stage-discount control would reasonably assume pricing already honoured it. The
+ * parameter is gone so the signature tells the truth (rovno #207). Whether stage
+ * and work discounts SHOULD apply is an open product question; implementing them
+ * means adding the tiers here and deciding how they compose with the "0 means
+ * inherit" rule below.
+ */
 export function computeEffectiveDiscountBps(
   line: Pick<EstimateV2ResourceLine, "discountBpsOverride">,
-  _stage: Pick<EstimateV2Stage, "discountBps">,
   project: Pick<EstimateV2Project, "discountBps">,
 ): number {
   // Treat null or 0 as "inherit from project" so global changes propagate to unset lines.
@@ -189,7 +206,7 @@ export function computeLineTotals(
     };
   }
 
-  const effectiveDiscountBps = computeEffectiveDiscountBps(line, stage, project);
+  const effectiveDiscountBps = computeEffectiveDiscountBps(line, project);
   const effectiveMarkupBps = projectMode === "build_myself" ? 0 : computeEffectiveMarkupBps(line, project);
 
   const costTotalCents = multiplyQtyMilli(line.costUnitCents, qtyMilli);

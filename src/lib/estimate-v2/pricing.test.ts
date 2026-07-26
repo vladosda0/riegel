@@ -75,17 +75,35 @@ function createLine(partial: Partial<EstimateV2ResourceLine> = {}): EstimateV2Re
 describe("estimate-v2 pricing", () => {
   it("inherits project discount when line override is absent or zero (stage tier removed)", () => {
     const project = createProject({ discountBps: 300 });
-    const stage = createStage({ discountBps: 1200 });
-    expect(computeEffectiveDiscountBps(createLine({ discountBpsOverride: null }), stage, project)).toBe(300);
-    expect(computeEffectiveDiscountBps(createLine({ discountBpsOverride: 0 }), stage, project)).toBe(300);
+    expect(computeEffectiveDiscountBps(createLine({ discountBpsOverride: null }), project)).toBe(300);
+    expect(computeEffectiveDiscountBps(createLine({ discountBpsOverride: 0 }), project)).toBe(300);
   });
 
   it("prefers positive line discount override over the project discount", () => {
     const project = createProject({ discountBps: 300 });
-    const stage = createStage({ discountBps: 1200 });
     const line = createLine({ discountBpsOverride: 2500 });
 
-    expect(computeEffectiveDiscountBps(line, stage, project)).toBe(2500);
+    expect(computeEffectiveDiscountBps(line, project)).toBe(2500);
+  });
+
+  it("ignores a non-zero stage discount, which is persisted but never priced (#207)", () => {
+    // Pins the documented behaviour so a future stage-discount feature has to
+    // change this test deliberately rather than silently start applying a
+    // discount that has been sitting in the database all along.
+    const project = createProject({ discountBps: 300 });
+    const stage = createStage({ discountBps: 1200 });
+    const line = createLine({ discountBpsOverride: null });
+
+    const totals = computeLineTotals(line, stage, project, "contractor");
+    const withoutStageDiscount = computeLineTotals(
+      line,
+      createStage({ discountBps: 0 }),
+      project,
+      "contractor",
+    );
+
+    expect(totals.clientTotalCents).toBe(withoutStageDiscount.clientTotalCents);
+    expect(totals.discountCents).toBe(withoutStageDiscount.discountCents);
   });
 
   it("applies markup to labor and subcontractor lines in contractor mode", () => {
