@@ -108,9 +108,9 @@ import {
   commitPhotoConsultActions,
   commitProposal,
   filterPhotoConsultProposalChangesBySeam,
-  isProposalTypeApplicable,
   type PhotoConsultApplyAction,
 } from "@/lib/commit-proposal";
+import { proposalFailureReasonKey, resolveProposalFastFail } from "@/lib/ai-proposal-execution";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { SaveLearnTargetDialog } from "@/components/ai/SaveLearnTargetDialog";
@@ -1208,17 +1208,20 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       let unavailableReason: string | null = null;
 
       while (attempt < 5 && !success) {
-        // Cannot be applied in ANY mode: commitProposal holds no mutator for this
-        // type and returns unavailable instead of claiming a success it never
-        // delivered (#175). Fail fast so the user does not sit through five fake
-        // retry animations before a generic error. Shares its predicate with the
-        // library guard so the two cannot drift apart.
-        if (!isProposalTypeApplicable(queueItem.proposal.type)) {
-          lastError = t("ai.sidebar.toast.estimateUnavailable.description");
+        // Whether this item can be attempted at all. The decision is pure and
+        // lives in @/lib/ai-proposal-execution so it can be unit-tested: it used
+        // to be two inline branches in this loop, which no test touches, and both
+        // review-round defects hid in exactly that blind spot.
+        const fastFail = resolveProposalFastFail(queueItem.proposal.type, workspaceMode.kind);
+        if (fastFail) {
+          lastError = t(fastFail.descriptionKey);
           setProposalQueue((prev) => (prev
             ? {
                 ...prev,
-                retryByItemId: { ...prev.retryByItemId, [queueItem.id]: 1 },
+                // 0, not 1: nothing was attempted. The transient queue badge and
+                // the permanent feed entry must not disagree about the same
+                // non-attempt.
+                retryByItemId: { ...prev.retryByItemId, [queueItem.id]: 0 },
                 executionErrorByItemId: {
                   ...prev.executionErrorByItemId,
                   [queueItem.id]: lastError,
@@ -1226,32 +1229,11 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
               }
             : prev));
           toast({
-            title: t("ai.sidebar.toast.estimateUnavailable.title"),
+            title: t(fastFail.titleKey),
             description: lastError,
             variant: "destructive",
           });
-          unavailableReason = "unsupported_proposal_type";
-          break;
-        }
-
-        if (workspaceMode.kind === "supabase" && queueItem.proposal.type === "generate_document") {
-          lastError = t("ai.sidebar.toast.supabaseModeUnavailable.documentDescription");
-          setProposalQueue((prev) => (prev
-            ? {
-                ...prev,
-                retryByItemId: { ...prev.retryByItemId, [queueItem.id]: 1 },
-                executionErrorByItemId: {
-                  ...prev.executionErrorByItemId,
-                  [queueItem.id]: lastError,
-                },
-              }
-            : prev));
-          toast({
-            title: t("ai.sidebar.toast.supabaseModeUnavailable.title"),
-            description: lastError,
-            variant: "destructive",
-          });
-          unavailableReason = "unsupported_in_supabase_mode";
+          unavailableReason = fastFail.reason;
           break;
         }
 
@@ -2248,7 +2230,12 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       if (event.type === "proposal_cancelled") {
         const status = typeof payload.status === "string" ? payload.status : "cancelled";
         const summary = typeof payload.summary === "string" ? payload.summary : t("ai.sidebar.proposal.summaryFallbackShort");
-        const reason = typeof payload.reason === "string" ? payload.reason.replace(/_/g, " ") : "";
+        // payload.reason is a machine token on a PERMANENT feed entry. This used
+        // to print it with underscores swapped for spaces, which put raw English
+        // ("execution failed") into the Russian feed. Translate the tokens we know
+        // and drop anything else, so a new token cannot leak by default.
+        const reasonKey = proposalFailureReasonKey(payload.reason);
+        const reason = reasonKey ? t(reasonKey) : "";
         const title = status === "failed"
           ? t("ai.sidebar.proposal.statusTitle.failed")
           : t("ai.sidebar.proposal.statusTitle.declined");

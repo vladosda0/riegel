@@ -342,13 +342,22 @@ function buildHierarchyNumbers(
 }
 
 /**
- * Display-side twin of computeEffectiveDiscountBps. Same resolution, same
- * deliberate absence of a stage tier: it took a stage and discarded it as
- * `_stage`, which advertised a capability neither side implements (#207).
+ * Display-side twin of computeEffectiveDiscountBps. Same resolution order, same
+ * clamp, and the same deliberate absence of a stage tier: it took a stage and
+ * discarded it as `_stage`, which advertised a capability neither side
+ * implements (#207).
+ *
+ * The clamp matters because without it the two sides disagree: pricing clamps to
+ * 10000 bps, so an out-of-range persisted value would be CHARGED as 100% while
+ * this table and the CSV discount column printed the raw figure. The UI cannot
+ * produce such a value (both editors parse through toBpsFromPercent, which
+ * clamps), so this guards against out-of-band data only.
  */
 function effectiveDiscountForDisplay(line: EstimateV2ResourceLine, projectDiscountBps: number): number {
-  if (line.discountBpsOverride != null && line.discountBpsOverride > 0) return line.discountBpsOverride;
-  return projectDiscountBps;
+  const raw = line.discountBpsOverride != null && line.discountBpsOverride > 0
+    ? line.discountBpsOverride
+    : projectDiscountBps;
+  return Math.max(0, Math.min(10_000, raw));
 }
 
 function effectiveMarkupForDisplay(line: EstimateV2ResourceLine, projectMarkupBps: number): number {

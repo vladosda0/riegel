@@ -245,9 +245,35 @@ function buildPayloadWithSource(payload: Record<string, unknown>, source?: "ai" 
  * module holds no estimate mutator (rovno #175). The single predicate exists so
  * the library guard and the AISidebar fast-fail cannot drift apart. Wiring real
  * estimate writes means changing this ONE place, and both guards follow.
+ *
+ * Written as an exhaustive switch, NOT as `type !== "update_estimate"`. The
+ * denylist form fails OPEN inside a module that is otherwise deny-by-default: add
+ * a sixth AIProposalType plus its PROPOSAL_TYPE_TO_CONTRACT_ACTION entry (which an
+ * author must add in order to permission-check it at all) and forget the mutator,
+ * and this returns true, every permission gate passes, no mutation branch matches,
+ * `count` stays 0, proposal_confirmed is emitted with change_count 0, deductCredit
+ * runs, and the user is told «Изменения применены». That is #175 reproduced
+ * exactly, and neither the type system nor the suite would notice.
+ *
+ * The `never` assignment makes the compiler refuse an unhandled member, so the
+ * next type has to make this decision explicitly.
  */
 export function isProposalTypeApplicable(type: AIProposal["type"]): boolean {
-  return type !== "update_estimate";
+  switch (type) {
+    case "add_task":
+    case "add_procurement":
+    case "generate_document":
+    case "create_project":
+      return true;
+    case "update_estimate":
+      return false;
+    default: {
+      // Returned rather than merely declared so no-unused-vars stays happy; a
+      // `never` value is assignable to boolean and is unreachable anyway.
+      const exhaustive: never = type;
+      return exhaustive;
+    }
+  }
 }
 
 export function commitProposal(proposal: AIProposal, options: CommitProposalOptions = {}): CommitResult {
