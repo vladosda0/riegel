@@ -551,6 +551,10 @@ export const manifest = {
     {
       "path": "supabase/migrations/20260725190000_profiles_locale_default_ru.sql",
       "sha256": "ca64826384de333d6ee17a02658312350074a25a3727d56f9a354108ce9778f6"
+    },
+    {
+      "path": "supabase/migrations/20260726120000_drop_debug_org_rls_state2.sql",
+      "sha256": "d9e369e04cd83d523e8d00de8344d6cbf9312d9164fd3ae23d3624eb95578e80"
     }
   ],
   "generated_artifacts": [
@@ -715,6 +719,7 @@ export const manifest = {
     "sql/20260720120000_payment_intents_order_attempt.sql",
     "sql/20260725120000_invite_replay_guard.sql",
     "sql/20260725190000_profiles_locale_default_ru.sql",
+    "sql/20260726120000_drop_debug_org_rls_state2.sql",
     "generated/db-public-schema.ts",
     "generated/supabase-types.ts"
   ],
@@ -18906,20 +18911,6 @@ export const functions = {
     },
     {
       "schema": "public",
-      "name": "__debug_org_rls_state2",
-      "signature": "public.__debug_org_rls_state2()",
-      "args": [],
-      "returnType": "jsonb",
-      "language": "sql",
-      "volatility": "stable",
-      "securityDefiner": true,
-      "searchPath": "public, pg_catalog",
-      "authenticatedExecute": true,
-      "sourceMigration": "supabase/migrations/20260507160000_org_policy_resilience.sql",
-      "triggerUsages": []
-    },
-    {
-      "schema": "public",
       "name": "import_documents_to_project",
       "signature": "public.import_documents_to_project(uuid, text, uuid[], text)",
       "args": [
@@ -23740,13 +23731,6 @@ export const sourceTrace = {
       "name": "mark_organization_deleting",
       "signature": "public.mark_organization_deleting()",
       "sourceMigration": "supabase/migrations/20260508120000_fix_orgs_select_policy_returning_and_guc_name.sql"
-    },
-    {
-      "key": "public.__debug_org_rls_state2",
-      "schema": "public",
-      "name": "__debug_org_rls_state2",
-      "signature": "public.__debug_org_rls_state2()",
-      "sourceMigration": "supabase/migrations/20260507160000_org_policy_resilience.sql"
     },
     {
       "key": "public.import_documents_to_project",

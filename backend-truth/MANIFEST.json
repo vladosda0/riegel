@@ -547,6 +547,10 @@
     {
       "path": "supabase/migrations/20260725190000_profiles_locale_default_ru.sql",
       "sha256": "ca64826384de333d6ee17a02658312350074a25a3727d56f9a354108ce9778f6"
+    },
+    {
+      "path": "supabase/migrations/20260726120000_drop_debug_org_rls_state2.sql",
+      "sha256": "d9e369e04cd83d523e8d00de8344d6cbf9312d9164fd3ae23d3624eb95578e80"
     }
   ],
   "generated_artifacts": [
@@ -711,6 +715,7 @@
     "sql/20260720120000_payment_intents_order_attempt.sql",
     "sql/20260725120000_invite_replay_guard.sql",
     "sql/20260725190000_profiles_locale_default_ru.sql",
+    "sql/20260726120000_drop_debug_org_rls_state2.sql",
     "generated/db-public-schema.ts",
     "generated/supabase-types.ts"
   ],
