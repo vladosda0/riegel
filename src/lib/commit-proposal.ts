@@ -292,6 +292,30 @@ export function commitProposal(proposal: AIProposal, options: CommitProposalOpti
     };
   }
 
+  // update_estimate is mapped and permission-checked, but NOTHING here writes to
+  // an estimate store: this module imports no estimate mutator at all, and no
+  // event subscriber closes the gap (the only consumers of estimate_created are
+  // display-only). It used to fall through, emit estimate_created, push result
+  // rows routed at /project/<id>/estimate, report count = changes.length, deduct
+  // a credit and return success. So the user saw a success toast, paid a credit,
+  // got a permanent activity-feed entry for a change that never happened, and
+  // followed a link to an unchanged estimate.
+  //
+  // Failing honestly is the minimum until AI estimate edits are actually
+  // implemented (rovno #175). Applying them for real is the open feature: it
+  // means mutating the estimate store here the way add_task, add_procurement and
+  // generate_document mutate theirs. Note this is also the only mapped type with
+  // no unavailability handling in AISidebar, which is why it read as working.
+  if (proposal.type === "update_estimate") {
+    return {
+      success: false,
+      error: "Applying AI estimate changes is not available yet.",
+      eventIds: [],
+      created: [],
+      updated: [],
+    };
+  }
+
   const project = authoritySeam.project ?? getProject(proposal.project_id);
   const stages = getStages(proposal.project_id);
   const currentStage = stages.find((s) => s.id === project?.current_stage_id) ?? stages[0];
@@ -414,30 +438,9 @@ export function commitProposal(proposal: AIProposal, options: CommitProposalOpti
     }
   }
 
-  if (proposal.type === "update_estimate") {
-    const evtId = `evt-ai-${Date.now()}`;
-    addEvent({
-      id: evtId,
-      project_id: pid,
-      actor_id: eventActorId,
-      type: "estimate_created",
-      object_type: "estimate_version",
-      object_id: proposal.id,
-      timestamp: new Date().toISOString(),
-      payload: buildPayloadWithSource({ summary: proposal.summary }, options.eventSource),
-    });
-    eventIds.push(evtId);
-    for (const change of proposal.changes) {
-      (change.action === "create" ? created : updated).push({
-        type: "estimate_version",
-        id: proposal.id,
-        label: change.label,
-        route: `/project/${pid}/estimate`,
-        meta: change.after,
-      });
-    }
-    count = proposal.changes.length;
-  }
+  // The update_estimate branch that used to sit here is gone: it reported a
+  // change count and emitted estimate_created without writing anything. The type
+  // now returns unavailable above, before any event or credit. See #175.
 
   if (options.emitProposalEvent !== false) {
     const proposalEvtId = `evt-proposal-${Date.now()}`;

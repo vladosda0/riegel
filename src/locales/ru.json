@@ -2614,6 +2614,8 @@
   "ai.sidebar.toast.supabaseModeUnavailable.title": "Недоступно в режиме Supabase",
   "ai.sidebar.toast.supabaseModeUnavailable.documentDescription": "Генерация документов ИИ недоступна в режиме Supabase, пока не поддерживается хранение текста документов.",
   "ai.sidebar.toast.supabaseModeUnavailable.learnNoteDescription": "Сохранение заметок Learn требует полного хранения текста документов, которое пока не доступно в режиме Supabase.",
+  "ai.sidebar.toast.estimateUnavailable.title": "Не получится применить к смете",
+  "ai.sidebar.toast.estimateUnavailable.description": "Применение изменений ИИ к смете пока не поддерживается. Ничего не изменилось, кредит не списан.",
   "ai.sidebar.toast.changesApplied.title": "Изменения применены",
   "ai.sidebar.toast.changesApplied.description": "{{summary}} выполнено.",
   "ai.sidebar.toast.changesApplied.consultDescription_one": "Применено {{count}} действие.",

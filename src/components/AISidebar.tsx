@@ -1200,6 +1200,30 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       let lastError = t("ai.sidebar.toast.executionFailed.title");
 
       while (attempt < 5 && !success) {
+        // update_estimate cannot be applied in ANY mode: commitProposal holds no
+        // estimate mutator and now returns unavailable instead of claiming a
+        // success it never delivered (#175). Fail fast so the user does not sit
+        // through five fake retry animations before a generic error.
+        if (queueItem.proposal.type === "update_estimate") {
+          lastError = t("ai.sidebar.toast.estimateUnavailable.description");
+          setProposalQueue((prev) => (prev
+            ? {
+                ...prev,
+                retryByItemId: { ...prev.retryByItemId, [queueItem.id]: 1 },
+                executionErrorByItemId: {
+                  ...prev.executionErrorByItemId,
+                  [queueItem.id]: lastError,
+                },
+              }
+            : prev));
+          toast({
+            title: t("ai.sidebar.toast.estimateUnavailable.title"),
+            description: lastError,
+            variant: "destructive",
+          });
+          break;
+        }
+
         if (workspaceMode.kind === "supabase" && queueItem.proposal.type === "generate_document") {
           lastError = t("ai.sidebar.toast.supabaseModeUnavailable.documentDescription");
           setProposalQueue((prev) => (prev
