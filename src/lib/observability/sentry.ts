@@ -129,9 +129,14 @@ function throwingFrameUrl(value: SentryExceptionLike): string | null {
   if (!Array.isArray(frames)) return null;
   for (let i = frames.length - 1; i >= 0; i--) {
     const filename = (frames[i] as SentryFrameLike)?.filename;
-    if (typeof filename !== "string" || filename === "") continue;
-    if (UNUSABLE_FRAME_FILENAMES.has(filename)) continue;
-    return filename;
+    // Only the two synthetic filenames are skipped; on the first REAL frame
+    // we stop and return whatever it has, `null` included. Continuing past a
+    // frameless frame to an older one is how you end up blaming an unrelated
+    // deeper caller — an error crossing an async or native boundary inside a
+    // handler that an extension wrapped would be attributed to the extension
+    // and dropped, which is the exact case this module must not drop.
+    if (typeof filename === "string" && UNUSABLE_FRAME_FILENAMES.has(filename)) continue;
+    return typeof filename === "string" && filename !== "" ? filename : null;
   }
   return null;
 }
@@ -153,13 +158,9 @@ export function isThirdPartyNoise(event: Record<string, unknown>): boolean {
     const values = (event.exception as { values?: unknown } | undefined)?.values;
     if (!Array.isArray(values)) return false;
 
-    // The message can legitimately be matched on any link of a `cause` chain:
-    // the pattern is specific enough that a hit anywhere means the bridge shim
-    // is involved.
     const exceptions = values.map((raw) => raw as SentryExceptionLike);
-    if (exceptions.some((value) => matchesNoisePattern(value?.value))) return true;
 
-    // The FRAME check, by contrast, must consider exactly ONE exception.
+    // Both checks below consider exactly ONE exception, the root.
     // `linkedErrorsIntegration` is a default browser integration and expands
     // `new Error(msg, { cause })` chains into several `exception.values`, so
     // scanning them all would discard a real regression in our bundle merely
@@ -170,6 +171,12 @@ export function isThirdPartyNoise(event: Record<string, unknown>): boolean {
       exceptions.find((value) => value?.mechanism?.parent_id === undefined) ??
       exceptions[exceptions.length - 1];
     if (!root) return false;
+
+    // Symmetric with the frame check on purpose. Scanning the whole chain for
+    // the message was the same defect one level up: `new Error("save failed",
+    // { cause: bridgeShimError })` would have discarded a genuine regression
+    // in our bundle because a wrapped cause mentioned the bridge.
+    if (matchesNoisePattern(root.value)) return true;
 
     const url = throwingFrameUrl(root);
     if (url === null) return false;

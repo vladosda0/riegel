@@ -16,7 +16,7 @@ export default function AuthCallback() {
   useEffect(() => {
     let cancelled = false;
 
-    const rejectLink = async () => {
+    const rejectLink = () => {
       // Actually sign out, do not just stamp the simulated role. The real
       // gate is the Supabase session (useWorkspaceModeState reads it, not
       // getAuthRole), so writing "guest" beside a live session protects
@@ -30,11 +30,22 @@ export default function AuthCallback() {
       // path does, which is strictly narrower and keeps the shared-device
       // case safe (person B's dead link cannot leave person A signed in).
       // Mirrors the canonical sign-out contract in TopBar.
-      try {
-        await supabase.auth.signOut();
-      } catch {
-        // Best effort: still clear local state and bounce to the form.
-      }
+      //
+      // `scope: "local"` is load-bearing. auth-js defaults to "global", which
+      // revokes every refresh token the account has: re-tapping an old
+      // confirmation email — which this feature's own comment calls routine —
+      // would then sign the person out on every device they own. The property
+      // we need is about THIS device only.
+      //
+      // Not awaited on purpose. signOut awaits an init promise, a lock and a
+      // plain fetch with no client-side timeout, and this route renders only a
+      // spinner: a stalled request would strand the visitor forever with
+      // nothing to click. The redirect must never be hostage to the network,
+      // and not awaiting also removes any chance of firing the toast and
+      // navigate from an unmounted component.
+      void supabase.auth.signOut({ scope: "local" }).catch(() => {
+        // Best effort; local state is cleared below regardless.
+      });
       clearDemoSession();
       clearAiSidebarSessionPreference();
       setAuthRole("guest");
@@ -66,7 +77,7 @@ export default function AuthCallback() {
 
       if (linkFailed) {
         if (cancelled) return;
-        await rejectLink();
+        rejectLink();
         return;
       }
 
@@ -88,7 +99,7 @@ export default function AuthCallback() {
       // No session and no error params: the route was opened directly, or the
       // tokens were unusable. Either way there is nothing to confirm.
       if (!session?.user) {
-        await rejectLink();
+        rejectLink();
         return;
       }
 

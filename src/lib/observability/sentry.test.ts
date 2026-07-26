@@ -123,7 +123,11 @@ describe("isThirdPartyNoise", () => {
     expect(isThirdPartyNoise(event)).toBe(true);
   });
 
-  it("ignores frames without a usable filename when deciding", () => {
+  it("does not blame a deeper extension frame when the top frame is frameless", () => {
+    // Previously this asserted `true`, which encoded the over-aggressive
+    // "keep walking until some frame has a filename" behaviour. Sentry stops
+    // at the first real frame and returns null, so an error whose throwing
+    // frame carries no filename is never attributed to an unrelated caller.
     const event = {
       exception: {
         values: [
@@ -141,7 +145,7 @@ describe("isThirdPartyNoise", () => {
       },
     };
 
-    expect(isThirdPartyNoise(event)).toBe(true);
+    expect(isThirdPartyNoise(event)).toBe(false);
   });
 
   /**
@@ -196,6 +200,49 @@ describe("isThirdPartyNoise", () => {
     };
 
     expect(isThirdPartyNoise(event)).toBe(true);
+  });
+
+  it("keeps our error when the throwing frame has no filename at all", () => {
+    // Async/native boundary inside an extension-wrapped handler: the top
+    // frame is frameless, so nothing may be concluded and the event stays.
+    const event = {
+      exception: {
+        values: [
+          {
+            value: "boom",
+            stacktrace: {
+              frames: [
+                { filename: "chrome-extension://abcdef/inject.js" },
+                { function: "asyncBoundary" },
+              ],
+            },
+          },
+        ],
+      },
+    };
+
+    expect(isThirdPartyNoise(event)).toBe(false);
+  });
+
+  it("keeps our error when only a wrapped cause mentions the bridge", () => {
+    const event = {
+      exception: {
+        values: [
+          {
+            value: "undefined is not an object (evaluating 'window.webkit.messageHandlers')",
+            mechanism: { type: "chained", parent_id: 0 },
+            stacktrace: { frames: [{ filename: "https://rovno.ai/" }] },
+          },
+          {
+            value: "estimate save failed",
+            mechanism: { type: "generic" },
+            stacktrace: { frames: [{ filename: "https://rovno.ai/assets/save.js" }] },
+          },
+        ],
+      },
+    };
+
+    expect(isThirdPartyNoise(event)).toBe(false);
   });
 
   it("ignores frame filenames Sentry itself treats as unusable", () => {
