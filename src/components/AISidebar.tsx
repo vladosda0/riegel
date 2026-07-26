@@ -110,6 +110,7 @@ import {
   filterPhotoConsultProposalChangesBySeam,
   type PhotoConsultApplyAction,
 } from "@/lib/commit-proposal";
+import { proposalFailureReasonKey, resolveProposalFastFail } from "@/lib/ai-proposal-execution";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { SaveLearnTargetDialog } from "@/components/ai/SaveLearnTargetDialog";
@@ -1198,14 +1199,30 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       let attempt = 0;
       let success = false;
       let lastError = t("ai.sidebar.toast.executionFailed.title");
+      // Set by a fast-fail branch below, which has already shown a SPECIFIC toast
+      // explaining why the type cannot run. The generic !success handler must not
+      // then fire its own: use-toast keeps TOAST_LIMIT = 1, so the later dispatch
+      // replaces the earlier one and the user would only ever see "не удалось
+      // выполнить" with none of the reason. It also records how many attempts
+      // really happened, which for a fast-fail is zero, not five.
+      let unavailableReason: string | null = null;
 
       while (attempt < 5 && !success) {
-        if (workspaceMode.kind === "supabase" && queueItem.proposal.type === "generate_document") {
-          lastError = t("ai.sidebar.toast.supabaseModeUnavailable.documentDescription");
+        // Whether this item can be attempted at all. The decision is pure and
+        // lives in @/lib/ai-proposal-execution so it can be unit-tested: it used
+        // to be two inline branches in this loop, which no test touches, and both
+        // review-round defects hid in exactly that blind spot.
+        const fastFail = resolveProposalFastFail(queueItem.proposal.type, workspaceMode.kind);
+        if (fastFail) {
+          lastError = t(fastFail.descriptionKey);
           setProposalQueue((prev) => (prev
             ? {
                 ...prev,
-                retryByItemId: { ...prev.retryByItemId, [queueItem.id]: 1 },
+                // 0, not 1: nothing was attempted, matching the `attempts: 0` the
+                // event records. Note retryByItemId currently has no reader
+                // anywhere in the repo, so this particular value is inert; it is
+                // kept consistent so it does not become wrong if one is added.
+                retryByItemId: { ...prev.retryByItemId, [queueItem.id]: 0 },
                 executionErrorByItemId: {
                   ...prev.executionErrorByItemId,
                   [queueItem.id]: lastError,
@@ -1213,10 +1230,11 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
               }
             : prev));
           toast({
-            title: t("ai.sidebar.toast.supabaseModeUnavailable.title"),
+            title: t(fastFail.titleKey),
             description: lastError,
             variant: "destructive",
           });
+          unavailableReason = fastFail.reason;
           break;
         }
 
@@ -1292,16 +1310,24 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
           payload: {
             summary: queueItem.proposal.summary,
             status: "failed",
-            reason: "execution_failed",
-            attempts: 5,
+            // A fast-fail never entered the retry loop, so `attempt` is 0. This
+            // used to be the literal 5, which permanently recorded five failed
+            // retries of an operation that was never attempted once.
+            reason: unavailableReason ?? "execution_failed",
+            attempts: attempt,
             source: "ai",
           },
         });
-        toast({
-          title: t("ai.sidebar.toast.executionFailed.title"),
-          description: t("ai.sidebar.toast.executionFailed.description", { summary: queueItem.proposal.summary }),
-          variant: "destructive",
-        });
+        // Only when no fast-fail branch already explained the failure: the toast
+        // limit is 1, so dispatching here would silently replace the specific
+        // message with a generic one.
+        if (!unavailableReason) {
+          toast({
+            title: t("ai.sidebar.toast.executionFailed.title"),
+            description: t("ai.sidebar.toast.executionFailed.description", { summary: queueItem.proposal.summary }),
+            variant: "destructive",
+          });
+        }
       }
     }
 
@@ -2205,7 +2231,12 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       if (event.type === "proposal_cancelled") {
         const status = typeof payload.status === "string" ? payload.status : "cancelled";
         const summary = typeof payload.summary === "string" ? payload.summary : t("ai.sidebar.proposal.summaryFallbackShort");
-        const reason = typeof payload.reason === "string" ? payload.reason.replace(/_/g, " ") : "";
+        // payload.reason is a machine token on a PERMANENT feed entry. This used
+        // to print it with underscores swapped for spaces, which put raw English
+        // ("execution failed") into the Russian feed. Translate the tokens we know
+        // and drop anything else, so a new token cannot leak by default.
+        const reasonKey = proposalFailureReasonKey(payload.reason);
+        const reason = reasonKey ? t(reasonKey) : "";
         const title = status === "failed"
           ? t("ai.sidebar.proposal.statusTitle.failed")
           : t("ai.sidebar.proposal.statusTitle.declined");

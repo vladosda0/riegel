@@ -35,14 +35,20 @@ const LANGUAGES: { value: string; label: string; disabled?: boolean }[] = [
   { value: "en", label: "English" },
   { value: "de", label: "Deutsch", disabled: true },
   { value: "fr", label: "Français", disabled: true },
+  // Not in the profiles.locale CHECK, which admits only ru/en/de/fr, so this one
+  // would be rejected by the database if it were ever selectable.
   { value: "es", label: "Español", disabled: true },
 ];
 
 function normalizeSelectableLanguage(locale: string | undefined): "ru" | "en" {
-  const raw = locale || "en";
+  const raw = locale || "ru";
   // Only ru/en are real translation bundles; any placeholder (de/fr/es) or stale
-  // backend value falls back to English.
-  return raw === "ru" || raw === "en" ? raw : "en";
+  // backend value falls back to Russian, which is what i18n actually boots when
+  // localStorage is unset (see getStoredLanguage). It used to fall back to
+  // English, so a row carrying de/fr/es or no locale at all rendered a control
+  // reading "English" over a Russian UI, and selecting English was not a dirty
+  // change so Save never enabled (rovno #201, #186).
+  return raw === "ru" || raw === "en" ? raw : "ru";
 }
 
 export function ProfilePanel() {
@@ -132,6 +138,10 @@ export function ProfilePanel() {
   }
 
   const handleSave = async () => {
+    // Capture BEFORE the awaits: the mutation writes profiles.locale, so reading
+    // user.locale afterwards would compare the new value against itself and this
+    // would always be false.
+    const languageChanged = language !== normalizeSelectableLanguage(user.locale);
     try {
       await Promise.all([
         updateIdentity.mutateAsync({
@@ -150,7 +160,16 @@ export function ProfilePanel() {
       // Apply the chosen interface language live and persist it for the next boot.
       // Saving locale to the backend alone never reached i18n, so the UI appeared
       // not to change. Only ru/en are real bundles.
-      if (language === "ru" || language === "en") {
+      //
+      // ONLY when the user actually touched the control (rovno #201). This used to
+      // fire on every successful save, and `language` is seeded from user.locale
+      // and untouched when someone edits just their name or phone, so saving any
+      // unrelated Профиль field silently force-applied the DB locale and wiped a
+      // language chosen in Настройки > Предпочтения (which writes localStorage
+      // only). The two stores still disagree; this stops one from clobbering the
+      // other on an unrelated write. Making profiles.locale the single source of
+      // truth is the real fix and is still open on #201 / #186.
+      if (languageChanged && (language === "ru" || language === "en")) {
         setAppLanguage(language);
       }
       toast({ title: t("profile.savedToast"), description: t("profile.savedToastDescription") });

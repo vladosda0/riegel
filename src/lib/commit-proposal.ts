@@ -237,6 +237,52 @@ function buildPayloadWithSource(payload: Record<string, unknown>, source?: "ai" 
   return source ? { ...payload, source } : payload;
 }
 
+/**
+ * Whether commitProposal can actually apply this proposal type, as opposed to
+ * merely being permitted to.
+ *
+ * `update_estimate` is mapped and permission-checked but writes nothing: this
+ * module holds no estimate mutator (rovno #175). The single predicate exists so
+ * the library guard and the AISidebar fast-fail cannot drift apart. Wiring real
+ * estimate writes means changing this ONE place, and both guards follow.
+ *
+ * Written as an exhaustive switch, NOT as `type !== "update_estimate"`. The
+ * denylist form fails OPEN inside a module that is otherwise deny-by-default: add
+ * a sixth AIProposalType plus its PROPOSAL_TYPE_TO_CONTRACT_ACTION entry (which an
+ * author must add in order to permission-check it at all) and forget the mutator,
+ * and this returns true, every permission gate passes, no mutation branch matches,
+ * `count` stays 0, proposal_confirmed is emitted with change_count 0, deductCredit
+ * runs, and the user is told «Изменения применены». That is #175 reproduced
+ * exactly, and neither the type system nor the suite would notice.
+ *
+ * The `never` assignment makes the COMPILER refuse an unhandled member, so the
+ * next type has to make this decision explicitly. That protection is
+ * compile-time ONLY. At runtime `type` can still be any string (proposals are
+ * data), so the default branch returns a hard `false` rather than the `never`
+ * value: `return exhaustive` would hand back the string itself, which is truthy,
+ * and the predicate would be fail-open again for exactly the unknown input the
+ * switch was meant to catch.
+ */
+export function isProposalTypeApplicable(type: AIProposal["type"]): boolean {
+  switch (type) {
+    case "add_task":
+    case "add_procurement":
+    case "generate_document":
+    case "create_project":
+      return true;
+    case "update_estimate":
+      return false;
+    default: {
+      // Declared for the compile-time exhaustiveness check, voided so
+      // no-unused-vars stays quiet, and NOT returned: at runtime it is the raw
+      // string, which is truthy.
+      const exhaustive: never = type;
+      void exhaustive;
+      return false;
+    }
+  }
+}
+
 export function commitProposal(proposal: AIProposal, options: CommitProposalOptions = {}): CommitResult {
   // Handle create_project specially — no existing project context needed
   if (proposal.type === "create_project") {
@@ -286,6 +332,31 @@ export function commitProposal(proposal: AIProposal, options: CommitProposalOpti
     return {
       success: false,
       error: `Action "${actionMapping.action}" is not available for your role.`,
+      eventIds: [],
+      created: [],
+      updated: [],
+    };
+  }
+
+  // See isProposalTypeApplicable: update_estimate is mapped and
+  // permission-checked, but NOTHING here writes to
+  // an estimate store: this module imports no estimate mutator at all, and no
+  // event subscriber closes the gap (the only consumers of estimate_created are
+  // display-only). It used to fall through, emit estimate_created, push result
+  // rows routed at /project/<id>/estimate, report count = changes.length, deduct
+  // a credit and return success. So the user saw a success toast, paid a credit,
+  // got a permanent activity-feed entry for a change that never happened, and
+  // followed a link to an unchanged estimate.
+  //
+  // Failing honestly is the minimum until AI estimate edits are actually
+  // implemented (rovno #175). Applying them for real is the open feature: it
+  // means mutating the estimate store here the way add_task, add_procurement and
+  // generate_document mutate theirs. Note this is also the only mapped type with
+  // no unavailability handling in AISidebar, which is why it read as working.
+  if (!isProposalTypeApplicable(proposal.type)) {
+    return {
+      success: false,
+      error: "Applying AI estimate changes is not available yet.",
       eventIds: [],
       created: [],
       updated: [],
@@ -414,30 +485,9 @@ export function commitProposal(proposal: AIProposal, options: CommitProposalOpti
     }
   }
 
-  if (proposal.type === "update_estimate") {
-    const evtId = `evt-ai-${Date.now()}`;
-    addEvent({
-      id: evtId,
-      project_id: pid,
-      actor_id: eventActorId,
-      type: "estimate_created",
-      object_type: "estimate_version",
-      object_id: proposal.id,
-      timestamp: new Date().toISOString(),
-      payload: buildPayloadWithSource({ summary: proposal.summary }, options.eventSource),
-    });
-    eventIds.push(evtId);
-    for (const change of proposal.changes) {
-      (change.action === "create" ? created : updated).push({
-        type: "estimate_version",
-        id: proposal.id,
-        label: change.label,
-        route: `/project/${pid}/estimate`,
-        meta: change.after,
-      });
-    }
-    count = proposal.changes.length;
-  }
+  // The update_estimate branch that used to sit here is gone: it reported a
+  // change count and emitted estimate_created without writing anything. The type
+  // now returns unavailable above, before any event or credit. See #175.
 
   if (options.emitProposalEvent !== false) {
     const proposalEvtId = `evt-proposal-${Date.now()}`;

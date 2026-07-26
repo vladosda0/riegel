@@ -8,7 +8,7 @@ import {
 import type { AIProposal, ProposalChange } from "@/types/ai";
 import type { ProjectAuthoritySeam } from "@/lib/project-authority-seam";
 import type { FinanceVisibility, MemberRole } from "@/types/entities";
-import { __unsafeResetStoreForTests } from "@/data/store";
+import { __unsafeResetStoreForTests, getCurrentUser, getEvents } from "@/data/store";
 import { clearDemoSession, enterDemoSession, setAuthRole } from "@/lib/auth-state";
 
 // ---------------------------------------------------------------------------
@@ -162,11 +162,29 @@ describe("commitProposal — enabled actions succeed", () => {
     expect(result.success).toBe(true);
   });
 
-  it("co_owner can commit update_estimate", () => {
+  it("update_estimate reports unavailable instead of a silent no-op, even for a permitted role", () => {
+    // Regression for #175. The role IS permitted and the type IS mapped; the
+    // point is that nothing in this module can write an estimate, so claiming
+    // success charged a credit and logged an activity entry for a change that
+    // never happened. Reverse this test only together with a real estimate
+    // mutation, never to restore the success claim on its own.
+    const before = getCurrentUser();
+    const creditsBefore = before.credits_free + before.credits_paid;
+
     const result = commitProposal(makeProposal("update_estimate"), {
       authoritySeam: seamForRole("co_owner", "detail"),
     });
-    expect(result.success).toBe(true);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/not available/i);
+    expect(result.eventIds).toEqual([]);
+    expect(result.created).toEqual([]);
+    expect(result.updated).toEqual([]);
+
+    // No credit charged and no activity entry claiming an estimate changed.
+    const after = getCurrentUser();
+    expect(after.credits_free + after.credits_paid).toBe(creditsBefore);
+    expect(getEvents("project-1").some((event) => event.type === "estimate_created")).toBe(false);
   });
 
   it("contractor can commit generate_document (documents_media.upload = enabled)", () => {

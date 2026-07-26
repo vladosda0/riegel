@@ -89,6 +89,7 @@ import {
   useWorkspaceProjectState,
 } from "@/hooks/use-workspace-source";
 import { trackEvent } from "@/lib/analytics";
+import { buildCsvDocument, CSV_BOM } from "@/lib/csv";
 import { useTierQuota } from "@/hooks/useTierQuota";
 import { showTierLimitPaywallByType } from "@/lib/tier-limit-error";
 import {
@@ -118,6 +119,9 @@ import { getPlanningSource } from "@/data/planning-source";
 import { addEvent, getUserById } from "@/data/store";
 import { createWorkspaceProjectInvite, sendWorkspaceProjectInviteEmail } from "@/data/workspace-source";
 import {
+  computeEffectiveDiscountBps,
+  computeEffectiveMarkupBps,
+  computeEffectiveTaxBps,
   computeLineTotals,
   computeProjectTotals,
   computeStageTotals,
@@ -340,19 +344,37 @@ function buildHierarchyNumbers(
   return { stageNumberById, workNumberById };
 }
 
-function effectiveDiscountForDisplay(line: EstimateV2ResourceLine, _stage: EstimateV2Stage, projectDiscountBps: number): number {
-  if (line.discountBpsOverride != null && line.discountBpsOverride > 0) return line.discountBpsOverride;
-  return projectDiscountBps;
+/**
+ * Display-side wrappers over the pricing resolvers. They exist only to adapt the
+ * call shape: the screen has a bare `projectXBps` number where pricing wants the
+ * project object.
+ *
+ * They DELEGATE rather than reimplement, deliberately. Two earlier revisions of
+ * this PR wrote the resolution rule out a second time here and it drifted both
+ * times: first with no clamp at all (an out-of-band value printed raw while
+ * pricing charged the clamped figure), then with a hand-rolled
+ * `Math.max(0, Math.min(10_000, raw))` that still missed clampBps's rounding and
+ * non-finite guard, so Infinity printed 100% against a charged 0% and 1250.6
+ * printed 12.506% against a charged 12.51%.
+ *
+ * Whatever the table, the CSV and the PDF show must be the number the client is
+ * actually charged. Delegation makes that structural instead of a promise: there
+ * is one resolution rule and one clamp, and pricing.test.ts covers them.
+ *
+ * The discount resolver also has the deliberate absence of a stage tier: it used
+ * to take a stage and discard it as `_stage`, advertising a capability neither
+ * side implements (#207).
+ */
+function effectiveDiscountForDisplay(line: EstimateV2ResourceLine, projectDiscountBps: number): number {
+  return computeEffectiveDiscountBps(line, { discountBps: projectDiscountBps });
 }
 
 function effectiveMarkupForDisplay(line: EstimateV2ResourceLine, projectMarkupBps: number): number {
-  if (line.markupBps > 0) return line.markupBps;
-  return projectMarkupBps;
+  return computeEffectiveMarkupBps(line, { markupBps: projectMarkupBps });
 }
 
 function effectiveTaxForDisplay(line: EstimateV2ResourceLine, projectTaxBps: number): number {
-  if (line.taxBpsOverride != null && line.taxBpsOverride > 0) return line.taxBpsOverride;
-  return projectTaxBps;
+  return computeEffectiveTaxBps(line, { taxBps: projectTaxBps });
 }
 
 function estimateStatusLabelKey(status: EstimateExecutionStatus): string {
@@ -415,16 +437,6 @@ const dayRangeFormatter = new Intl.DateTimeFormat("ru-RU", {
 function formatDayIndex(dayIndex: number | null): string {
   if (dayIndex == null) return "—";
   return dayRangeFormatter.format(new Date(fromDayIndex(dayIndex)));
-}
-
-function buildCsv(rows: string[][]): string {
-  return rows
-    .map((row) => row.map((cell) => {
-      const normalized = cell.replace(/"/g, '""');
-      if (/[",\n]/.test(normalized)) return `"${normalized}"`;
-      return normalized;
-    }).join(","))
-    .join("\n");
 }
 
 const RESOURCE_TYPE_OPTIONS: Array<{ value: ResourceLineType; labelKey: string }> = [
@@ -1537,8 +1549,8 @@ export default function ProjectEstimate() {
               unit: line.unit,
               costUnitCents: line.costUnitCents,
               costTotalCents: lineTotals.costTotalCents,
-              markupBps: line.markupBps > 0 ? line.markupBps : estimateProject.markupBps,
-              discountBps: effectiveDiscountForDisplay(line, stage, estimateProject.discountBps),
+              markupBps: effectiveMarkupForDisplay(line, estimateProject.markupBps),
+              discountBps: effectiveDiscountForDisplay(line, estimateProject.discountBps),
               clientUnitCents: clientAmounts.clientUnitCents,
               clientTotalCents: clientAmounts.clientTotalCents,
               discountedClientTotalCents,
@@ -2255,8 +2267,11 @@ export default function ProjectEstimate() {
               line.unit,
               money(line.costUnitCents, estimateProject.currency),
               money(lineTotals.costTotalCents, estimateProject.currency),
-              fromBpsToPercent(line.markupBps),
-              fromBpsToPercent(effectiveDiscountForDisplay(line, stage, estimateProject.discountBps)),
+              // Through the helper, like the on-screen cell: the raw line.markupBps
+              // skipped both the project-inheritance rule (a line at 0 shows 0%
+              // while it is actually charged the project markup) and the clamp.
+              fromBpsToPercent(effectiveMarkupForDisplay(line, estimateProject.markupBps)),
+              fromBpsToPercent(effectiveDiscountForDisplay(line, estimateProject.discountBps)),
               clientUnitStr,
               clientTotalStr,
             ]);
@@ -2272,7 +2287,7 @@ export default function ProjectEstimate() {
             line.unit,
             money(line.costUnitCents, estimateProject.currency),
             money(lineTotals.costTotalCents, estimateProject.currency),
-            fromBpsToPercent(effectiveDiscountForDisplay(line, stage, estimateProject.discountBps)),
+            fromBpsToPercent(effectiveDiscountForDisplay(line, estimateProject.discountBps)),
             clientUnitStr,
             clientTotalStr,
           ]);
@@ -2293,8 +2308,14 @@ export default function ProjectEstimate() {
     rows.push([t("estimate.csv.taxAmount"), money(uiTaxAmountCents, estimateProject.currency)]);
     rows.push([t("estimate.csv.totalIncVat"), money(uiTotalIncVatCents, estimateProject.currency)]);
 
-    const csv = buildCsv(rows);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    // Stage/work/line titles and units are unfiltered free text, so every cell
+    // goes through the shared guard rather than a local quoting rule (#195).
+    const csv = buildCsvDocument(rows);
+    // UTF-8 BOM, which the portfolio export already emits. Without it Excel reads
+    // a double-clicked .csv as the system ANSI codepage and every Cyrillic
+    // stage/work/line title garbles, which on a Russian-UI product is most of the
+    // file. Only the more exposed of the two exporters was missing it.
+    const blob = new Blob([CSV_BOM + csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -3256,7 +3277,7 @@ export default function ProjectEstimate() {
                                               <TableCell className="w-[92px] py-1.5 pr-2 align-top">
                                                 {canEditEstimate ? (
                                                   <InlineEditableNumber
-                                                    value={effectiveDiscountForDisplay(line, stage, estimateProject.discountBps)}
+                                                    value={effectiveDiscountForDisplay(line, estimateProject.discountBps)}
                                                     onCommit={(nextValue) => updateLine(pid, line.id, { discountBpsOverride: nextValue > 0 ? nextValue : null })}
                                                     formatDisplay={(value) => `${fromBpsToPercent(value)}%`}
                                                     formatInput={(value) => fromBpsToPercent(value)}
@@ -3264,7 +3285,7 @@ export default function ProjectEstimate() {
                                                   />
                                                 ) : (
                                                   <div className="min-h-7 whitespace-nowrap px-1 py-0.5 text-right text-sm tabular-nums text-foreground">
-                                                    {`${fromBpsToPercent(effectiveDiscountForDisplay(line, stage, estimateProject.discountBps))}%`}
+                                                    {`${fromBpsToPercent(effectiveDiscountForDisplay(line, estimateProject.discountBps))}%`}
                                                   </div>
                                                 )}
                                               </TableCell>

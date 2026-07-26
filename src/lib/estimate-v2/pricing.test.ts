@@ -8,6 +8,8 @@ import type {
 } from "@/types/estimate-v2";
 import {
   computeEffectiveDiscountBps,
+  computeEffectiveMarkupBps,
+  computeEffectiveTaxBps,
   computeClientUnitCents,
   computeLineTotals,
   computeProjectTotals,
@@ -75,17 +77,73 @@ function createLine(partial: Partial<EstimateV2ResourceLine> = {}): EstimateV2Re
 describe("estimate-v2 pricing", () => {
   it("inherits project discount when line override is absent or zero (stage tier removed)", () => {
     const project = createProject({ discountBps: 300 });
-    const stage = createStage({ discountBps: 1200 });
-    expect(computeEffectiveDiscountBps(createLine({ discountBpsOverride: null }), stage, project)).toBe(300);
-    expect(computeEffectiveDiscountBps(createLine({ discountBpsOverride: 0 }), stage, project)).toBe(300);
+    expect(computeEffectiveDiscountBps(createLine({ discountBpsOverride: null }), project)).toBe(300);
+    expect(computeEffectiveDiscountBps(createLine({ discountBpsOverride: 0 }), project)).toBe(300);
   });
 
   it("prefers positive line discount override over the project discount", () => {
     const project = createProject({ discountBps: 300 });
-    const stage = createStage({ discountBps: 1200 });
     const line = createLine({ discountBpsOverride: 2500 });
 
-    expect(computeEffectiveDiscountBps(line, stage, project)).toBe(2500);
+    expect(computeEffectiveDiscountBps(line, project)).toBe(2500);
+  });
+
+  it("inherits the project markup and tax when the line value is zero or unset", () => {
+    // This is the rule the estimate CSV and the PDF payload print. Both used to
+    // emit the RAW line.markupBps, so a line at 0 showed 0% while it was in fact
+    // charged the project markup. They now go through this resolver, so the rule
+    // needs a test of its own rather than only being exercised through totals.
+    const project = createProject({ markupBps: 2500, taxBps: 2000 });
+    expect(computeEffectiveMarkupBps(createLine({ markupBps: 0 }), project)).toBe(2500);
+    expect(computeEffectiveMarkupBps(createLine({ markupBps: 1000 }), project)).toBe(1000);
+    expect(computeEffectiveTaxBps(createLine({ taxBpsOverride: null }), project)).toBe(2000);
+    expect(computeEffectiveTaxBps(createLine({ taxBpsOverride: 0 }), project)).toBe(2000);
+    expect(computeEffectiveTaxBps(createLine({ taxBpsOverride: 500 }), project)).toBe(500);
+  });
+
+  it("clamps an out-of-band persisted rate on every resolver, so display cannot diverge from what is charged", () => {
+    // The client hydration path reads these straight from the database with no
+    // clamp, so a value outside [0, 10000] is reachable and self-sustaining. What
+    // the table, the CSV and the PDF show must be what computeClientUnitCents
+    // actually applies. Fractions round; a POSITIVE non-finite maps to 0.
+    const project = createProject({ discountBps: 0, markupBps: 0, taxBps: 0 });
+    expect(computeEffectiveMarkupBps(createLine({ markupBps: 50_000 }), project)).toBe(10_000);
+    expect(computeEffectiveMarkupBps(createLine({ markupBps: Number.POSITIVE_INFINITY }), project)).toBe(0);
+    expect(computeEffectiveMarkupBps(createLine({ markupBps: 1250.6 }), project)).toBe(1251);
+    expect(computeEffectiveDiscountBps(createLine({ discountBpsOverride: 20_000 }), project)).toBe(10_000);
+    expect(computeEffectiveTaxBps(createLine({ taxBpsOverride: 20_000 }), project)).toBe(10_000);
+
+    // NaN does NOT reach the clamp: `NaN > 0` is false, so the resolver takes the
+    // project-inheritance branch. Asserting toBe(0) against a 0-markup project
+    // would pass either way and pin nothing, so pin the behaviour that is real.
+    expect(computeEffectiveMarkupBps(
+      createLine({ markupBps: Number.NaN }),
+      createProject({ markupBps: 2500 }),
+    )).toBe(2500);
+
+    // Reach the non-finite guard directly instead, through the one entry point
+    // that hands an unresolved rate straight to it.
+    expect(computeClientUnitCents(10_000, Number.NaN, 0)).toBe(10_000);
+  });
+
+  it("ignores a non-zero stage discount, which is persisted but never priced (#207)", () => {
+    // Pins the documented behaviour so a future stage-discount feature has to
+    // change this test deliberately rather than silently start applying a
+    // discount that has been sitting in the database all along.
+    const project = createProject({ discountBps: 300 });
+    const stage = createStage({ discountBps: 1200 });
+    const line = createLine({ discountBpsOverride: null });
+
+    const totals = computeLineTotals(line, stage, project, "contractor");
+    const withoutStageDiscount = computeLineTotals(
+      line,
+      createStage({ discountBps: 0 }),
+      project,
+      "contractor",
+    );
+
+    expect(totals.clientTotalCents).toBe(withoutStageDiscount.clientTotalCents);
+    expect(totals.discountCents).toBe(withoutStageDiscount.discountCents);
   });
 
   it("applies markup to labor and subcontractor lines in contractor mode", () => {
