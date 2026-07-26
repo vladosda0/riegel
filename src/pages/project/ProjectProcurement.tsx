@@ -79,7 +79,9 @@ import {
   computePurchasePriceVariance,
   computeRemainingRequestedQty,
   computeTabChipTotals,
+  isAppliedOrderStatus,
   isEstimateLinkedProcurementItem,
+  isOpenOrderStatus,
   toInventoryKey,
 } from "@/lib/procurement-fulfillment";
 import { fmtCost } from "@/lib/procurement-utils";
@@ -293,7 +295,7 @@ export default function ProjectProcurement() {
   const { items: baseItems, isLoading: isProcurementItemsLoading } = useProjectProcurementItemsState(pid);
   const orders = useOrders(pid);
   const hasPlacedSupplierOrderLines = useMemo(
-    () => orders.some((o) => o.kind === "supplier" && o.status === "placed" && o.lines.length > 0),
+    () => orders.some((o) => o.kind === "supplier" && isOpenOrderStatus(o.status) && o.lines.length > 0),
     [orders],
   );
   const locations = useLocations(pid);
@@ -790,7 +792,7 @@ export default function ProjectProcurement() {
     orders
       .filter((order) => (
         order.kind === "supplier"
-        && (order.status === "placed" || order.status === "received")
+        && isAppliedOrderStatus(order.status)
       ))
       .filter((order) => {
         if (!search.trim()) return true;
@@ -2221,7 +2223,10 @@ export default function ProjectProcurement() {
                 const deliveryLabel = isReceived
                   ? formatDate(transferReceivedAt, dash)
                   : formatDate(order.deliveryDeadline, dash);
-                const canReceive = isIncoming && order.status === "placed" && canManageProcurement;
+                // Open set, not 'placed' alone: a transfer cannot legitimately be
+                // 'partially_received', but if one ever is, keep the button so the RPC can
+                // reject it loudly rather than stranding the transfer with no affordance.
+                const canReceive = isIncoming && isOpenOrderStatus(order.status) && canManageProcurement;
                 // Distinct title conveys direction (the source project's card is an outgoing
                 // shipment, not an incoming order) without re-introducing a separate badge.
                 const transferTitle = isIncoming

@@ -407,3 +407,63 @@ describe("delete-safeguards", () => {
     expect(assessment.startedEntries.map((entry) => entry.kind)).toEqual(["work", "task"]);
   });
 });
+
+describe("delete-safeguards with a partially received order", () => {
+  // Function-level gap, unreachable until now: `buildDeleteGuardContext` excluded
+  // `partially_received`, so once the mapper stops flattening it, a part-delivered line
+  // would score supplierOrderedQty 0 AND inStockQty 0 and neither guard would fire, letting
+  // the line be deleted and orphaning stock already on site. It was never actually
+  // triggerable before, because no order could carry the status. This pins that the widened
+  // predicate closes the gap in the same change that makes the state reachable.
+  it("still warns when the linked order is partially received", () => {
+    const materialLine = line({
+      id: "line-material",
+      title: "Concrete",
+      type: "material",
+      qtyMilli: 12_000,
+    });
+    const linkedProcurement = procurementItem({
+      id: "proc-linked",
+      name: "Concrete",
+      requiredQty: 12,
+      sourceEstimateV2LineId: materialLine.id,
+    });
+
+    const assessment = assessResourceDelete(materialLine, {
+      projectId,
+      stages: [stage()],
+      works: [work()],
+      lines: [materialLine],
+      tasks: [],
+      procurementItems: [linkedProcurement],
+      orders: [
+        order({
+          status: "partially_received",
+          lines: [{
+            id: "order-line-1",
+            orderId: "order-1",
+            procurementItemId: linkedProcurement.id,
+            qty: 10,
+            receivedQty: 4,
+            unit: "pcs",
+            plannedUnitPrice: 100,
+            actualUnitPrice: 100,
+          }],
+        }),
+      ],
+      hrItems: [],
+      hrPayments: [],
+      locations: [defaultLocation],
+    });
+
+    expect(assessment.initialStep).toBe("financial");
+    expect(assessment.financial.summary.partiallyOrderedCount).toBe(1);
+    expect(assessment.financial.summary.inStockCount).toBe(1);
+    expect(assessment.financial.procurement[0]).toMatchObject({
+      procurementItemId: "proc-linked",
+      orderedState: "partial",
+      inStock: true,
+      inStockQty: 4,
+    });
+  });
+});

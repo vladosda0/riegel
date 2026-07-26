@@ -10,7 +10,9 @@ import {
   computeInStockByLocation,
   computeOrderedOpenQty,
   computeRemainingRequestedQty,
+  isAppliedOrderStatus,
   isEstimateLinkedProcurementItem,
+  isOpenOrderStatus,
 } from "@/lib/procurement-fulfillment";
 import type { InventoryLocation, OrderWithLines, ProcurementItemV2 } from "@/types/entities";
 
@@ -797,5 +799,129 @@ describe("computeProjectLastReceivedAt", () => {
     expect(computeProjectLastReceivedAt(projectId, orders)).toBe("2026-06-02T10:00:00.000Z");
     // Orders from another project never count.
     expect(computeProjectLastReceivedAt("other-project", orders)).toBeNull();
+  });
+});
+
+describe("partially received supplier orders", () => {
+  const RECEIVED_AT = "2026-03-05T10:00:00.000Z";
+  const projectId = "partial-project";
+
+  function partialItem(overrides: Partial<ProcurementItemV2> = {}) {
+    return buildTestRequestLine(projectId, "req-partial", 10, {
+      sourceEstimateV2LineId: "line-1",
+      plannedUnitPrice: 100,
+      actualUnitPrice: 120,
+      ...overrides,
+    });
+  }
+
+  /** qty 10 ordered, 4 delivered to loc-site, so 6 are still outstanding. */
+  function partialOrder(status: OrderWithLines["status"] = "partially_received"): OrderWithLines {
+    return {
+      id: "o-partial",
+      projectId,
+      status,
+      kind: "supplier",
+      supplierName: "Supplier A",
+      deliverToLocationId: "loc-site",
+      createdAt: "2026-03-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z",
+      lines: [{
+        id: "l-partial",
+        orderId: "o-partial",
+        procurementItemId: "req-partial",
+        qty: 10,
+        receivedQty: 4,
+        unit: "pcs",
+        plannedUnitPrice: 100,
+        actualUnitPrice: 120,
+      }],
+      receiveEvents: [{
+        id: "ev-partial",
+        orderId: "o-partial",
+        orderLineId: "l-partial",
+        procurementItemId: "req-partial",
+        locationId: "loc-site",
+        deltaQty: 4,
+        eventType: "receive",
+        createdAt: RECEIVED_AT,
+      }],
+    } as unknown as OrderWithLines;
+  }
+
+  const locations = [
+    { id: "loc-site", projectId, name: "Site", isDefault: true },
+  ] as unknown as InventoryLocation[];
+
+  it("reports the unreceived remainder as still open", () => {
+    expect(computeOrderedOpenQty("req-partial", [partialOrder()])).toBe(6);
+  });
+
+  it("counts the order against the requested quantity", () => {
+    expect(computeRemainingRequestedQty(partialItem(), [partialOrder()])).toBe(0);
+    expect(computeFulfilledQty("req-partial", [partialOrder()])).toBe(10);
+  });
+
+  it("puts the delivered units on hand", () => {
+    const groups = computeInStockByLocation(projectId, [partialItem()], [partialOrder()], locations);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].items[0]).toMatchObject({ procurementItemId: "req-partial", qty: 4 });
+    expect(groups[0].totalValue).toBe(480);
+  });
+
+  it("splits the order across committed and received in the header KPIs", () => {
+    const kpis = computeProcurementHeaderKpis(projectId, [partialItem()], [partialOrder()]);
+
+    // 6 outstanding x 120 committed, 4 delivered x 120 received.
+    expect(kpis.committed).toBe(720);
+    expect(kpis.received).toBe(480);
+    expect(kpis.used).toBe(1_200);
+  });
+
+  it("includes the delivered units in purchase price variance", () => {
+    const variance = computePurchasePriceVariance(projectId, [partialItem()], [partialOrder()]);
+
+    // 4 delivered at 120 against a planned 100.
+    expect(variance.deltaTotal).toBe(80);
+    expect(variance.baseTotal).toBe(400);
+    expect(variance.pct).toBe(20);
+  });
+
+  it("surfaces the receipt timestamp", () => {
+    expect(computeLastReceivedAt("req-partial", "loc-site", [partialOrder()])).toBe(RECEIVED_AT);
+    expect(computeProjectLastReceivedAt(projectId, [partialOrder()])).toBe(RECEIVED_AT);
+  });
+
+  it("keeps the order in the ordered tab chip while quantity is outstanding", () => {
+    const totals = computeTabChipTotals(projectId, [partialItem()], [partialOrder()], []);
+
+    expect(totals.ordered.count).toBe(1);
+    expect(totals.ordered.total).toBe(720);
+  });
+
+  it("matches how a placed order of the same shape is treated", () => {
+    const partial = partialOrder("partially_received");
+    const placed = partialOrder("placed");
+
+    expect(computeOrderedOpenQty("req-partial", [partial]))
+      .toBe(computeOrderedOpenQty("req-partial", [placed]));
+    expect(computeProcurementHeaderKpis(projectId, [partialItem()], [partial]))
+      .toEqual(computeProcurementHeaderKpis(projectId, [partialItem()], [placed]));
+  });
+});
+
+describe("order status predicates", () => {
+  // Enumerated over the whole OrderStatus domain: a missing case here is exactly the
+  // defect class this module keeps reintroducing.
+  it.each([
+    ["draft", false, false],
+    ["placed", true, true],
+    ["partially_received", true, true],
+    ["received", true, false],
+    ["voided", false, false],
+  ] as const)("classifies %s", (status, applied, open) => {
+    expect(isAppliedOrderStatus(status)).toBe(applied);
+    expect(isOpenOrderStatus(status)).toBe(open);
   });
 });

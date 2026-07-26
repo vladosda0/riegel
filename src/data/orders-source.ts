@@ -15,6 +15,7 @@ import {
 import type { DbEstimateResourceType } from "@/lib/estimate-v2/resource-type-contract";
 import { projectToProcurementItemType } from "@/lib/estimate-v2/resource-type-contract";
 import type { FinanceRowLoadAccess } from "@/lib/permissions";
+import { isAppliedOrderStatus, isOpenOrderStatus } from "@/lib/procurement-fulfillment";
 import { normalizeName } from "@/lib/procurement-utils";
 import type { WorkspaceMode } from "@/data/workspace-source";
 import { resolveWorkspaceMode } from "@/data/workspace-source";
@@ -264,6 +265,15 @@ function mapOrderStatus(status: OrderRow["status"]): OrderWithLines["status"] {
   if (status === "received") {
     return "received";
   }
+  // Preserve the half-delivered state instead of flattening it into 'placed'. Everything
+  // downstream classifies order states through isAppliedOrderStatus / isOpenOrderStatus,
+  // both of which treat 'partially_received' exactly as they treat 'placed', so the money,
+  // stock and delete-guard figures are unchanged — what changes is that the UI can finally
+  // tell the user an order is «Частично получено» rather than «Заказано».
+  if (status === "partially_received") {
+    return "partially_received";
+  }
+  // Unknown / future row states keep falling back to the conservative 'placed'.
   return "placed";
 }
 
@@ -734,7 +744,7 @@ async function loadShapedOrders(
     const needsOperationalBackfill = shaped.some(
       (order) => order.kind === "supplier"
         && order.lines.length === 0
-        && (order.status === "placed" || order.status === "partially_received" || order.status === "received"),
+        && isAppliedOrderStatus(order.status),
     );
     if (needsOperationalBackfill) {
       shaped = await mergeOperationalSummaryLinesIntoOrders(supabase, projectIdForRpc, shaped);
@@ -894,7 +904,7 @@ export function createSupabaseOrdersSource(
         financeLoadAccess,
       );
 
-      return orders.filter((order) => order.kind === "supplier" && order.status === "placed");
+      return orders.filter((order) => order.kind === "supplier" && isOpenOrderStatus(order.status));
     },
 
     async getPlacedSupplierOrdersAllProjects() {
@@ -902,7 +912,7 @@ export function createSupabaseOrdersSource(
         statuses: ["placed", "partially_received"],
       });
 
-      return orders.filter((order) => order.kind === "supplier" && order.status === "placed");
+      return orders.filter((order) => order.kind === "supplier" && isOpenOrderStatus(order.status));
     },
     async createDraftSupplierOrder(input: CreateSupplierDraftOrderInput) {
       const lines = input.lines.filter((line) => line.qty > 0);

@@ -8,7 +8,7 @@ import {
   getProcurementItemById,
   updateProcurementItem,
 } from "@/data/procurement-store";
-import { toInventoryKey } from "@/lib/procurement-fulfillment";
+import { isOpenOrderStatus, toInventoryKey } from "@/lib/procurement-fulfillment";
 import { onDemoSessionDeactivated } from "@/lib/auth-state";
 import type {
   Order,
@@ -138,7 +138,13 @@ function seedOrdersFromLegacyProcurement() {
     seededOrders.push({
       id: orderId,
       projectId: item.projectId,
-      status: item.receivedQty >= qty ? "received" : "placed",
+      // qty is max(orderedQty, receivedQty, 0), so receivedQty <= qty always and a seeded
+      // part-delivery lands on partially_received — the same state a runtime partial receive
+      // produces. Without this the demo's own canonical part-delivery would read «Заказано»
+      // next to a freshly received order reading «Частично получено».
+      status: item.receivedQty >= qty
+        ? "received"
+        : (item.receivedQty > 0 ? "partially_received" : "placed"),
       kind: "supplier",
       supplierName: item.supplier ?? item.supplierPreferred ?? null,
       deliverToLocationId: deliverToLocation.id,
@@ -213,12 +219,12 @@ export function listOrdersByProject(projectId: string): OrderWithLines[] {
 
 export function listPlacedSupplierOrders(projectId: string): OrderWithLines[] {
   return listOrdersByProject(projectId)
-    .filter((order) => order.kind === "supplier" && order.status === "placed");
+    .filter((order) => order.kind === "supplier" && isOpenOrderStatus(order.status));
 }
 
 export function listPlacedSupplierOrdersAllProjects(): OrderWithLines[] {
   return orders
-    .filter((order) => order.kind === "supplier" && order.status === "placed")
+    .filter((order) => order.kind === "supplier" && isOpenOrderStatus(order.status))
     .map(withLines)
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
@@ -452,10 +458,16 @@ export function receiveOrder(
 
   const currentLines = orderLines.filter((line) => line.orderId === orderId);
   const isFullyReceived = currentLines.every((line) => line.receivedQty >= line.qty);
+  // Mirror the Supabase source, which records 'partially_received' once some but not all
+  // quantity has landed. Without this, demo/local mode shows «Заказано» for the same data
+  // the real backend shows as «Частично получено», so demo stops being a valid rehearsal
+  // surface for the half-delivered state.
+  // A 'placed' arm would be dead here: the !receivedSomething early return above means at
+  // least one line has receivedQty > 0 by this point.
 
   const nextOrder: Order = {
     ...order,
-    status: isFullyReceived ? "received" : "placed",
+    status: isFullyReceived ? "received" : "partially_received",
     deliverToLocationId: order.deliverToLocationId ?? locationId,
     updatedAt: new Date().toISOString(),
   };
@@ -557,9 +569,11 @@ export function voidOrder(
   if (order.status === "voided") return { ok: false, error: "Order is already voided" };
 
   if (order.kind === "supplier") {
-    if (order.status !== "placed") {
+    if (!isOpenOrderStatus(order.status)) {
       return { ok: false, error: "Only placed supplier orders can be voided" };
     }
+    // A partially received order falls through to the received-quantity guard below, which
+    // rejects it with the more precise message — same outcome as before this status existed.
     const lines = orderLines.filter((line) => line.orderId === orderId);
     if (lines.some((line) => line.receivedQty > 0)) {
       return { ok: false, error: "Supplier order with received quantities cannot be voided" };
