@@ -138,7 +138,13 @@ function seedOrdersFromLegacyProcurement() {
     seededOrders.push({
       id: orderId,
       projectId: item.projectId,
-      status: item.receivedQty >= qty ? "received" : "placed",
+      // qty is max(orderedQty, receivedQty, 0), so receivedQty <= qty always and a seeded
+      // part-delivery lands on partially_received — the same state a runtime partial receive
+      // produces. Without this the demo's own canonical part-delivery would read «Заказано»
+      // next to a freshly received order reading «Частично получено».
+      status: item.receivedQty >= qty
+        ? "received"
+        : (item.receivedQty > 0 ? "partially_received" : "placed"),
       kind: "supplier",
       supplierName: item.supplier ?? item.supplierPreferred ?? null,
       deliverToLocationId: deliverToLocation.id,
@@ -456,11 +462,12 @@ export function receiveOrder(
   // quantity has landed. Without this, demo/local mode shows «Заказано» for the same data
   // the real backend shows as «Частично получено», so demo stops being a valid rehearsal
   // surface for the half-delivered state.
-  const hasAnyReceipt = currentLines.some((line) => line.receivedQty > 0);
+  // A 'placed' arm would be dead here: the !receivedSomething early return above means at
+  // least one line has receivedQty > 0 by this point.
 
   const nextOrder: Order = {
     ...order,
-    status: isFullyReceived ? "received" : (hasAnyReceipt ? "partially_received" : "placed"),
+    status: isFullyReceived ? "received" : "partially_received",
     deliverToLocationId: order.deliverToLocationId ?? locationId,
     updatedAt: new Date().toISOString(),
   };

@@ -409,9 +409,12 @@ describe("delete-safeguards", () => {
 });
 
 describe("delete-safeguards with a partially received order", () => {
-  // Latent hole: while `partially_received` was excluded from the applied-order set, an
-  // estimate line with a real part-delivery scored supplierOrderedQty 0 AND inStockQty 0, so
-  // NEITHER guard fired and the line could be deleted, orphaning stock already on site.
+  // Function-level gap, unreachable until now: `buildDeleteGuardContext` excluded
+  // `partially_received`, so once the mapper stops flattening it, a part-delivered line
+  // would score supplierOrderedQty 0 AND inStockQty 0 and neither guard would fire, letting
+  // the line be deleted and orphaning stock already on site. It was never actually
+  // triggerable before, because no order could carry the status. This pins that the widened
+  // predicate closes the gap in the same change that makes the state reachable.
   it("still warns when the linked order is partially received", () => {
     const materialLine = line({
       id: "line-material",

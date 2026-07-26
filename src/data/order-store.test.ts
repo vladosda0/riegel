@@ -432,6 +432,8 @@ describe("order-store partially_received parity", () => {
     if (rest.ok) expect(rest.order.status).toBe("received");
   });
 
+  // Covers the no-quantity rejection: a receive that applies nothing is refused outright and
+  // leaves the status untouched, so the order never slips into partially_received.
   it("stays on placed when a receive lands no quantity at all", () => {
     const projectId = `parity-none-${Date.now()}`;
     const item = createRequestLine(projectId, `line-${Date.now()}`);
