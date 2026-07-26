@@ -18,8 +18,10 @@ import type {
  * status check looks reasonable in isolation.
  *
  * Domain note: this is the CLIENT model (`OrderStatus`). The Supabase row domain is a
- * different set (`cancelled` where this has `voided`) and is checked separately by
- * `orderRowStatusAllowsOperationalLineHydration` in `@/data/orders-source`.
+ * different set (`cancelled` where this has `voided`), so it cannot share this predicate and
+ * is checked separately in two places that must stay in agreement with it:
+ * `orderRowStatusAllowsOperationalLineHydration` in `@/data/orders-source` and the
+ * same-named `isAppliedOrderStatus` in `@/data/procurement-source`.
  */
 export function isAppliedOrderStatus(status: OrderStatus): boolean {
   return status === "placed" || status === "partially_received" || status === "received";

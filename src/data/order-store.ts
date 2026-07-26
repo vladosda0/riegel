@@ -452,10 +452,15 @@ export function receiveOrder(
 
   const currentLines = orderLines.filter((line) => line.orderId === orderId);
   const isFullyReceived = currentLines.every((line) => line.receivedQty >= line.qty);
+  // Mirror the Supabase source, which records 'partially_received' once some but not all
+  // quantity has landed. Without this, demo/local mode shows «Заказано» for the same data
+  // the real backend shows as «Частично получено», so demo stops being a valid rehearsal
+  // surface for the half-delivered state.
+  const hasAnyReceipt = currentLines.some((line) => line.receivedQty > 0);
 
   const nextOrder: Order = {
     ...order,
-    status: isFullyReceived ? "received" : "placed",
+    status: isFullyReceived ? "received" : (hasAnyReceipt ? "partially_received" : "placed"),
     deliverToLocationId: order.deliverToLocationId ?? locationId,
     updatedAt: new Date().toISOString(),
   };
@@ -557,9 +562,11 @@ export function voidOrder(
   if (order.status === "voided") return { ok: false, error: "Order is already voided" };
 
   if (order.kind === "supplier") {
-    if (order.status !== "placed") {
+    if (!isOpenOrderStatus(order.status)) {
       return { ok: false, error: "Only placed supplier orders can be voided" };
     }
+    // A partially received order falls through to the received-quantity guard below, which
+    // rejects it with the more precise message — same outcome as before this status existed.
     const lines = orderLines.filter((line) => line.orderId === orderId);
     if (lines.some((line) => line.receivedQty > 0)) {
       return { ok: false, error: "Supplier order with received quantities cannot be voided" };

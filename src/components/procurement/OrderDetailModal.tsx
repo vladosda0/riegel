@@ -137,10 +137,14 @@ export function OrderDetailModal({
   );
 
   // The destination ('in') side of a pending cross-project transfer is the one the receiver acts on.
+  // A transfer should never be 'partially_received' (its receive RPC only ever writes
+  // 'received'), but gate on the open set rather than 'placed' alone: if one ever appears
+  // via a raw status write, the button stays visible and the RPC rejects it loudly, instead
+  // of the order silently stranding with no affordance at all.
   const canReceiveCrossProjectTransfer = Boolean(
     isSupabaseMode
       && order?.kind === "stock"
-      && order?.status === "placed"
+      && order != null && isOpenOrderStatus(order.status)
       && order?.transferDirection === "in"
       && order?.transferGroupId,
   );
@@ -308,7 +312,7 @@ export function OrderDetailModal({
               <Button type="button" variant="destructive" disabled>{t("procurement.orderDetail.cancelDraft")}</Button>
             )}
             {/* TODO: allow editing deliverTo on placed orders before first receive */}
-            {order?.status === "placed" && !isSupabaseMode && (
+            {order != null && isOpenOrderStatus(order.status) && !isSupabaseMode && (
               <Button type="button" variant="destructive" onClick={onVoidOrder}>{t("procurement.orderDetail.voidOrder")}</Button>
             )}
             {order != null && isOpenOrderStatus(order.status) && isSupabaseMode && order.kind === "supplier" && (

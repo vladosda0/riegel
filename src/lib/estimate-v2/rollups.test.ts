@@ -403,8 +403,10 @@ describe("estimate-v2 rollups", () => {
     expect(fact.spentCents).toBe(100_000);
     expect(fact.spentByTypeCents.material).toBe(100_000);
     // The open remainder only: 6 undelivered units x planned 100. Asserting this alongside
-    // spend is the point — counting the full order as spent while still reporting the full
-    // order as owed would imply 2x the order's cost in the finance header.
+    // spend is the point — it pins that to-be-paid tracks the UNDELIVERED quantity and
+    // shrinks as receipts land, rather than staying at the full order value. (The two
+    // figures legitimately overlap on a fresh 'placed' order with nothing received; they are
+    // separate KPIs and are never summed, so the overlap is not itself an error.)
     expect(fact.toBePaidPlannedCents).toBe(60_000);
   });
 

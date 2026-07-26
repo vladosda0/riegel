@@ -2223,7 +2223,10 @@ export default function ProjectProcurement() {
                 const deliveryLabel = isReceived
                   ? formatDate(transferReceivedAt, dash)
                   : formatDate(order.deliveryDeadline, dash);
-                const canReceive = isIncoming && order.status === "placed" && canManageProcurement;
+                // Open set, not 'placed' alone: a transfer cannot legitimately be
+                // 'partially_received', but if one ever is, keep the button so the RPC can
+                // reject it loudly rather than stranding the transfer with no affordance.
+                const canReceive = isIncoming && isOpenOrderStatus(order.status) && canManageProcurement;
                 // Distinct title conveys direction (the source project's card is an outgoing
                 // shipment, not an incoming order) without re-introducing a separate badge.
                 const transferTitle = isIncoming

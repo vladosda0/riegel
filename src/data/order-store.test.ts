@@ -128,7 +128,8 @@ describe("order-store", () => {
     const firstReceive = receiveOrder(draft.id, { locationId: site.id, lines: [{ lineId: firstLineId, qty: 3 }] });
     expect(firstReceive.ok).toBe(true);
     if (firstReceive.ok) {
-      expect(firstReceive.order.status).toBe("placed");
+      // A partial receipt now records the half-delivered state, matching the Supabase source.
+      expect(firstReceive.order.status).toBe("partially_received");
       expect(firstReceive.order.lines[0]?.receivedQty).toBe(3);
     }
     expect(getStock(projectId, site.id, toInventoryKey(item))).toBe(3);
@@ -180,7 +181,8 @@ describe("order-store", () => {
     });
     expect(firstReceive.ok).toBe(true);
     if (firstReceive.ok) {
-      expect(firstReceive.order.status).toBe("placed");
+      // A partial receipt now records the half-delivered state, matching the Supabase source.
+      expect(firstReceive.order.status).toBe("partially_received");
       const nextLineA = firstReceive.order.lines.find((line) => line.id === lineAId);
       const nextLineB = firstReceive.order.lines.find((line) => line.id === lineBId);
       expect(nextLineA?.receivedQty).toBe(2);
@@ -386,5 +388,69 @@ describe("order-store", () => {
     expect(usageEvent?.deltaQty).toBe(-3);
     expect(usageEvent?.usedByName).toBe("Ivan Petrov");
     expect(usageEvent?.note).toBe("Used for stage prep");
+  });
+});
+
+describe("order-store partially_received parity", () => {
+  beforeEach(() => {
+    __unsafeResetOrdersForTests();
+    __unsafeResetInventoryForTests();
+  });
+
+  it("records the half-delivered state and keeps the order receivable to completion", () => {
+    const projectId = `parity-${Date.now()}`;
+    const item = createRequestLine(projectId, `line-${Date.now()}`);
+    const site = ensureDefaultLocation(projectId);
+
+    const draft = createDraftOrder({
+      projectId,
+      kind: "supplier",
+      supplierName: "Supplier",
+      deliverToLocationId: site.id,
+      lines: [{ procurementItemId: item.id, qty: 10, unit: "pcs", plannedUnitPrice: 100, actualUnitPrice: 100 }],
+    });
+    expect(placeOrder(draft.id).ok).toBe(true);
+
+    const lineId = getOrder(draft.id)?.lines[0]?.id;
+    expect(lineId).toBeTruthy();
+    if (!lineId) return;
+
+    // Demo/local must report the same state the Supabase source does for the same data,
+    // otherwise demo is not a valid rehearsal surface for a part-delivered order.
+    const partial = receiveOrder(draft.id, { locationId: site.id, lines: [{ lineId, qty: 4 }] });
+    expect(partial.ok).toBe(true);
+    if (partial.ok) expect(partial.order.status).toBe("partially_received");
+
+    // Voiding stays refused, and for the precise reason.
+    const voided = voidOrder(draft.id);
+    expect(voided.ok).toBe(false);
+    if (!voided.ok) expect(voided.error).toBe("Supplier order with received quantities cannot be voided");
+
+    // Not a dead end: the remaining quantity still closes the order.
+    const rest = receiveOrder(draft.id, { locationId: site.id, lines: [{ lineId, qty: 6 }] });
+    expect(rest.ok).toBe(true);
+    if (rest.ok) expect(rest.order.status).toBe("received");
+  });
+
+  it("stays on placed when a receive lands no quantity at all", () => {
+    const projectId = `parity-none-${Date.now()}`;
+    const item = createRequestLine(projectId, `line-${Date.now()}`);
+    const site = ensureDefaultLocation(projectId);
+
+    const draft = createDraftOrder({
+      projectId,
+      kind: "supplier",
+      supplierName: "Supplier",
+      deliverToLocationId: site.id,
+      lines: [{ procurementItemId: item.id, qty: 10, unit: "pcs", plannedUnitPrice: 100, actualUnitPrice: 100 }],
+    });
+    expect(placeOrder(draft.id).ok).toBe(true);
+    expect(getOrder(draft.id)?.status).toBe("placed");
+
+    const lineId = getOrder(draft.id)?.lines[0]?.id;
+    if (!lineId) return;
+    const none = receiveOrder(draft.id, { locationId: site.id, lines: [{ lineId, qty: 0 }] });
+    expect(none.ok).toBe(false);
+    expect(getOrder(draft.id)?.status).toBe("placed");
   });
 });
