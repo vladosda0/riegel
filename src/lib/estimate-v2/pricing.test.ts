@@ -105,14 +105,25 @@ describe("estimate-v2 pricing", () => {
     // The client hydration path reads these straight from the database with no
     // clamp, so a value outside [0, 10000] is reachable and self-sustaining. What
     // the table, the CSV and the PDF show must be what computeClientUnitCents
-    // actually applies. Non-finite maps to 0, fractions round.
+    // actually applies. Fractions round; a POSITIVE non-finite maps to 0.
     const project = createProject({ discountBps: 0, markupBps: 0, taxBps: 0 });
     expect(computeEffectiveMarkupBps(createLine({ markupBps: 50_000 }), project)).toBe(10_000);
     expect(computeEffectiveMarkupBps(createLine({ markupBps: Number.POSITIVE_INFINITY }), project)).toBe(0);
-    expect(computeEffectiveMarkupBps(createLine({ markupBps: Number.NaN }), project)).toBe(0);
     expect(computeEffectiveMarkupBps(createLine({ markupBps: 1250.6 }), project)).toBe(1251);
     expect(computeEffectiveDiscountBps(createLine({ discountBpsOverride: 20_000 }), project)).toBe(10_000);
     expect(computeEffectiveTaxBps(createLine({ taxBpsOverride: 20_000 }), project)).toBe(10_000);
+
+    // NaN does NOT reach the clamp: `NaN > 0` is false, so the resolver takes the
+    // project-inheritance branch. Asserting toBe(0) against a 0-markup project
+    // would pass either way and pin nothing, so pin the behaviour that is real.
+    expect(computeEffectiveMarkupBps(
+      createLine({ markupBps: Number.NaN }),
+      createProject({ markupBps: 2500 }),
+    )).toBe(2500);
+
+    // Reach the non-finite guard directly instead, through the one entry point
+    // that hands an unresolved rate straight to it.
+    expect(computeClientUnitCents(10_000, Number.NaN, 0)).toBe(10_000);
   });
 
   it("ignores a non-zero stage discount, which is persisted but never priced (#207)", () => {
