@@ -109,10 +109,31 @@ interface SentryFrameLike {
 interface SentryExceptionLike {
   value?: unknown;
   stacktrace?: { frames?: unknown };
+  mechanism?: { parent_id?: unknown };
 }
 
 function matchesNoisePattern(text: unknown): boolean {
   return typeof text === "string" && THIRD_PARTY_MESSAGE_PATTERNS.some((re) => re.test(text));
+}
+
+/** Frame filenames Sentry itself refuses to treat as a source URL. */
+const UNUSABLE_FRAME_FILENAMES = new Set(["<anonymous>", "[native code]"]);
+
+/**
+ * The URL the error was actually thrown from, mirroring Sentry's own
+ * `_getLastValidUrl`: frames are ordered oldest-first, so the throwing frame
+ * is the LAST one carrying a usable filename.
+ */
+function throwingFrameUrl(value: SentryExceptionLike): string | null {
+  const frames = value?.stacktrace?.frames;
+  if (!Array.isArray(frames)) return null;
+  for (let i = frames.length - 1; i >= 0; i--) {
+    const filename = (frames[i] as SentryFrameLike)?.filename;
+    if (typeof filename !== "string" || filename === "") continue;
+    if (UNUSABLE_FRAME_FILENAMES.has(filename)) continue;
+    return filename;
+  }
+  return null;
 }
 
 /**
@@ -132,27 +153,27 @@ export function isThirdPartyNoise(event: Record<string, unknown>): boolean {
     const values = (event.exception as { values?: unknown } | undefined)?.values;
     if (!Array.isArray(values)) return false;
 
-    return values.some((raw) => {
-      const value = raw as SentryExceptionLike;
-      if (matchesNoisePattern(value?.value)) return true;
+    // The message can legitimately be matched on any link of a `cause` chain:
+    // the pattern is specific enough that a hit anywhere means the bridge shim
+    // is involved.
+    const exceptions = values.map((raw) => raw as SentryExceptionLike);
+    if (exceptions.some((value) => matchesNoisePattern(value?.value))) return true;
 
-      const frames = value?.stacktrace?.frames;
-      if (!Array.isArray(frames)) return false;
+    // The FRAME check, by contrast, must consider exactly ONE exception.
+    // `linkedErrorsIntegration` is a default browser integration and expands
+    // `new Error(msg, { cause })` chains into several `exception.values`, so
+    // scanning them all would discard a real regression in our bundle merely
+    // because some wrapped cause came from an extension. Sentry's own
+    // `_getEventFilterUrl` picks the root exception — the one with no
+    // `mechanism.parent_id` — and ignores the rest; do the same.
+    const root =
+      exceptions.find((value) => value?.mechanism?.parent_id === undefined) ??
+      exceptions[exceptions.length - 1];
+    if (!root) return false;
 
-      // ONLY the frame the error was actually thrown from decides — Sentry
-      // orders frames oldest-first, so that is the last one carrying a
-      // filename, which is also what Sentry's own denyUrls matches. Checking
-      // "any frame" would be strictly broader and would silently discard a
-      // real regression in our bundle whose stack merely passes THROUGH an
-      // extension: password managers, translators and ad blockers routinely
-      // wrap addEventListener/fetch and leave an extension frame behind.
-      for (let i = frames.length - 1; i >= 0; i--) {
-        const filename = (frames[i] as SentryFrameLike)?.filename;
-        if (typeof filename !== "string" || filename === "") continue;
-        return THIRD_PARTY_FRAME_PREFIXES.some((prefix) => filename.startsWith(prefix));
-      }
-      return false;
-    });
+    const url = throwingFrameUrl(root);
+    if (url === null) return false;
+    return THIRD_PARTY_FRAME_PREFIXES.some((prefix) => url.startsWith(prefix));
   } catch {
     // Never let the filter itself drop or break a real report.
     return false;

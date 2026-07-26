@@ -144,6 +144,82 @@ describe("isThirdPartyNoise", () => {
     expect(isThirdPartyNoise(event)).toBe(true);
   });
 
+  /**
+   * `linkedErrorsIntegration` is a default browser integration, so
+   * `new Error(msg, { cause })` — used across estimate-v2-hero-transition —
+   * arrives as several exception.values. Only the ROOT one (no
+   * mechanism.parent_id) may decide, exactly as Sentry's own
+   * _getEventFilterUrl does; scanning them all would discard a real
+   * regression because some wrapped cause came from an extension.
+   */
+  it("keeps a chained error whose root is ours even when a cause is third-party", () => {
+    const event = {
+      exception: {
+        values: [
+          {
+            value: "network hiccup",
+            mechanism: { type: "chained", parent_id: 0 },
+            stacktrace: {
+              frames: [{ filename: "chrome-extension://abcdef/fetch-wrapper.js" }],
+            },
+          },
+          {
+            value: "hero transition failed",
+            mechanism: { type: "generic" },
+            stacktrace: {
+              frames: [{ filename: "https://rovno.ai/assets/hero.js" }],
+            },
+          },
+        ],
+      },
+    };
+
+    expect(isThirdPartyNoise(event)).toBe(false);
+  });
+
+  it("still drops a chained error whose root itself is third-party", () => {
+    const event = {
+      exception: {
+        values: [
+          {
+            value: "inner",
+            mechanism: { type: "chained", parent_id: 0 },
+            stacktrace: { frames: [{ filename: "https://rovno.ai/assets/a.js" }] },
+          },
+          {
+            value: "outer",
+            mechanism: { type: "generic" },
+            stacktrace: { frames: [{ filename: "moz-extension://abcdef/inject.js" }] },
+          },
+        ],
+      },
+    };
+
+    expect(isThirdPartyNoise(event)).toBe(true);
+  });
+
+  it("ignores frame filenames Sentry itself treats as unusable", () => {
+    const event = {
+      exception: {
+        values: [
+          {
+            value: "boom",
+            stacktrace: {
+              frames: [
+                { filename: "chrome-extension://abcdef/inject.js" },
+                { filename: "<anonymous>" },
+                { filename: "[native code]" },
+              ],
+            },
+          },
+        ],
+      },
+    };
+
+    // The last USABLE filename is the extension one, so this is still noise.
+    expect(isThirdPartyNoise(event)).toBe(true);
+  });
+
   it("keeps an error whose frames are all ours", () => {
     const event = {
       exception: {

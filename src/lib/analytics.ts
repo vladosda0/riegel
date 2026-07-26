@@ -397,6 +397,22 @@ export function initMetrika(): void {
     accurateTrackBounce: true,
     trackLinks: true,
     referrer: document.referrer,
-    url: location.href,
+    // NEVER the raw href. On /auth/callback the fragment still carries
+    // `access_token` and `refresh_token` at init time — supabase-js only
+    // clears it after an async round-trip, and never at all when the link
+    // failed — and a refresh token is a full-account credential. Fragments
+    // are never meaningful to analytics anyway, so drop them everywhere
+    // rather than special-casing the auth routes.
+    url: hrefWithoutFragment(),
   });
+}
+
+/**
+ * `location.href` with any `#fragment` removed. Everything we hand Metrika —
+ * the init url and every SPA pageview hit — must go through this: the auth
+ * callback carries `access_token` / `refresh_token` in its fragment, and a
+ * refresh token is a full-account credential.
+ */
+export function hrefWithoutFragment(): string {
+  return `${location.origin}${location.pathname}${location.search}`;
 }

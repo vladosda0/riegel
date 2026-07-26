@@ -184,6 +184,10 @@ describe("AuthCallback", () => {
     expect(getAuthRole()).toBe("guest");
     expect(trackEventOncePerUser).not.toHaveBeenCalled();
     expect(toast).toHaveBeenCalledWith(expect.objectContaining({ variant: "destructive" }));
+    // The role alone proves nothing: useWorkspaceModeState gates on the real
+    // Supabase session, so person A must actually be signed out, otherwise
+    // person B can reach /home from the landing CTA.
+    expect(signOutMock).toHaveBeenCalled();
   });
 
   it("rejects a failed link reported through the query string too", async () => {

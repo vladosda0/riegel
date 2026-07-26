@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
-import { METRIKA_COUNTER_ID } from "@/lib/analytics";
+import { METRIKA_COUNTER_ID, hrefWithoutFragment } from "@/lib/analytics";
 
 /**
  * Fires a Yandex Metrika SPA pageview hit on every react-router navigation.
@@ -26,7 +26,9 @@ export function MetrikaPageviewTracker(): null {
     if (METRIKA_COUNTER_ID === null) return;
     if (typeof window === "undefined" || typeof window.ym !== "function") return;
 
-    window.ym(METRIKA_COUNTER_ID, "hit", window.location.href, {
+    // Fragment stripped: the auth callback carries access/refresh tokens
+    // there, and a fragment is never meaningful to analytics anyway.
+    window.ym(METRIKA_COUNTER_ID, "hit", hrefWithoutFragment(), {
       referer: document.referrer,
       title: document.title,
     });

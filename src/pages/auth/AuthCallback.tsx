@@ -16,11 +16,27 @@ export default function AuthCallback() {
   useEffect(() => {
     let cancelled = false;
 
-    const rejectLink = () => {
-      // A failed link must never leave the visitor holding somebody else's
-      // session, so drop the simulated role back to guest as the old
-      // sign-out path used to. getAuthRole() defaults to "owner" when the
-      // key is absent, so not touching it is NOT equivalent.
+    const rejectLink = async () => {
+      // Actually sign out, do not just stamp the simulated role. The real
+      // gate is the Supabase session (useWorkspaceModeState reads it, not
+      // getAuthRole), so writing "guest" beside a live session protects
+      // nothing and additionally breaks the routine case: re-tapping an
+      // already-used confirmation email would leave a legitimately
+      // signed-in user with guest-gated UI and nothing to restore it, the
+      // exact anti-pattern use-exit-demo.ts warns about.
+      //
+      // Signing out here is not a regression: BEFORE this feature the route
+      // signed out on every visit, success included. Now only the failure
+      // path does, which is strictly narrower and keeps the shared-device
+      // case safe (person B's dead link cannot leave person A signed in).
+      // Mirrors the canonical sign-out contract in TopBar.
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        // Best effort: still clear local state and bounce to the form.
+      }
+      clearDemoSession();
+      clearAiSidebarSessionPreference();
       setAuthRole("guest");
       toast({
         title: t("auth.confirm.errorTitle"),
@@ -50,7 +66,7 @@ export default function AuthCallback() {
 
       if (linkFailed) {
         if (cancelled) return;
-        rejectLink();
+        await rejectLink();
         return;
       }
 
@@ -72,7 +88,7 @@ export default function AuthCallback() {
       // No session and no error params: the route was opened directly, or the
       // tokens were unusable. Either way there is nothing to confirm.
       if (!session?.user) {
-        rejectLink();
+        await rejectLink();
         return;
       }
 
@@ -97,11 +113,11 @@ export default function AuthCallback() {
       // so first_login belongs here rather than on a password form they no
       // longer have to fill in. Once-per-user guarded, same as Login.tsx.
       const completedOnboarding = await hasCompletedOnboarding(user.id);
+      if (cancelled) return;
+
       if (!completedOnboarding) {
         trackEventOncePerUser("first_login", { user_id: user.id, via: "email_confirm" });
       }
-
-      if (cancelled) return;
 
       // The "email confirmed" toast used to live on /auth/login?confirmed=1.
       // Now that we skip that stop, surface it inside the app instead.

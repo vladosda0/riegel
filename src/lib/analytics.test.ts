@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { isAnalyticsOptedOut } from "@/lib/analytics";
+import { hrefWithoutFragment, isAnalyticsOptedOut } from "@/lib/analytics";
 
 const OPT_OUT_KEY = "rovno-analytics-opt-out";
 
@@ -73,5 +73,28 @@ describe("analytics opt-out", () => {
 
     // A real visitor in private mode must still be counted.
     expect(isAnalyticsOptedOut()).toBe(false);
+  });
+});
+
+describe("hrefWithoutFragment", () => {
+  it("drops the fragment so auth tokens never reach Metrika", () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/auth/callback?next=%2Fhome#access_token=SECRET&refresh_token=ALSO_SECRET",
+    );
+
+    const url = hrefWithoutFragment();
+
+    expect(url).not.toContain("SECRET");
+    expect(url).not.toContain("#");
+    expect(url).toContain("/auth/callback");
+    expect(url).toContain("next=%2Fhome");
+  });
+
+  it("leaves a fragment-free url intact", () => {
+    window.history.replaceState({}, "", "/pricing?utm_source=telegram");
+
+    expect(hrefWithoutFragment()).toContain("/pricing?utm_source=telegram");
   });
 });
