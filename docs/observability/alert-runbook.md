@@ -113,9 +113,8 @@ broken deploy when it usually isn't.
 
 #### Two known host-side gaps behind this alert (Timeweb / Caddy, not fixable in this repo)
 
-Verified against prod on 2026-07-27. Both need a Timeweb static-hosting config
-change or a support request; the app-side recovery above is what we can do
-without them.
+Verified against prod on 2026-07-27, and still open. Both need a change on
+Timeweb's side; the app-side recovery above is what we can do without them.
 
 1. **No `Cache-Control` header at all** on `index.html` or the hashed assets
    (`curl -I https://rovno.ai/` shows only `etag` / `last-modified`). Browsers
@@ -132,6 +131,23 @@ without them.
    **JS** hash does reach it, because an HTML MIME type is a hard module-import
    failure. Wanted: serve the SPA fallback for navigation requests only, and
    return a real 404 under `/assets/*`.
+
+**The dashboard route is ruled out** (checked 2026-07-27, app `Rovno.ai`
+ID 183673). The «Настройки» tab of an App Platform frontend app exposes exactly
+five blocks — «Настройки деплоя» (framework, Node version, build command,
+dependencies, build dir, project path, env vars, branch, autodeploy),
+«Конфигурация», «Лимит входящих запросов», «Домены», «Проект». There is no
+header and no routing/rewrite setting anywhere in it, and App Platform reads no
+repo-level config file either (no `_headers` / `_redirects` / `.htaccess` /
+`Caddyfile` equivalent is documented or supported). So the only two paths are a
+**support request** to Timeweb, or **switching the app to a Dockerfile deploy**
+so we ship our own web server config — the latter changes the app type and its
+pricing model, so it is a deliberate decision, not a quick fix.
+
+Staging (`rovno-staging`, ID 189624) has both gaps identically, so any request
+should cover both apps. A drafted support ticket (in Russian, with the curl
+evidence) is the next action; replace this whole subsection with the resolved
+state once the change lands.
 
 ## Muting / vacation mode (Open Question #8)
 
