@@ -31,14 +31,25 @@ const TIMEZONES = [
 
 // The interface language lives in Настройки > Предпочтения and NOWHERE else
 // (rovno #186). This panel used to carry a second selector that wrote
-// profiles.locale while Предпочтения wrote localStorage, so the two disagreed
-// and saving any unrelated field here silently overwrote a language chosen
-// there. One control, one writer.
+// profiles.locale while Предпочтения wrote localStorage, so the two disagreed and
+// saving any unrelated field here silently overwrote a language chosen there.
 //
 // This panel no longer sends `locale` at all. That is safe because
 // updateProfileIdentity is a genuine partial update (`if (patch.locale !==
-// undefined)`), so omitting the field leaves the column untouched rather than
-// nulling it.
+// undefined)` in the Supabase source; the browser source ignores the patch
+// entirely), so omitting the field leaves the column untouched rather than
+// nulling it. workspace-source.identity.test.ts pins that invariant, because it
+// is now the only thing standing between a Профиль save and a reset locale.
+//
+// NOTE on profiles.locale itself: after this change nothing writes it and
+// nothing reads it. A pre-merge review established there is no reader anywhere,
+// not in any component, edge function or SQL function (AI answer language comes
+// from profile_settings.ai_output_language). An earlier revision of this change
+// added a write from Предпочтения justified as feeding "AI and notification
+// language"; that justification was simply false, and the write brought a race,
+// a rarely-firing trigger and Sentry noise with it, so it was dropped. Reading
+// the column at boot is option A on #186 and needs a backfill first: today's
+// rows say 'en' only by accident of the old column default.
 export function ProfilePanel() {
   const { t } = useTranslation();
   const user = useCurrentUser();
