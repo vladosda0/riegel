@@ -859,7 +859,6 @@
   "profile.phone": "Phone",
   "profile.phonePlaceholder": "+7 (___) ___-__-__",
   "profile.timezone": "Timezone",
-  "profile.language": "Language",
   "profile.timezoneOption.auto": "Browser (auto-detect)",
   "profile.bio": "About me",
   "profile.bioPlaceholder": "A short bio...",

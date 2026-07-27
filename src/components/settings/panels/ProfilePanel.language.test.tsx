@@ -1,8 +1,14 @@
-// Regression cover for rovno #201: a Профиль save used to force-apply the DB
-// locale to i18n even when the user never touched the Язык control, silently
-// wiping a language chosen in Настройки > Предпочтения (which writes
-// localStorage only). Also pins the normalizeSelectableLanguage fallback, which
-// must match what i18n actually boots (ru), not English.
+// rovno #186: the interface language has exactly ONE control, and it is not here.
+//
+// Профиль used to carry a second language selector that wrote profiles.locale
+// while Настройки > Предпочтения wrote localStorage. The two stores disagreed,
+// so saving any unrelated Профиль field silently overwrote a language chosen in
+// Предпочтения (#201 stopped the clobber; this removes the second writer).
+//
+// These tests are the tripwire against re-adding it. They assert absence, which
+// is weak by nature, so they also pin the two consequences that made the
+// duplicate control harmful: the save payload must not carry `locale`, and
+// saving must not touch i18n.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
@@ -38,60 +44,45 @@ vi.mock("@/i18n", async (importOriginal) => {
 
 import { ProfilePanel } from "@/components/settings/panels/ProfilePanel";
 
-/** The panel renders two Selects: [0] is Timezone, [1] is Язык. */
-function languageTrigger(): HTMLElement {
-  return screen.getAllByRole("combobox")[1];
-}
-
-describe("ProfilePanel interface language", () => {
+describe("ProfilePanel no longer owns the interface language", () => {
   beforeEach(() => {
     identityMutate.mockReset().mockResolvedValue(currentUser);
     contactMutate.mockReset().mockResolvedValue(contactInfo);
     setAppLanguageMock.mockReset();
-    currentUser.locale = "en";
-    // Radix Select moves focus to the active item when the listbox opens, and
-    // jsdom has no scrollIntoView. Without this the popover never settles.
-    Element.prototype.scrollIntoView = vi.fn();
   });
 
-  it("does not touch i18n when saving a profile edit that is not the language", async () => {
+  it("renders no language control", () => {
     render(<ProfilePanel />);
 
-    // Edit only the display name, exactly as a user updating their name would.
+    // Timezone is the only Select left in this panel. Asserting the count rather
+    // than just the absence of "Русский" catches a re-added control whatever it
+    // is labelled.
+    expect(screen.getAllByRole("combobox")).toHaveLength(1);
+    expect(screen.queryByText("Русский")).not.toBeInTheDocument();
+    expect(screen.queryByText("English")).not.toBeInTheDocument();
+  });
+
+  it("does not send locale when saving, so it cannot overwrite the chosen language", () => {
+    render(<ProfilePanel />);
+
     fireEvent.change(screen.getByDisplayValue("Alex Builder"), { target: { value: "Alex B" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
-    await waitFor(() => expect(identityMutate).toHaveBeenCalledTimes(1));
-    // The locale still rides along to the backend, unchanged. What must NOT
-    // happen is the live UI language being reset from it.
-    expect(identityMutate).toHaveBeenCalledWith(expect.objectContaining({ locale: "en" }));
-    expect(setAppLanguageMock).not.toHaveBeenCalled();
+    return waitFor(() => {
+      expect(identityMutate).toHaveBeenCalledTimes(1);
+      // updateProfileIdentity is a partial update, so an absent key leaves the
+      // column untouched. Present-but-stale is the failure mode being prevented.
+      expect(identityMutate.mock.calls[0][0]).not.toHaveProperty("locale");
+    });
   });
 
-  it("applies the language to i18n when the user actually changes the control", async () => {
-    currentUser.locale = "ru";
+  it("does not touch i18n on save", async () => {
     render(<ProfilePanel />);
 
-    fireEvent.keyDown(languageTrigger(), { key: "ArrowDown" });
-    fireEvent.click(await screen.findByRole("option", { name: "English" }));
+    fireEvent.change(screen.getByDisplayValue("Alex Builder"), { target: { value: "Alex C" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(identityMutate).toHaveBeenCalledTimes(1));
-    expect(identityMutate).toHaveBeenCalledWith(expect.objectContaining({ locale: "en" }));
-    expect(setAppLanguageMock).toHaveBeenCalledWith("en");
-  });
-
-  it("falls back to Русский for a locale that is not a real bundle", () => {
-    // de/fr are disabled placeholders the DB CHECK still admits (it is
-    // `locale in ('ru','en','de','fr')`, so the `es` entry in LANGUAGES is a
-    // value the database would reject outright), and an undefined locale is
-    // possible too. Either way the control must agree with
-    // the Russian UI that i18n boots, or Save can never enable: selecting the
-    // language already shown is not a dirty change.
-    currentUser.locale = "de";
-    render(<ProfilePanel />);
-
-    expect(languageTrigger()).toHaveTextContent("Русский");
-    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(setAppLanguageMock).not.toHaveBeenCalled();
   });
 });
