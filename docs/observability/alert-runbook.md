@@ -73,6 +73,66 @@ is the truth.
   3. Escalation path if the self-host stack is the problem is the
      docker-compose recovery in `rovno-db/infra` (see the PG17 override note).
 
+### A4 — "Unable to preload CSS for /assets/…" / "Failed to fetch dynamically imported module"
+
+Not a paging alert on its own (a single event lands in the weekly digest), but
+it has its own section because the message looks alarming and reads like a
+broken deploy when it usually isn't.
+
+- **Means:** a route chunk's dependency failed to load. Every route is
+  `lazy(() => import(...))`, so Vite's preload helper injects a `<link>` per
+  dependency and rejects when one fires `error`. Two very different causes:
+  1. **Transient client-side network loss** (mobile operator, DPI, in-app
+     browser such as the Telegram WebView) while the asset is served fine. This
+     is the common case, and it is a single-user, single-event issue.
+  2. **A stale `index.html`** naming asset hashes that a later deploy removed.
+     This arrives as a burst right after a deploy, across several users.
+- **Do:**
+  1. `curl -I https://rovno.ai/assets/<the-exact-file-from-the-message>`.
+     A `200` with `content-type: text/css` (or `application/javascript`) means
+     the asset is live and you are looking at cause 1 — **stand down**, nothing
+     to fix.
+  2. Cross-check the event count and unique-user count. One user, one event,
+     first-seen not adjacent to a deploy → cause 1.
+  3. If it is a burst after a deploy, confirm with `grep` that the *current*
+     prod bundle still references that hash. If it does not, it is cause 2 and
+     it self-heals: see the recovery below.
+- **Recovery in the app:** `src/lib/observability/preload-recovery.ts` listens
+  for `vite:preloadError` and reloads the page **once per browsing session**,
+  which fixes both causes. The retry is capped at one because a permanently
+  broken asset would otherwise reload forever; the second failure falls through
+  to `RootErrorBoundary` and its manual «Обновить страницу» button. A recovery
+  is reported to Sentry on the *next* load as
+  `Recovered from a Vite preload failure by reloading`, tagged
+  `source=preload-recovery` — so a rise in **that** message, not in the raw
+  preload error, is the signal that something is actually wrong. It is captured
+  at **error** level on purpose (decided 2026-07-27): a recovery is something to
+  look at when it shows up, so it belongs in the weekly digest rather than being
+  filed away as a silent counter. It still does not page — A1 needs a ~10×
+  spike, which a healthy trickle of single-user recoveries will never reach.
+
+#### Two known host-side gaps behind this alert (Timeweb / Caddy, not fixable in this repo)
+
+Verified against prod on 2026-07-27. Both need a Timeweb static-hosting config
+change or a support request; the app-side recovery above is what we can do
+without them.
+
+1. **No `Cache-Control` header at all** on `index.html` or the hashed assets
+   (`curl -I https://rovno.ai/` shows only `etag` / `last-modified`). Browsers
+   then apply heuristic freshness, roughly 10% of the document's age, so a
+   client can hold a stale `index.html` for hours and walk straight into cause 2
+   after a deploy. Wanted: `no-cache` on `index.html`,
+   `public, max-age=31536000, immutable` on `/assets/*` (safe — the filenames
+   are content-hashed).
+2. **A missing asset is answered by the SPA fallback**, not a 404:
+   `/assets/landing-DOESNOTEXIST.css` returns `200 text/html`. Consequences:
+   real 404s are invisible in server logs, and Chromium fires `load` (not
+   `error`) for a stylesheet served as HTML, so a stale **CSS** hash silently
+   renders the page **unstyled** and never reaches the recovery handler. A stale
+   **JS** hash does reach it, because an HTML MIME type is a hard module-import
+   failure. Wanted: serve the SPA fallback for navigation requests only, and
+   return a real 404 under `/assets/*`.
+
 ## Muting / vacation mode (Open Question #8)
 
 There is no in-app UI for this in v1. To go quiet:
