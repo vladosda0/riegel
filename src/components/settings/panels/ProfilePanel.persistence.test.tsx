@@ -55,8 +55,13 @@ describe("ProfilePanel persistence", () => {
 
     await waitFor(() => expect(identityMutate).toHaveBeenCalledTimes(1));
     expect(identityMutate).toHaveBeenCalledWith(
-      expect.objectContaining({ fullName: "Alex B", avatarUrl: null, locale: "en", timezone: "Europe/Moscow" }),
+      expect.objectContaining({ fullName: "Alex B", avatarUrl: null, timezone: "Europe/Moscow" }),
     );
+    // `locale` is deliberately ABSENT: the interface language moved to
+    // Настройки > Предпочтения (rovno #186) and this is a partial update, so
+    // omitting the key leaves the column alone. Sending it from here is what let
+    // an unrelated profile save clobber the user's language.
+    expect(identityMutate.mock.calls[0][0]).not.toHaveProperty("locale");
     expect(contactMutate).toHaveBeenCalledWith(
       expect.objectContaining({ roleTitle: "Lead", phone: "+7900", bio: "Bio text", signatureBlock: "Sig" }),
     );

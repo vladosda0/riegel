@@ -6,7 +6,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { toast } from "@/hooks/use-toast";
 import {
+  useUpdateWorkspaceProfileIdentity,
   useUpdateWorkspaceProfilePreferences,
+  useWorkspaceMode,
   useWorkspaceProfilePreferencesState,
 } from "@/hooks/use-workspace-source";
 import type {
@@ -54,6 +56,19 @@ export function PreferencesPanel() {
   const { t } = useTranslation();
   const { preferences, isLoading } = useWorkspaceProfilePreferencesState();
   const updatePreferences = useUpdateWorkspaceProfilePreferences();
+  const updateIdentity = useUpdateWorkspaceProfileIdentity();
+  const workspaceMode = useWorkspaceMode();
+  // Mirrors the guard inside useUpdateWorkspaceProfileIdentity: guest and
+  // pending-supabase have a backend but no session, so the mutation throws.
+  const canPersistLocale =
+    workspaceMode.kind === "demo" || workspaceMode.kind === "local" || workspaceMode.kind === "supabase";
+
+  // Seeded from localStorage, NOT from profiles.locale, and that is deliberate.
+  // i18n boots from localStorage (see getStoredLanguage), so seeding from the
+  // database would put the control back into the state rovno #186 was filed
+  // about: a selector reading "English" over a Russian UI, where choosing the
+  // language already on screen is not a change and therefore cannot be saved.
+  // This control always tells the truth about what the interface is running.
   const [interfaceLanguage, setInterfaceLanguage] = useState<AppLanguage>(() => getStoredLanguage());
   const [currency, setCurrency] = useState("RUB");
   const [units, setUnits] = useState("metric");
@@ -67,6 +82,24 @@ export function PreferencesPanel() {
     setInterfaceLanguage(lang);
     setAppLanguage(lang);
     toast({ title: t("preferences.languageChangedToast") });
+
+    // This is now the ONLY control that writes profiles.locale. Профиль used to
+    // carry a second language selector that wrote the column while this one
+    // wrote localStorage, so the two stores disagreed and any Профиль save could
+    // clobber a choice made here (rovno #201, #186).
+    //
+    // Applied locally FIRST and never awaited into the UI. localStorage is what
+    // i18n actually boots from, so the user's language is already switched and
+    // survives a reload regardless of what the backend does; the column is a
+    // server-side record of the choice, used for AI and notification language.
+    // A failed write therefore costs the user nothing, which is why it does not
+    // raise a destructive toast on a control whose visible job already succeeded.
+    if (canPersistLocale) {
+      void updateIdentity.mutateAsync({ locale: lang }).catch(() => {
+        // Intentionally swallowed: see above. The switch the user asked for has
+        // already happened and is persisted where boot reads it.
+      });
+    }
   };
 
   useEffect(() => {
