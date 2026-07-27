@@ -555,6 +555,10 @@ export const manifest = {
     {
       "path": "supabase/migrations/20260726120000_drop_debug_org_rls_state2.sql",
       "sha256": "d9e369e04cd83d523e8d00de8344d6cbf9312d9164fd3ae23d3624eb95578e80"
+    },
+    {
+      "path": "supabase/migrations/20260727120000_drop_out_of_band_debug_rpcs.sql",
+      "sha256": "0c42afcf8c6bef9041d59f15f1bde196fb33791e58aeedbcbb8e55dbef588357"
     }
   ],
   "generated_artifacts": [
@@ -720,6 +724,7 @@ export const manifest = {
     "sql/20260725120000_invite_replay_guard.sql",
     "sql/20260725190000_profiles_locale_default_ru.sql",
     "sql/20260726120000_drop_debug_org_rls_state2.sql",
+    "sql/20260727120000_drop_out_of_band_debug_rpcs.sql",
     "generated/db-public-schema.ts",
     "generated/supabase-types.ts"
   ],
