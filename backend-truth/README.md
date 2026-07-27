@@ -162,6 +162,7 @@ It is an allowlist-specific extractor for the source migrations below, not a gen
 - `supabase/migrations/20260725120000_invite_replay_guard.sql`
 - `supabase/migrations/20260725190000_profiles_locale_default_ru.sql`
 - `supabase/migrations/20260726120000_drop_debug_org_rls_state2.sql`
+- `supabase/migrations/20260727120000_drop_out_of_band_debug_rpcs.sql`
 
 ## Exclusions
 
