@@ -74,7 +74,7 @@ export function ProfilePanel() {
   const needsSignIn = workspaceMode.kind === "guest";
 
   const [name, setName] = useState(user.name);
-  const [email] = useState(user.email);
+  const [email, setEmail] = useState(user.email);
   const [roleTitle, setRoleTitle] = useState("");
   const [phone, setPhone] = useState(PHONE_PREFILL);
   const [timezone, setTimezone] = useState(user.timezone || "auto");
@@ -86,6 +86,7 @@ export function ProfilePanel() {
   // Seed identity fields once the current user resolves (async in supabase mode).
   useEffect(() => {
     setName(user.name);
+    setEmail(user.email);
     setTimezone(user.timezone || "auto");
     setAvatarUrl(user.avatar ?? "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
