@@ -2587,7 +2587,6 @@
   "ai.sidebar.toast.estimateUnavailable.description": "Applying AI changes to an estimate is not supported yet. Nothing was changed and no credit was used.",
   "ai.sidebar.toast.procurementUnavailable.title": "Cannot add to procurement",
   "ai.sidebar.toast.procurementUnavailable.description": "Adding AI procurement items is not supported yet. Nothing was added and no credit was used.",
-  "ai.sidebar.toast.someUnavailable.title": "Some actions are not supported ({{count}})",
   "ai.sidebar.toast.unknownProposalType.title": "Cannot apply this",
   "ai.sidebar.toast.unknownProposalType.description": "This action is not supported by the current version of the app. Nothing was changed and no credit was used.",
   "ai.sidebar.proposal.failureReason.executionFailed": "execution failed",

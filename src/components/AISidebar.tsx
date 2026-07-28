@@ -1161,11 +1161,15 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       //
       // The `if (!isProjectContext) return;` that used to sit here is removed
       // deliberately, and it had ONE consequence beyond the project id:
-      // addEventToState fans a Notification row out to every other member of
-      // event.project_id. Off /project/* that fan-out previously did not happen
-      // at all. It does now, which matches what a decline on the project page
-      // has always done, but it IS a new notification on a path that used to
-      // write nothing.
+      // addEventToState fans a Notification row out to every member of
+      // event.project_id except event.actor_id. Off /project/* that fan-out
+      // previously did not happen at all. It does now, which matches what a
+      // decline on the project page has always done, but it IS a new
+      // notification on a path that used to write nothing. The failure writer
+      // below gained the same fan-out in this PR, and note it passes
+      // actor_id "ai", which matches no member row, so its exclusion filter
+      // excludes nobody: that one notifies every member INCLUDING whoever ran
+      // the queue.
       project_id: proposal.project_id,
       actor_id: user.id,
       type: "proposal_cancelled",
@@ -1197,8 +1201,6 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
           executionErrorByItemId: {},
         }
       : prev));
-
-    const unavailableToasts: Array<{ title: string; description: string }> = [];
 
     for (let cursor = 0; cursor < confirmedItems.length; cursor++) {
       const queueItem = confirmedItems[cursor];
@@ -1244,14 +1246,11 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
                 },
               }
             : prev));
-          // Collected, NOT dispatched here. A queue can hold more than one type
-          // that fails closed (update_estimate and add_procurement), and the
-          // fast-fail path breaks before the loop's only `await`, so two of them
-          // dispatch synchronously with no render between. use-toast keeps
-          // TOAST_LIMIT = 1, so the first would be discarded before it was ever
-          // painted and the user would never learn about it. One toast is raised
-          // after the loop instead.
-          unavailableToasts.push({ title: t(fastFail.titleKey), description: lastError });
+          toast({
+            title: t(fastFail.titleKey),
+            description: lastError,
+            variant: "destructive",
+          });
           unavailableReason = fastFail.reason;
           break;
         }
@@ -1353,19 +1352,6 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
           });
         }
       }
-    }
-
-    // One dispatch per queue. A single unavailable item keeps its exact wording,
-    // so the common case is unchanged; only a queue with several of them is
-    // summarised, which is the case that used to lose messages outright.
-    if (unavailableToasts.length === 1) {
-      toast({ ...unavailableToasts[0], variant: "destructive" });
-    } else if (unavailableToasts.length > 1) {
-      toast({
-        title: t("ai.sidebar.toast.someUnavailable.title", { count: unavailableToasts.length }),
-        description: unavailableToasts.map((entry) => entry.description).join(" "),
-        variant: "destructive",
-      });
     }
 
     setWorkLogs(new Map());
