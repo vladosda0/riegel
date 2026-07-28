@@ -411,6 +411,9 @@ export function commitProposal(proposal: AIProposal, options: CommitProposalOpti
     for (const change of proposal.changes) {
       if (change.action === "create" && change.entity_type === "procurement_item") {
         const itemId = `proc-ai-${Date.now()}-${count}`;
+        // ai-engine strips the amount to an em dash for non-detail finance
+        // visibility, so `after` can carry no digits at all: parse defensively.
+        const parsedCost = Number.parseInt((change.after ?? "").replace(/[^\d]/g, ""), 10);
         addProcurementItem({
           id: itemId,
           project_id: pid,
@@ -419,7 +422,7 @@ export function commitProposal(proposal: AIProposal, options: CommitProposalOpti
           unit: "pcs",
           qty: 1,
           in_stock: 0,
-          cost: parseInt(change.after?.replace(/[^\d]/g, "") ?? "0"),
+          cost: Number.isFinite(parsedCost) ? parsedCost : 0,
           status: "not_purchased",
         });
         const procurementEvtId = `evt-proc-ai-${Date.now()}-${count}`;

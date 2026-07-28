@@ -8,7 +8,7 @@ import {
 import type { AIProposal, ProposalChange } from "@/types/ai";
 import type { ProjectAuthoritySeam } from "@/lib/project-authority-seam";
 import type { FinanceVisibility, MemberRole } from "@/types/entities";
-import { __unsafeResetStoreForTests, getCurrentUser, getEvents } from "@/data/store";
+import { __unsafeResetStoreForTests, getCurrentUser, getEvents, getProcurementItems } from "@/data/store";
 import { clearDemoSession, enterDemoSession, setAuthRole } from "@/lib/auth-state";
 
 // ---------------------------------------------------------------------------
@@ -185,6 +185,24 @@ describe("commitProposal — enabled actions succeed", () => {
     const after = getCurrentUser();
     expect(after.credits_free + after.credits_paid).toBe(creditsBefore);
     expect(getEvents("project-1").some((event) => event.type === "estimate_created")).toBe(false);
+  });
+
+  it("add_procurement writes a numeric cost when the money copy was sanitized away", () => {
+    // Regression for #176. ai-engine replaces the amount with an em dash for any
+    // role whose finance visibility is not "detail", so `after` carries no digits
+    // by the time it reaches commit.
+    const proposal = makeProposal("add_procurement");
+    proposal.changes = [{ entity_type: "procurement_item", action: "create", label: "Nails", after: "—" }];
+
+    const result = commitProposal(proposal, {
+      authoritySeam: seamForRole("co_owner", "summary"),
+    });
+
+    expect(result.success).toBe(true);
+    const item = getProcurementItems("project-1").find((entry) => entry.title === "Nails");
+    expect(item).toBeDefined();
+    expect(Number.isFinite(item!.cost)).toBe(true);
+    expect(item!.cost).toBe(0);
   });
 
   it("contractor can commit generate_document (documents_media.upload = enabled)", () => {
