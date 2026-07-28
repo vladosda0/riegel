@@ -14,7 +14,23 @@ const ToastViewport = React.forwardRef<
   <ToastPrimitives.Viewport
     ref={ref}
     className={cn(
-      "fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[420px]",
+      // overflow-y-auto matters on mobile: this is column-reverse anchored at
+      // top-0 with max-h-screen and previously no overflow rule, so once the
+      // stack grew taller than the viewport the OLDEST toast was laid out past
+      // the top edge and clipped, with no way to scroll to it. That became
+      // reachable when TOAST_LIMIT was raised for the AI proposal queue (see
+      // use-toast.ts): four ~3-line destructive toasts already fill most of a
+      // 375px-wide phone.
+      //
+      // overflow-x-hidden is not decoration: a non-visible value on one axis
+      // coerces the other from visible to auto, and the Toast's own exit
+      // animation translates it a full width to the right, so a bare
+      // overflow-y-auto creates a horizontal scroll range on EVERY dismissal
+      // app-wide. On platforms with classic (non-overlay) scrollbars that shows
+      // a scrollbar inside the toast viewport for the length of the animation.
+      // hidden/auto is a legal pair with no coercion, and clips nothing visible
+      // because the viewport's right edge already coincides with the window's.
+      "fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse gap-2 overflow-x-hidden overflow-y-auto p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[420px]",
       className,
     )}
     {...props}

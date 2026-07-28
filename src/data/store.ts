@@ -450,6 +450,19 @@ export function updateProject(id: string, partial: Partial<Project>) {
   });
 }
 
+/**
+ * v1 store only. NOT the procurement path any screen reads.
+ *
+ * Zero importers as of rovno #224: everything in the product goes through
+ * `@/data/procurement-store`'s V2 function OF THE SAME NAME (ProjectProcurement
+ * via useProjectProcurementItemsState, procurement-read-model via
+ * getAllProcurementItemsV2, plus estimate-v2 rollups and procurement-sync).
+ *
+ * That name collision is exactly what produced #224: the AI commit path imported
+ * this one, wrote rows nobody could ever see, and still charged a credit and
+ * logged an activity entry. Kept for symmetry with the other v1 mutators rather
+ * than deleted, but do not reach for it by autocomplete.
+ */
 export function addProcurementItem(item: ProcurementItem) {
   updateWorkspaceState((state) => {
     state.procurementItems = [...state.procurementItems, item];

@@ -40,8 +40,32 @@ describe("resolveProposalFastFail", () => {
     }
   });
 
+  it("blocks add_procurement in every workspace mode", () => {
+    // Regression for #224. The mutator exists but writes to the v1 @/data/store,
+    // which no procurement reader consumes, so the type can never surface
+    // anywhere. Mode-independent, matching the library guard.
+    for (const kind of WORKSPACE_KINDS) {
+      const result = resolveProposalFastFail("add_procurement", kind);
+      expect(result, `expected a fast-fail in ${kind}`).not.toBeNull();
+      expect(result?.reason).toBe("unsupported_proposal_type");
+    }
+  });
+
+  it("gives add_procurement its own message, not the estimate one", () => {
+    // Both are unsupported_proposal_type, so the reason alone cannot tell them
+    // apart. Telling a user their ESTIMATE cannot be updated when they asked for
+    // procurement would be the same lie the unknown-type case guards against.
+    const result = resolveProposalFastFail("add_procurement", "demo");
+    expect(result?.titleKey).toBe("ai.sidebar.toast.procurementUnavailable.title");
+    expect(result?.descriptionKey).toBe("ai.sidebar.toast.procurementUnavailable.description");
+    expect(resolveProposalFastFail("update_estimate", "demo")?.titleKey)
+      .toBe("ai.sidebar.toast.estimateUnavailable.title");
+  });
+
   it("lets every implemented type through in every mode", () => {
-    const implemented = ALL_TYPES.filter((t) => t !== "update_estimate" && t !== "generate_document");
+    const implemented = ALL_TYPES.filter(
+      (t) => t !== "update_estimate" && t !== "generate_document" && t !== "add_procurement",
+    );
     for (const type of implemented) {
       for (const kind of WORKSPACE_KINDS) {
         expect(resolveProposalFastFail(type, kind), `${type} in ${kind}`).toBeNull();

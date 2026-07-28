@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { generateProposalQueue } from "@/lib/ai-engine";
+import { PROPOSAL_TYPE_TO_CONTRACT_ACTION, generateProposalQueue } from "@/lib/ai-engine";
+import { TOAST_LIMIT } from "@/hooks/use-toast";
 import type { ProjectAuthoritySeam } from "@/lib/project-authority-seam";
 import type { FinanceVisibility, MemberRole } from "@/types/entities";
 import * as store from "@/data/store";
@@ -94,6 +95,66 @@ describe("generateProposalQueue — action filtering by role", () => {
       seamForRole("owner", "detail"),
     );
     expect(types).toHaveLength(4);
+  });
+
+  it("never produces more proposals than the toast stack can hold", () => {
+    // runQueueExecution raises one toast per confirmed item, with no render
+    // between consecutive fast-fails, and use-toast keeps only TOAST_LIMIT
+    // entries. The chosen limit is justified purely by "greater than the largest
+    // queue this generator can build", and the comment tells the next author to
+    // raise it if the generator grows — but nothing enforced that: the suite was
+    // green at a limit of 4 too, so a fifth intent branch would silently restore
+    // the pre-paint eviction the constant exists to prevent.
+    const maxQueue = generateProposalQueue(
+      "add task, update estimate cost budget, buy purchase material procurement, generate document contract report",
+      "project-1",
+      "assisted",
+      seamForRole("owner", "detail"),
+    );
+
+    // Pin that the prompt still reaches EVERY mapped type. Without this the
+    // assertion below is satisfied by any queue of 1..TOAST_LIMIT-1, so a fifth
+    // intent branch keyed on a word this prompt happens not to contain would
+    // slip through green while making a 5-item queue reachable in production.
+    // It also catches the reverse rot: a regex edit that silently stops matching
+    // a branch shrinks this set instead of passing vacuously on a shorter queue.
+    //
+    // Residual, stated rather than hidden: a fifth branch re-emitting an
+    // EXISTING type is still only caught when its keyword is in the prompt. No
+    // black-box test can bound the generator over all inputs.
+    expect(new Set(maxQueue.map((proposal) => proposal.type))).toEqual(
+      new Set(Object.keys(PROPOSAL_TYPE_TO_CONTRACT_ACTION)),
+    );
+
+    expect(
+      TOAST_LIMIT,
+      `TOAST_LIMIT ${TOAST_LIMIT} must exceed the ${maxQueue.length}-item queue runQueueExecution toasts for`,
+    ).toBeGreaterThan(maxQueue.length);
+  });
+
+  it("stamps the requested project on every proposal it returns", () => {
+    // AISidebar keys four writers on `proposal.project_id`: the failure event,
+    // the decline event and the two trackEvent goals. It does that because the
+    // route-derived id is "" outside /project/*, and getEvents matches
+    // project_id exactly, so an event filed under "" is unreachable forever.
+    //
+    // That fix rests on this invariant, and nothing else pins it: every other
+    // assertion in this file reads only `.type`. Drop the `project_id` stamp in
+    // createProjectProposals, or wire in a builder that stamps something else
+    // (generateProjectProposal uses the "__new__" sentinel), and those four
+    // writers would silently file under a wrong or absent project while the
+    // whole suite stayed green — the same invisible-write class as #224.
+    const proposals = generateProposalQueue(
+      "add task, update estimate, buy materials, generate contract",
+      "project-1",
+      "assisted",
+      seamForRole("owner", "detail"),
+    );
+
+    expect(proposals).toHaveLength(4);
+    for (const proposal of proposals) {
+      expect(proposal.project_id, proposal.type).toBe("project-1");
+    }
   });
 });
 
