@@ -2,7 +2,18 @@ import * as React from "react";
 
 import type { ToastActionElement, ToastProps } from "@/components/ui/toast";
 
-const TOAST_LIMIT = 1;
+// Raised from the stock shadcn value of 1. With 1, `[new, ...state].slice(0, 1)`
+// evicts the previous toast the instant a second one is dispatched, so two
+// messages raised in the same tick left the user seeing only the last. That is
+// reachable whenever an AI proposal queue holds more than one unavailable type
+// (rovno #224): each fast-fail dispatches its own specific toast, and every one
+// but the last was silently discarded.
+//
+// Toasts still auto-close on the Radix default duration, and TOAST_REMOVE_DELAY
+// only governs how long an already-closed entry lingers in the array, so a
+// higher limit stacks a few simultaneously visible toasts rather than letting
+// them accumulate on screen.
+const TOAST_LIMIT = 3;
 const TOAST_REMOVE_DELAY = 1000000;
 
 type ToasterToast = ToastProps & {
