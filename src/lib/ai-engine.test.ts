@@ -95,6 +95,31 @@ describe("generateProposalQueue — action filtering by role", () => {
     );
     expect(types).toHaveLength(4);
   });
+
+  it("stamps the requested project on every proposal it returns", () => {
+    // AISidebar keys four writers on `proposal.project_id`: the failure event,
+    // the decline event and the two trackEvent goals. It does that because the
+    // route-derived id is "" outside /project/*, and getEvents matches
+    // project_id exactly, so an event filed under "" is unreachable forever.
+    //
+    // That fix rests on this invariant, and nothing else pins it: every other
+    // assertion in this file reads only `.type`. Drop the `project_id` stamp in
+    // createProjectProposals, or wire in a builder that stamps something else
+    // (generateProjectProposal uses the "__new__" sentinel), and those four
+    // writers would silently file under a wrong or absent project while the
+    // whole suite stayed green — the same invisible-write class as #224.
+    const proposals = generateProposalQueue(
+      "add task, update estimate, buy materials, generate contract",
+      "project-1",
+      "assisted",
+      seamForRole("owner", "detail"),
+    );
+
+    expect(proposals).toHaveLength(4);
+    for (const proposal of proposals) {
+      expect(proposal.project_id, proposal.type).toBe("project-1");
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

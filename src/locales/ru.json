@@ -2617,6 +2617,7 @@
   "ai.sidebar.toast.estimateUnavailable.description": "Применение изменений ИИ к смете пока не поддерживается. Ничего не изменилось, кредит не списан.",
   "ai.sidebar.toast.procurementUnavailable.title": "Не получится добавить в снабжение",
   "ai.sidebar.toast.procurementUnavailable.description": "Добавление позиций снабжения через ИИ пока не поддерживается. Ничего не добавлено, кредит не списан.",
+  "ai.sidebar.toast.someUnavailable.title": "Часть действий не поддерживается ({{count}})",
   "ai.sidebar.toast.unknownProposalType.title": "Не получится применить",
   "ai.sidebar.toast.unknownProposalType.description": "Это действие не поддерживается текущей версией приложения. Ничего не изменилось, кредит не списан.",
   "ai.sidebar.proposal.failureReason.executionFailed": "не удалось выполнить",
