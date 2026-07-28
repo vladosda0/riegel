@@ -113,6 +113,33 @@ describe("useToast", () => {
     expect(open).toHaveLength(1);
   });
 
+  it("shows a DIFFERENT message that shares a title, the app's prevailing shape", () => {
+    // The convention here is a constant title with the real message in the
+    // description: AuthResetPassword raises three validation errors under one
+    // "Ошибка проверки" title. Keying dedup on the title alone dropped the
+    // second one entirely, so a user who fixed the first problem and resubmitted
+    // within the auto-close window got NO feedback and a form that silently
+    // refused to submit. That was worse than the pre-dedup behaviour, where the
+    // newer toast at least replaced the older one.
+    const { result } = renderHook(() => useToast());
+
+    act(() => {
+      result.current.toast({
+        title: "Ошибка проверки",
+        description: "Пароль должен содержать минимум 6 символов",
+        variant: "destructive",
+      });
+      result.current.toast({
+        title: "Ошибка проверки",
+        description: "Пароли не совпадают",
+        variant: "destructive",
+      });
+    });
+
+    const descriptions = result.current.toasts.map((entry) => entry.description);
+    expect(descriptions).toContain("Пароли не совпадают");
+  });
+
   it("never suppresses a toast carrying an action", () => {
     // Those are interactive (the Undo affordance), and the caller holds the
     // returned dismiss handle. Hiding one would hide a control.

@@ -1859,16 +1859,20 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       ));
       const nextIndex = prev.activeIndex < nextItems.length - 1 ? prev.activeIndex + 1 : prev.activeIndex;
       const nextQueue = { ...prev, items: nextItems, activeIndex: nextIndex };
+      // The proposal's own project, for the same reason the two event writers
+      // use it: the route-derived `projectId` is "" on /home, where this queue
+      // is fully usable. Leaving it here would file every /home decision under
+      // an empty project while the activity feed recorded the real one.
       if (decision === "confirmed") {
         trackEvent("ai_proposal_applied", {
-          project_id: projectId,
+          project_id: current.proposal.project_id,
           surface: "ai",
           proposal_id: current.proposal.id,
           proposal_type: current.proposal.type,
         });
       } else if (decision === "declined") {
         trackEvent("ai_proposal_rejected", {
-          project_id: projectId,
+          project_id: current.proposal.project_id,
           surface: "ai",
           proposal_id: current.proposal.id,
         });

@@ -403,9 +403,15 @@ export function commitProposal(proposal: AIProposal, options: CommitProposalOpti
       default:
         // Deliberately NOT the same wording as the unmapped-type guard above,
         // so a test or a log line can tell which guard produced the result.
-        // Unreachable today: the four own keys of
-        // PROPOSAL_TYPE_TO_CONTRACT_ACTION are exactly the four types named
-        // here plus create_project, which returns before this point.
+        //
+        // Unreachable today: reaching this arm needs a type that hits
+        // PROPOSAL_TYPE_TO_CONTRACT_ACTION, is not create_project (dispatched
+        // before the guard), and is neither add_procurement nor update_estimate.
+        // No such value exists among that map's own keys, which are exactly
+        // add_task, update_estimate, add_procurement and generate_document.
+        // Note the lookup is a prototype-chain read, so a key like "constructor"
+        // does pass the mapping guard above; it cannot pass the action-state
+        // check, whose domain resolves to hidden for any non-ProjectDomain.
         unavailableError = `AI proposal type "${proposal.type}" is not implemented.`;
     }
     return {

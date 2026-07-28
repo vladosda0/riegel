@@ -90,6 +90,15 @@ export const reducer = (state: State, action: Action): State => {
       // protection regardless of the call site, including ones not written yet.
       //
       // Deliberately narrow, so it suppresses noise and nothing else:
+      // - the key includes `description`, NOT just the title. The prevailing
+      //   convention here is a constant title with the actual message in the
+      //   description (AuthResetPassword raises three different validation
+      //   errors under one "Ошибка проверки" title; OrderModal names a
+      //   different short item each time). Keying on the title alone would drop
+      //   the second, DIFFERENT message and leave the user with no feedback at
+      //   all, which is worse than the pre-dedup behaviour where the newer toast
+      //   at least replaced the older one. The motivating noisy loops are
+      //   unaffected because their repeats are identical in both fields.
       // - only against toasts still `open`. Once one has closed, an identical
       //   message is a NEW event and must be shown, or a repeated user action
       //   would give no feedback.
@@ -97,15 +106,16 @@ export const reducer = (state: State, action: Action): State => {
       //   (the Undo affordance in use-apply-template-stages and
       //   use-add-library-work) and suppressing one would hide a control whose
       //   `dismiss` handle the caller is holding.
-      // - `title` is a ReactNode, so `===` only matches primitives. An element
-      //   title never dedupes, which fails toward showing too much rather than
-      //   too little.
+      // - `title` and `description` are ReactNodes, so `===` only matches
+      //   primitives. An element never dedupes, which fails toward showing too
+      //   much rather than too little.
       const duplicatesOpenToast = state.toasts.some(
         (existing) =>
           existing.open &&
           !existing.action &&
           !action.toast.action &&
           existing.title === action.toast.title &&
+          existing.description === action.toast.description &&
           existing.variant === action.toast.variant,
       );
       if (duplicatesOpenToast) return state;
@@ -195,6 +205,13 @@ function toast({ ...props }: Toast) {
     },
   });
 
+  // CAVEAT: when the reducer suppresses this toast as a duplicate of one still
+  // on screen, these handles refer to a toast that was never added. `update`
+  // no-ops and `dismiss` cannot close the visible duplicate. That is safe only
+  // because dedup skips anything carrying an `action`, which covers every
+  // current caller that keeps these handles. A future caller that holds
+  // `dismiss` for a toast WITHOUT an action must not assume it can close what
+  // the user is looking at.
   return {
     id: id,
     dismiss,

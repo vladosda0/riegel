@@ -178,11 +178,12 @@ describe("commitProposal — enabled actions succeed", () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/not available/i);
-    // Pin WHICH arm answered. /not available/i alone matches the estimate
+    // Pin the EXACT string. /not available/i alone matches the estimate
     // message too, so swapping the two switch arms — precisely the lie the
-    // third arm exists to prevent — would otherwise ship green.
-    expect(result.error).toMatch(/procurement/i);
+    // third arm exists to prevent — would otherwise ship green. A loose
+    // /procurement/i is also satisfied by the role-guard message for a hidden
+    // action, so it cannot tell the applicability guard from the role guard.
+    expect(result.error).toBe("Adding AI procurement items is not available yet.");
     expect(result.eventIds).toEqual([]);
     expect(result.created).toEqual([]);
     expect(result.updated).toEqual([]);
@@ -207,9 +208,10 @@ describe("commitProposal — enabled actions succeed", () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/not available/i);
-    // Same reason as the procurement case above: pin which arm answered.
-    expect(result.error).toMatch(/estimate/i);
+    // Same reason as the procurement case above, and it matters more here:
+    // update_estimate maps to the action edit_estimate_rows, so the role-guard
+    // message also contains both "not available" and "estimate".
+    expect(result.error).toBe("Applying AI estimate changes is not available yet.");
     expect(result.eventIds).toEqual([]);
     expect(result.created).toEqual([]);
     expect(result.updated).toEqual([]);
