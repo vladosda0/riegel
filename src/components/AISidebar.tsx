@@ -1206,12 +1206,10 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       let lastError = t("ai.sidebar.toast.executionFailed.title");
       // Set by a fast-fail branch below, which has already shown a SPECIFIC toast
       // explaining why the type cannot run. The generic !success handler must not
-      // then fire its own: it would add a contentless "не удалось выполнить" on
-      // top of the message that actually states the reason. (Before TOAST_LIMIT
-      // was raised to 3 it was worse than redundant — the generic dispatch
-      // REPLACED the specific one, so the reason was lost outright.) It also
-      // records how many attempts really happened, which for a fast-fail is
-      // zero, not five.
+      // then fire its own: use-toast keeps TOAST_LIMIT = 1, so the later dispatch
+      // replaces the earlier one and the user would only ever see "не удалось
+      // выполнить" with none of the reason. It also records how many attempts
+      // really happened, which for a fast-fail is zero, not five.
       let unavailableReason: string | null = null;
 
       while (attempt < 5 && !success) {
@@ -1331,10 +1329,9 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
             source: "ai",
           },
         });
-        // Only when no fast-fail branch already explained the failure: the
-        // generic message would stack on top of the specific one and add
-        // nothing. (Before TOAST_LIMIT was raised it was worse than redundant,
-        // it replaced the specific message outright.)
+        // Only when no fast-fail branch already explained the failure: the toast
+        // limit is 1, so dispatching here would silently replace the specific
+        // message with a generic one.
         if (!unavailableReason) {
           toast({
             title: t("ai.sidebar.toast.executionFailed.title"),
@@ -1862,7 +1859,14 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       // The proposal's own project, for the same reason the two event writers
       // use it: the route-derived `projectId` is "" on /home, where this queue
       // is fully usable. Leaving it here would file every /home decision under
-      // an empty project while the activity feed recorded the real one.
+      // an empty project while the activity feed recorded the real one. It also
+      // makes these agree with ai_prompt_submitted, which already reports
+      // targetProjectId.
+      //
+      // NOTE FOR ANALYTICS: this CHANGES the meaning of the project_id dimension
+      // on these two goals as of this release. Proposals raised from /home used
+      // to report "" and now report the real id, so a report or funnel grouped
+      // on it shows a step at the deploy boundary. On /project/* nothing changes.
       if (decision === "confirmed") {
         trackEvent("ai_proposal_applied", {
           project_id: current.proposal.project_id,
