@@ -1150,10 +1150,15 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
   }
 
   function emitProposalDeclinedEvent(proposal: AIProposal, payload: Record<string, unknown> = {}) {
-    if (!isProjectContext) return;
     addEvent({
       id: `evt-proposal-cancelled-${Date.now()}`,
-      project_id: projectId,
+      // The proposal's OWN project, matching the failure event below. These two
+      // emit the same proposal_cancelled type from the same queue UI, and the
+      // queue card renders on /home as well, where the route-derived `projectId`
+      // is "" and getEvents (an exact project_id match) drops the row. Keeping
+      // one route-scoped and one proposal-scoped would mean a declined item
+      // vanished while a failed one was recorded, from the same screen.
+      project_id: proposal.project_id,
       actor_id: user.id,
       type: "proposal_cancelled",
       object_type: "proposal",
@@ -1201,10 +1206,12 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       let lastError = t("ai.sidebar.toast.executionFailed.title");
       // Set by a fast-fail branch below, which has already shown a SPECIFIC toast
       // explaining why the type cannot run. The generic !success handler must not
-      // then fire its own: use-toast keeps TOAST_LIMIT = 1, so the later dispatch
-      // replaces the earlier one and the user would only ever see "не удалось
-      // выполнить" with none of the reason. It also records how many attempts
-      // really happened, which for a fast-fail is zero, not five.
+      // then fire its own: it would add a contentless "не удалось выполнить" on
+      // top of the message that actually states the reason. (Before TOAST_LIMIT
+      // was raised to 3 it was worse than redundant — the generic dispatch
+      // REPLACED the specific one, so the reason was lost outright.) It also
+      // records how many attempts really happened, which for a fast-fail is
+      // zero, not five.
       let unavailableReason: string | null = null;
 
       while (attempt < 5 && !success) {
@@ -1301,7 +1308,13 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       if (!success) {
         addEvent({
           id: `evt-proposal-failed-${Date.now()}-${cursor}`,
-          project_id: projectId,
+          // The proposal's OWN project, not the route's. `projectId` is derived
+          // from location.pathname and is "" everywhere outside /project/*, so on
+          // /home this wrote an event that getEvents (which filters project_id
+          // exactly) could never return: a permanent record that does not exist.
+          // Proposals are only ever generated with a truthy targetProjectId, so
+          // this field is always populated for any item that can reach here.
+          project_id: queueItem.proposal.project_id,
           actor_id: "ai",
           type: "proposal_cancelled",
           object_type: "proposal",
@@ -1318,9 +1331,10 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
             source: "ai",
           },
         });
-        // Only when no fast-fail branch already explained the failure: the toast
-        // limit is 1, so dispatching here would silently replace the specific
-        // message with a generic one.
+        // Only when no fast-fail branch already explained the failure: the
+        // generic message would stack on top of the specific one and add
+        // nothing. (Before TOAST_LIMIT was raised it was worse than redundant,
+        // it replaced the specific message outright.)
         if (!unavailableReason) {
           toast({
             title: t("ai.sidebar.toast.executionFailed.title"),
@@ -1334,7 +1348,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
     setWorkLogs(new Map());
     setProposalQueue(null);
     executingQueueRef.current = false;
-  }, [projectId, workspaceMode.kind, seamForProjectCommit, t, WORK_STEPS_COMMIT]);
+  }, [workspaceMode.kind, seamForProjectCommit, t, WORK_STEPS_COMMIT]);
 
   const beginQueueExecution = useCallback((queueSnapshot: ProposalQueueState) => {
     if (executingQueueRef.current) return;
@@ -1845,16 +1859,20 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       ));
       const nextIndex = prev.activeIndex < nextItems.length - 1 ? prev.activeIndex + 1 : prev.activeIndex;
       const nextQueue = { ...prev, items: nextItems, activeIndex: nextIndex };
+      // The proposal's own project, for the same reason the two event writers
+      // use it: the route-derived `projectId` is "" on /home, where this queue
+      // is fully usable. Leaving it here would file every /home decision under
+      // an empty project while the activity feed recorded the real one.
       if (decision === "confirmed") {
         trackEvent("ai_proposal_applied", {
-          project_id: projectId,
+          project_id: current.proposal.project_id,
           surface: "ai",
           proposal_id: current.proposal.id,
           proposal_type: current.proposal.type,
         });
       } else if (decision === "declined") {
         trackEvent("ai_proposal_rejected", {
-          project_id: projectId,
+          project_id: current.proposal.project_id,
           surface: "ai",
           proposal_id: current.proposal.id,
         });

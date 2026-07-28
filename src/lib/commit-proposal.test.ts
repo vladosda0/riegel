@@ -155,11 +155,43 @@ describe("commitProposal — enabled actions succeed", () => {
     expect(result.created.length).toBeGreaterThan(0);
   });
 
-  it("owner can commit add_procurement", () => {
+  it("add_procurement reports unavailable instead of writing to a store nobody reads", () => {
+    // Regression for #224, and the same shape as the #175 case below. The role
+    // IS permitted and the type IS mapped, but the only mutator this module
+    // holds for procurement is addProcurementItem from @/data/store — the v1
+    // store, which no procurement reader consumes. The product reads V2
+    // (@/data/procurement-store): ProjectProcurement goes through
+    // useProjectProcurementItemsState, and procurement-read-model through
+    // getAllProcurementItemsV2. The only v1 reader, useProcurement in
+    // use-mock-data, has zero call sites.
+    //
+    // So claiming success charged a credit and logged a procurement_created
+    // activity entry for an item that appears nowhere.
+    //
+    // Reverse this test only together with a real V2 write, never to restore
+    // the success claim on its own.
+    const before = getCurrentUser();
+    const creditsBefore = before.credits_free + before.credits_paid;
+
     const result = commitProposal(makeProposal("add_procurement"), {
       authoritySeam: seamForRole("owner", "detail"),
     });
-    expect(result.success).toBe(true);
+
+    expect(result.success).toBe(false);
+    // Pin the EXACT string. /not available/i alone matches the estimate
+    // message too, so swapping the two switch arms — precisely the lie the
+    // third arm exists to prevent — would otherwise ship green. A loose
+    // /procurement/i is also satisfied by the role-guard message for a hidden
+    // action, so it cannot tell the applicability guard from the role guard.
+    expect(result.error).toBe("Adding AI procurement items is not available yet.");
+    expect(result.eventIds).toEqual([]);
+    expect(result.created).toEqual([]);
+    expect(result.updated).toEqual([]);
+
+    // No credit charged and no activity entry claiming an item was created.
+    const after = getCurrentUser();
+    expect(after.credits_free + after.credits_paid).toBe(creditsBefore);
+    expect(getEvents("project-1").some((event) => event.type === "procurement_created")).toBe(false);
   });
 
   it("update_estimate reports unavailable instead of a silent no-op, even for a permitted role", () => {
@@ -176,7 +208,10 @@ describe("commitProposal — enabled actions succeed", () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/not available/i);
+    // Same reason as the procurement case above, and it matters more here:
+    // update_estimate maps to the action edit_estimate_rows, so the role-guard
+    // message also contains both "not available" and "estimate".
+    expect(result.error).toBe("Applying AI estimate changes is not available yet.");
     expect(result.eventIds).toEqual([]);
     expect(result.created).toEqual([]);
     expect(result.updated).toEqual([]);
