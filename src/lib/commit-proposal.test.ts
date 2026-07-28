@@ -155,11 +155,39 @@ describe("commitProposal — enabled actions succeed", () => {
     expect(result.created.length).toBeGreaterThan(0);
   });
 
-  it("owner can commit add_procurement", () => {
+  it("add_procurement reports unavailable instead of writing to a store nobody reads", () => {
+    // Regression for #224, and the same shape as the #175 case below. The role
+    // IS permitted and the type IS mapped, but the only mutator this module
+    // holds for procurement is addProcurementItem from @/data/store — the v1
+    // store, which no procurement reader consumes. The product reads V2
+    // (@/data/procurement-store): ProjectProcurement goes through
+    // useProjectProcurementItemsState, and procurement-read-model through
+    // getAllProcurementItemsV2. The only v1 reader, useProcurement in
+    // use-mock-data, has zero call sites.
+    //
+    // So claiming success charged a credit and logged a procurement_created
+    // activity entry, and pushed a result row routed at
+    // /project/<id>/procurement, for an item that appears nowhere.
+    //
+    // Reverse this test only together with a real V2 write, never to restore
+    // the success claim on its own.
+    const before = getCurrentUser();
+    const creditsBefore = before.credits_free + before.credits_paid;
+
     const result = commitProposal(makeProposal("add_procurement"), {
       authoritySeam: seamForRole("owner", "detail"),
     });
-    expect(result.success).toBe(true);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/not available/i);
+    expect(result.eventIds).toEqual([]);
+    expect(result.created).toEqual([]);
+    expect(result.updated).toEqual([]);
+
+    // No credit charged and no activity entry claiming an item was created.
+    const after = getCurrentUser();
+    expect(after.credits_free + after.credits_paid).toBe(creditsBefore);
+    expect(getEvents("project-1").some((event) => event.type === "procurement_created")).toBe(false);
   });
 
   it("update_estimate reports unavailable instead of a silent no-op, even for a permitted role", () => {

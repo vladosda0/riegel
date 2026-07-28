@@ -11,7 +11,7 @@ import {
 import type { AIAccess, MemberRole } from "@/types/entities";
 import {
   getCurrentUser, getMembers, getProject, getStages, getTask,
-  addTask, addEvent, addProcurementItem, addDocument, addComment,
+  addTask, addEvent, addDocument, addComment,
   deductCredit, updateTask,
   addProject, addMember, addStage,
 } from "@/data/store";
@@ -241,10 +241,27 @@ function buildPayloadWithSource(payload: Record<string, unknown>, source?: "ai" 
  * Whether commitProposal can actually apply this proposal type, as opposed to
  * merely being permitted to.
  *
- * `update_estimate` is mapped and permission-checked but writes nothing: this
- * module holds no estimate mutator (rovno #175). The single predicate exists so
- * the library guard and the AISidebar fast-fail cannot drift apart. Wiring real
- * estimate writes means changing this ONE place, and both guards follow.
+ * Two types are mapped and permission-checked but cannot actually apply:
+ *
+ * - `update_estimate` writes nothing: this module holds no estimate mutator
+ *   (rovno #175).
+ * - `add_procurement` writes to the WRONG store (rovno #224). It calls
+ *   addProcurementItem from `@/data/store`, the v1 store, which no procurement
+ *   reader consumes. The product reads V2 (`@/data/procurement-store`):
+ *   ProjectProcurement via useProjectProcurementItemsState, procurement-read-model
+ *   via getAllProcurementItemsV2, plus estimate-v2 rollups and procurement-sync.
+ *   The only v1 reader is useProcurement in use-mock-data, which has zero call
+ *   sites. A write that lands nowhere is indistinguishable from no write at all,
+ *   so it belongs on this side of the predicate.
+ *
+ * Note the contrast with the siblings, which is why only these two are listed:
+ * add_task and generate_document write to `@/data/store` AND are read back from
+ * it in demo/local mode (use-planning-source and the documents state both import
+ * it), so they genuinely surface.
+ *
+ * The single predicate exists so the library guard and the AISidebar fast-fail
+ * cannot drift apart. Wiring a real write for either type means changing this ONE
+ * place, and both guards follow.
  *
  * Written as an exhaustive switch, NOT as `type !== "update_estimate"`. The
  * denylist form fails OPEN inside a module that is otherwise deny-by-default: add
@@ -266,11 +283,11 @@ function buildPayloadWithSource(payload: Record<string, unknown>, source?: "ai" 
 export function isProposalTypeApplicable(type: AIProposal["type"]): boolean {
   switch (type) {
     case "add_task":
-    case "add_procurement":
     case "generate_document":
     case "create_project":
       return true;
     case "update_estimate":
+    case "add_procurement":
       return false;
     default: {
       // Declared for the compile-time exhaustiveness check, voided so
@@ -338,25 +355,35 @@ export function commitProposal(proposal: AIProposal, options: CommitProposalOpti
     };
   }
 
-  // See isProposalTypeApplicable: update_estimate is mapped and
-  // permission-checked, but NOTHING here writes to
-  // an estimate store: this module imports no estimate mutator at all, and no
-  // event subscriber closes the gap (the only consumers of estimate_created are
-  // display-only). It used to fall through, emit estimate_created, push result
-  // rows routed at /project/<id>/estimate, report count = changes.length, deduct
-  // a credit and return success. So the user saw a success toast, paid a credit,
-  // got a permanent activity-feed entry for a change that never happened, and
-  // followed a link to an unchanged estimate.
+  // See isProposalTypeApplicable. Both types below are mapped and
+  // permission-checked, and both used to fall through, emit an event, push
+  // result rows carrying a route, report count = changes.length, deduct a credit
+  // and return success. So the user saw a success toast, paid a credit, got a
+  // permanent activity-feed entry for a change that never happened, and followed
+  // a link to a screen where nothing had changed.
   //
-  // Failing honestly is the minimum until AI estimate edits are actually
-  // implemented (rovno #175). Applying them for real is the open feature: it
-  // means mutating the estimate store here the way add_task, add_procurement and
-  // generate_document mutate theirs. Note this is also the only mapped type with
-  // no unavailability handling in AISidebar, which is why it read as working.
+  // update_estimate (rovno #175): this module imports no estimate mutator at
+  // all, and no event subscriber closes the gap (the only consumers of
+  // estimate_created are display-only).
+  //
+  // add_procurement (rovno #224): the mutator exists but writes to the v1
+  // `@/data/store`, which no procurement reader consumes. Landing a row where
+  // nothing reads it is the same user-visible outcome as not writing at all.
+  //
+  // Failing honestly is the minimum until each is actually implemented. Doing
+  // either for real is the open feature: for the estimate it means mutating an
+  // estimate store here; for procurement it means writing through
+  // `@/data/procurement-store` and mapping onto ProcurementItemV2, which also
+  // forces the "what amount does a user who may not see money store" question
+  // (rovno #176) to be answered against plannedUnitPrice, a field that IS
+  // rendered.
   if (!isProposalTypeApplicable(proposal.type)) {
     return {
       success: false,
-      error: "Applying AI estimate changes is not available yet.",
+      error:
+        proposal.type === "add_procurement"
+          ? "Adding AI procurement items is not available yet."
+          : "Applying AI estimate changes is not available yet.",
       eventIds: [],
       created: [],
       updated: [],
@@ -407,43 +434,13 @@ export function commitProposal(proposal: AIProposal, options: CommitProposalOpti
     }
   }
 
-  if (proposal.type === "add_procurement") {
-    for (const change of proposal.changes) {
-      if (change.action === "create" && change.entity_type === "procurement_item") {
-        const itemId = `proc-ai-${Date.now()}-${count}`;
-        addProcurementItem({
-          id: itemId,
-          project_id: pid,
-          stage_id: currentStage?.id,
-          title: change.label,
-          unit: "pcs",
-          qty: 1,
-          in_stock: 0,
-          cost: parseInt(change.after?.replace(/[^\d]/g, "") ?? "0"),
-          status: "not_purchased",
-        });
-        const procurementEvtId = `evt-proc-ai-${Date.now()}-${count}`;
-        addEvent({
-          id: procurementEvtId,
-          project_id: pid,
-          actor_id: eventActorId,
-          type: "procurement_created",
-          object_type: "procurement_item",
-          object_id: itemId,
-          timestamp: new Date().toISOString(),
-          payload: buildPayloadWithSource({ title: change.label }, options.eventSource),
-        });
-        eventIds.push(procurementEvtId);
-        created.push({
-          type: "procurement_item",
-          id: itemId,
-          label: change.label,
-          route: `/project/${pid}/procurement`,
-        });
-        count++;
-      }
-    }
-  }
+  // The add_procurement mutation branch that used to sit here was removed with
+  // the #224 guard above, exactly as #175 removed the update_estimate one. It
+  // wrote through addProcurementItem from `@/data/store` (v1), which no
+  // procurement reader consumes, so it produced an invisible row plus a real
+  // credit charge and a real procurement_created event. Restoring it means
+  // writing through `@/data/procurement-store` and mapping onto
+  // ProcurementItemV2, not reinstating this code.
 
   if (proposal.type === "generate_document") {
     for (const change of proposal.changes) {

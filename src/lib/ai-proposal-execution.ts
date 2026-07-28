@@ -34,16 +34,24 @@ export function resolveProposalFastFail(
   // Cannot be applied in ANY mode: commitProposal holds no mutator for the type
   // and returns unavailable rather than claiming a success it never delivered.
   if (!isProposalTypeApplicable(proposalType)) {
-    // Two different situations share this gate. update_estimate is a KNOWN
-    // not-yet-built feature and deserves the specific message. Anything else
-    // reaching here is a type the build does not recognise at all (proposals are
-    // data, so the union is a compile-time claim, not a runtime guarantee), and
-    // telling that user their ESTIMATE cannot be updated would be a lie.
+    // Three different situations share this gate. update_estimate (#175) and
+    // add_procurement (#224) are KNOWN not-yet-built features and each deserves
+    // its own message naming the right screen. Anything else reaching here is a
+    // type the build does not recognise at all (proposals are data, so the union
+    // is a compile-time claim, not a runtime guarantee), and telling that user
+    // their ESTIMATE cannot be updated would be a lie.
     if (proposalType === "update_estimate") {
       return {
         reason: "unsupported_proposal_type",
         titleKey: "ai.sidebar.toast.estimateUnavailable.title",
         descriptionKey: "ai.sidebar.toast.estimateUnavailable.description",
+      };
+    }
+    if (proposalType === "add_procurement") {
+      return {
+        reason: "unsupported_proposal_type",
+        titleKey: "ai.sidebar.toast.procurementUnavailable.title",
+        descriptionKey: "ai.sidebar.toast.procurementUnavailable.description",
       };
     }
     return {
