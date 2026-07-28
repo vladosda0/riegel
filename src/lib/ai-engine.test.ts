@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { generateProposalQueue } from "@/lib/ai-engine";
+import { PROPOSAL_TYPE_TO_CONTRACT_ACTION, generateProposalQueue } from "@/lib/ai-engine";
 import { TOAST_LIMIT } from "@/hooks/use-toast";
 import type { ProjectAuthoritySeam } from "@/lib/project-authority-seam";
 import type { FinanceVisibility, MemberRole } from "@/types/entities";
@@ -112,7 +112,20 @@ describe("generateProposalQueue — action filtering by role", () => {
       seamForRole("owner", "detail"),
     );
 
-    expect(maxQueue.length).toBeGreaterThan(0);
+    // Pin that the prompt still reaches EVERY mapped type. Without this the
+    // assertion below is satisfied by any queue of 1..TOAST_LIMIT-1, so a fifth
+    // intent branch keyed on a word this prompt happens not to contain would
+    // slip through green while making a 5-item queue reachable in production.
+    // It also catches the reverse rot: a regex edit that silently stops matching
+    // a branch shrinks this set instead of passing vacuously on a shorter queue.
+    //
+    // Residual, stated rather than hidden: a fifth branch re-emitting an
+    // EXISTING type is still only caught when its keyword is in the prompt. No
+    // black-box test can bound the generator over all inputs.
+    expect(new Set(maxQueue.map((proposal) => proposal.type))).toEqual(
+      new Set(Object.keys(PROPOSAL_TYPE_TO_CONTRACT_ACTION)),
+    );
+
     expect(
       TOAST_LIMIT,
       `TOAST_LIMIT ${TOAST_LIMIT} must exceed the ${maxQueue.length}-item queue runQueueExecution toasts for`,
