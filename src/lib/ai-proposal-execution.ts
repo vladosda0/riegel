@@ -3,10 +3,13 @@
 //
 // They lived inline in `runQueueExecution`, which no test in the repo touches,
 // and that is exactly where two defects hid: a toast that was silently replaced
-// because use-toast keeps TOAST_LIMIT = 1, and a persisted event claiming five
-// failed retries of something never attempted once (rovno #175 review rounds 1
-// and 2). Driving that component loop from a test is nontrivial; making the
-// decision pure is the cheap way to pin it.
+// because use-toast then kept TOAST_LIMIT = 1, and a persisted event claiming
+// five failed retries of something never attempted once (rovno #175 review
+// rounds 1 and 2). Driving that component loop from a test is nontrivial; making
+// the decision pure is the cheap way to pin it.
+//
+// The loop still has no direct coverage, and four more blocking defects hid
+// there during the #224 rounds. Extending this pattern is tracked in rovno #229.
 
 import { isProposalTypeApplicable } from "@/lib/commit-proposal";
 import type { AIProposalType } from "@/types/ai";

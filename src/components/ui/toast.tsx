@@ -14,7 +14,14 @@ const ToastViewport = React.forwardRef<
   <ToastPrimitives.Viewport
     ref={ref}
     className={cn(
-      "fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[420px]",
+      // overflow-y-auto matters on mobile: this is column-reverse anchored at
+      // top-0 with max-h-screen and previously no overflow rule, so once the
+      // stack grew taller than the viewport the OLDEST toast was laid out past
+      // the top edge and clipped, with no way to scroll to it. That became
+      // reachable when TOAST_LIMIT was raised for the AI proposal queue (see
+      // use-toast.ts): four ~3-line destructive toasts already fill most of a
+      // 375px-wide phone.
+      "fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse gap-2 overflow-y-auto p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[420px]",
       className,
     )}
     {...props}

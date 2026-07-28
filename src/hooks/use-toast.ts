@@ -22,7 +22,7 @@ import type { ToastActionElement, ToastProps } from "@/components/ui/toast";
 // identical toasts is the real fix and is tracked separately — it must key on
 // title AND description AND variant, must only suppress toasts still `open`,
 // and must never suppress one carrying an `action`.
-const TOAST_LIMIT = 5;
+export const TOAST_LIMIT = 5;
 const TOAST_REMOVE_DELAY = 1000000;
 
 type ToasterToast = ToastProps & {

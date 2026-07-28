@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { generateProposalQueue } from "@/lib/ai-engine";
+import { TOAST_LIMIT } from "@/hooks/use-toast";
 import type { ProjectAuthoritySeam } from "@/lib/project-authority-seam";
 import type { FinanceVisibility, MemberRole } from "@/types/entities";
 import * as store from "@/data/store";
@@ -94,6 +95,28 @@ describe("generateProposalQueue — action filtering by role", () => {
       seamForRole("owner", "detail"),
     );
     expect(types).toHaveLength(4);
+  });
+
+  it("never produces more proposals than the toast stack can hold", () => {
+    // runQueueExecution raises one toast per confirmed item, with no render
+    // between consecutive fast-fails, and use-toast keeps only TOAST_LIMIT
+    // entries. The chosen limit is justified purely by "greater than the largest
+    // queue this generator can build", and the comment tells the next author to
+    // raise it if the generator grows — but nothing enforced that: the suite was
+    // green at a limit of 4 too, so a fifth intent branch would silently restore
+    // the pre-paint eviction the constant exists to prevent.
+    const maxQueue = generateProposalQueue(
+      "add task, update estimate cost budget, buy purchase material procurement, generate document contract report",
+      "project-1",
+      "assisted",
+      seamForRole("owner", "detail"),
+    );
+
+    expect(maxQueue.length).toBeGreaterThan(0);
+    expect(
+      TOAST_LIMIT,
+      `TOAST_LIMIT ${TOAST_LIMIT} must exceed the ${maxQueue.length}-item queue runQueueExecution toasts for`,
+    ).toBeGreaterThan(maxQueue.length);
   });
 
   it("stamps the requested project on every proposal it returns", () => {

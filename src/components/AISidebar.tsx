@@ -1218,10 +1218,10 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       let lastError = t("ai.sidebar.toast.executionFailed.title");
       // Set by a fast-fail branch below, which has already shown a SPECIFIC toast
       // explaining why the type cannot run. The generic !success handler must not
-      // then fire its own: use-toast keeps TOAST_LIMIT = 1, so the later dispatch
-      // replaces the earlier one and the user would only ever see "не удалось
-      // выполнить" with none of the reason. It also records how many attempts
-      // really happened, which for a fast-fail is zero, not five.
+      // then fire its own: it would bury the stated reason under a contentless
+      // "не удалось выполнить" AND raise a SECOND toast for the same item,
+      // doubling this queue's burst against TOAST_LIMIT. It also records how many
+      // attempts really happened, which for a fast-fail is zero, not five.
       let unavailableReason: string | null = null;
 
       while (attempt < 5 && !success) {
@@ -1341,9 +1341,9 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
             source: "ai",
           },
         });
-        // Only when no fast-fail branch already explained the failure: the toast
-        // limit is 1, so dispatching here would silently replace the specific
-        // message with a generic one.
+        // Only when no fast-fail branch already explained the failure: dispatching
+        // here would raise a SECOND toast for the same item, burying the specific
+        // reason under a generic one and doubling the queue's toast burst.
         if (!unavailableReason) {
           toast({
             title: t("ai.sidebar.toast.executionFailed.title"),
