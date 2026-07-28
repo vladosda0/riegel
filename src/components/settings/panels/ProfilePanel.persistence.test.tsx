@@ -12,12 +12,16 @@ const currentUser = {
   credits_free: 0,
   credits_paid: 0,
 };
+// The shape useWorkspaceCurrentUserState hands back before the profile query
+// resolves in supabase mode (EMPTY_WORKSPACE_USER).
+const emptyUser = { ...currentUser, id: "", email: "", name: "", avatar: undefined, timezone: "UTC" };
 const contactInfo = { roleTitle: "Foreman", phone: "+7900", bio: "Bio text", signatureBlock: "Sig" };
 const identityMutate = vi.fn();
 const contactMutate = vi.fn();
 const toastMock = vi.fn();
+let activeUser = currentUser;
 
-vi.mock("@/hooks/use-mock-data", () => ({ useCurrentUser: () => currentUser }));
+vi.mock("@/hooks/use-mock-data", () => ({ useCurrentUser: () => activeUser }));
 vi.mock("@/hooks/use-workspace-source", () => ({
   // Authenticated session: Save / avatar edits are enabled (not gated).
   useWorkspaceMode: () => ({ kind: "supabase", profileId: "u1" }),
@@ -32,9 +36,20 @@ import { ProfilePanel } from "@/components/settings/panels/ProfilePanel";
 
 describe("ProfilePanel persistence", () => {
   beforeEach(() => {
+    activeUser = currentUser;
     identityMutate.mockReset().mockResolvedValue(currentUser);
     contactMutate.mockReset().mockResolvedValue(contactInfo);
     toastMock.mockReset();
+  });
+
+  it("re-seeds email when the profile resolves after mount", () => {
+    activeUser = emptyUser;
+    const { rerender } = render(<ProfilePanel />);
+    activeUser = currentUser;
+    rerender(<ProfilePanel />);
+
+    expect(screen.getByDisplayValue("Alex Builder")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("a@b.co")).toBeInTheDocument();
   });
 
   it("seeds fields from loaded identity + contact info", () => {
