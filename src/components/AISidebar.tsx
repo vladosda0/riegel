@@ -1301,7 +1301,13 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       if (!success) {
         addEvent({
           id: `evt-proposal-failed-${Date.now()}-${cursor}`,
-          project_id: projectId,
+          // The proposal's OWN project, not the route's. `projectId` is derived
+          // from location.pathname and is "" everywhere outside /project/*, so on
+          // /home this wrote an event that getEvents (which filters project_id
+          // exactly) could never return: a permanent record that does not exist.
+          // Proposals are only ever generated with a truthy targetProjectId, so
+          // this field is always populated for any item that can reach here.
+          project_id: queueItem.proposal.project_id,
           actor_id: "ai",
           type: "proposal_cancelled",
           object_type: "proposal",

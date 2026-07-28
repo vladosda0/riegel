@@ -166,8 +166,7 @@ describe("commitProposal — enabled actions succeed", () => {
     // use-mock-data, has zero call sites.
     //
     // So claiming success charged a credit and logged a procurement_created
-    // activity entry, and pushed a result row routed at
-    // /project/<id>/procurement, for an item that appears nowhere.
+    // activity entry for an item that appears nowhere.
     //
     // Reverse this test only together with a real V2 write, never to restore
     // the success claim on its own.

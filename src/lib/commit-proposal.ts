@@ -254,14 +254,22 @@ function buildPayloadWithSource(payload: Record<string, unknown>, source?: "ai" 
  *   sites. A write that lands nowhere is indistinguishable from no write at all,
  *   so it belongs on this side of the predicate.
  *
- * Note the contrast with the siblings, which is why only these two are listed:
- * add_task and generate_document write to `@/data/store` AND are read back from
- * it in demo/local mode (use-planning-source and the documents state both import
- * it), so they genuinely surface.
+ * The siblings are listed as applicable on a NARROWER basis than "they work":
+ * add_task and generate_document write to `@/data/store` and are read back from
+ * it in demo and local mode (use-planning-source and the documents state both
+ * import it), so they surface THERE. generate_document additionally carries a
+ * supabase-mode fast-fail in resolveProposalFastFail. add_task has no such arm
+ * and its supabase-mode read path does not go through `@/data/store`, so whether
+ * it has the same defect in that mode is an OPEN question, tracked separately —
+ * do not read this comment as a claim that it does not.
  *
  * The single predicate exists so the library guard and the AISidebar fast-fail
- * cannot drift apart. Wiring a real write for either type means changing this ONE
- * place, and both guards follow.
+ * cannot drift apart, and wiring a real write means changing this ONE place.
+ * IMPORTANT SCOPE: that holds only for types which actually reach the guard.
+ * `create_project` is dispatched by commitProposal BEFORE the guard runs, so
+ * moving it to the false arm would fast-fail the sidebar while commitProposal
+ * kept applying it — #175 and #224 reproduced for that type. Move its dispatch
+ * below the guard first if it ever needs to become inapplicable.
  *
  * Written as an exhaustive switch, NOT as `type !== "update_estimate"`. The
  * denylist form fails OPEN inside a module that is otherwise deny-by-default: add
@@ -356,11 +364,13 @@ export function commitProposal(proposal: AIProposal, options: CommitProposalOpti
   }
 
   // See isProposalTypeApplicable. Both types below are mapped and
-  // permission-checked, and both used to fall through, emit an event, push
-  // result rows carrying a route, report count = changes.length, deduct a credit
-  // and return success. So the user saw a success toast, paid a credit, got a
-  // permanent activity-feed entry for a change that never happened, and followed
-  // a link to a screen where nothing had changed.
+  // permission-checked, and both used to fall through, emit an event, report
+  // count = changes.length, deduct a credit and return success. So the user saw
+  // a success toast, paid a credit, and got a permanent activity-feed entry for
+  // a change that never happened. (They also populated CommitResult.created with
+  // a route, but nothing renders it: the queue path reads only success, error
+  // and eventIds, and ResultCard has no call sites. The store-write argument
+  // stands without that clause.)
   //
   // update_estimate (rovno #175): this module imports no estimate mutator at
   // all, and no event subscriber closes the gap (the only consumers of
@@ -378,12 +388,24 @@ export function commitProposal(proposal: AIProposal, options: CommitProposalOpti
   // (rovno #176) to be answered against plannedUnitPrice, a field that IS
   // rendered.
   if (!isProposalTypeApplicable(proposal.type)) {
+    // Three arms, not a two-way ternary, for the same reason
+    // resolveProposalFastFail spends a third arm on unrecognised types: a
+    // denylist shape would hand a future unimplemented type the ESTIMATE
+    // message, which is the specific lie this file already guards against.
+    let unavailableError: string;
+    switch (proposal.type) {
+      case "add_procurement":
+        unavailableError = "Adding AI procurement items is not available yet.";
+        break;
+      case "update_estimate":
+        unavailableError = "Applying AI estimate changes is not available yet.";
+        break;
+      default:
+        unavailableError = `AI proposal type "${proposal.type}" cannot be applied.`;
+    }
     return {
       success: false,
-      error:
-        proposal.type === "add_procurement"
-          ? "Adding AI procurement items is not available yet."
-          : "Applying AI estimate changes is not available yet.",
+      error: unavailableError,
       eventIds: [],
       created: [],
       updated: [],
