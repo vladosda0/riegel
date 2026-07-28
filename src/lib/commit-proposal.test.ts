@@ -179,6 +179,10 @@ describe("commitProposal — enabled actions succeed", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/not available/i);
+    // Pin WHICH arm answered. /not available/i alone matches the estimate
+    // message too, so swapping the two switch arms — precisely the lie the
+    // third arm exists to prevent — would otherwise ship green.
+    expect(result.error).toMatch(/procurement/i);
     expect(result.eventIds).toEqual([]);
     expect(result.created).toEqual([]);
     expect(result.updated).toEqual([]);
@@ -204,6 +208,8 @@ describe("commitProposal — enabled actions succeed", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/not available/i);
+    // Same reason as the procurement case above: pin which arm answered.
+    expect(result.error).toMatch(/estimate/i);
     expect(result.eventIds).toEqual([]);
     expect(result.created).toEqual([]);
     expect(result.updated).toEqual([]);

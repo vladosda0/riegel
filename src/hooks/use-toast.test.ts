@@ -60,4 +60,70 @@ describe("useToast", () => {
     expect(result.current.toasts.map((e) => e.title)).toContain("first");
     expect(result.current.toasts.map((e) => e.title)).toContain("second");
   });
+
+  it("suppresses a duplicate of a toast that is still on screen", () => {
+    // Raising TOAST_LIMIT removed the accidental protection the old limit of 1
+    // gave to `toast()` calls inside a loop, where a per-item error handler
+    // overwrote itself. Without dedup, dropping N images against a failing
+    // upload stacks N identical destructive toasts.
+    const { result } = renderHook(() => useToast());
+
+    act(() => {
+      result.current.toast({ title: "Не удалось загрузить изображение", variant: "destructive" });
+      result.current.toast({ title: "Не удалось загрузить изображение", variant: "destructive" });
+      result.current.toast({ title: "Не удалось загрузить изображение", variant: "destructive" });
+    });
+
+    const matching = result.current.toasts.filter(
+      (entry) => entry.title === "Не удалось загрузить изображение",
+    );
+    expect(matching).toHaveLength(1);
+  });
+
+  it("still shows two DIFFERENT messages, which is what the limit was raised for", () => {
+    const { result } = renderHook(() => useToast());
+
+    act(() => {
+      result.current.toast({ title: "Не получится применить к смете", variant: "destructive" });
+      result.current.toast({ title: "Не получится добавить в снабжение", variant: "destructive" });
+    });
+
+    const titles = result.current.toasts.map((entry) => entry.title);
+    expect(titles).toContain("Не получится применить к смете");
+    expect(titles).toContain("Не получится добавить в снабжение");
+  });
+
+  it("does not suppress a repeat once the earlier toast has closed", () => {
+    // A closed toast is a finished event. A repeated user action must still give
+    // feedback, so dedup is scoped to toasts that are still open.
+    const { result } = renderHook(() => useToast());
+
+    let handle: { id: string; dismiss: () => void };
+    act(() => {
+      handle = result.current.toast({ title: "Скопировано" });
+    });
+    act(() => {
+      handle!.dismiss();
+    });
+    act(() => {
+      result.current.toast({ title: "Скопировано" });
+    });
+
+    const open = result.current.toasts.filter((entry) => entry.title === "Скопировано" && entry.open);
+    expect(open).toHaveLength(1);
+  });
+
+  it("never suppresses a toast carrying an action", () => {
+    // Those are interactive (the Undo affordance), and the caller holds the
+    // returned dismiss handle. Hiding one would hide a control.
+    const { result } = renderHook(() => useToast());
+
+    act(() => {
+      result.current.toast({ title: "Этапы применены", action: { type: "div" } as never });
+      result.current.toast({ title: "Этапы применены", action: { type: "div" } as never });
+    });
+
+    const matching = result.current.toasts.filter((entry) => entry.title === "Этапы применены");
+    expect(matching).toHaveLength(2);
+  });
 });

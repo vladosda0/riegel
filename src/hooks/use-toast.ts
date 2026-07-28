@@ -81,11 +81,39 @@ const addToRemoveQueue = (toastId: string) => {
 
 export const reducer = (state: State, action: Action): State => {
   switch (action.type) {
-    case "ADD_TOAST":
+    case "ADD_TOAST": {
+      // Suppress a toast that duplicates one already ON SCREEN. Raising
+      // TOAST_LIMIT above 1 removed the accidental protection the old limit gave
+      // to every `toast()` call inside a loop: a per-item error handler that
+      // used to overwrite itself would otherwise stack N identical copies (blog
+      // image upload, catalog row flush). Deduping in the reducer keeps that
+      // protection regardless of the call site, including ones not written yet.
+      //
+      // Deliberately narrow, so it suppresses noise and nothing else:
+      // - only against toasts still `open`. Once one has closed, an identical
+      //   message is a NEW event and must be shown, or a repeated user action
+      //   would give no feedback.
+      // - never when either toast carries an `action`. Those are interactive
+      //   (the Undo affordance in use-apply-template-stages and
+      //   use-add-library-work) and suppressing one would hide a control whose
+      //   `dismiss` handle the caller is holding.
+      // - `title` is a ReactNode, so `===` only matches primitives. An element
+      //   title never dedupes, which fails toward showing too much rather than
+      //   too little.
+      const duplicatesOpenToast = state.toasts.some(
+        (existing) =>
+          existing.open &&
+          !existing.action &&
+          !action.toast.action &&
+          existing.title === action.toast.title &&
+          existing.variant === action.toast.variant,
+      );
+      if (duplicatesOpenToast) return state;
       return {
         ...state,
         toasts: [action.toast, ...state.toasts].slice(0, TOAST_LIMIT),
       };
+    }
 
     case "UPDATE_TOAST":
       return {

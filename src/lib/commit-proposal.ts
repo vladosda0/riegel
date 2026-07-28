@@ -401,7 +401,12 @@ export function commitProposal(proposal: AIProposal, options: CommitProposalOpti
         unavailableError = "Applying AI estimate changes is not available yet.";
         break;
       default:
-        unavailableError = `AI proposal type "${proposal.type}" cannot be applied.`;
+        // Deliberately NOT the same wording as the unmapped-type guard above,
+        // so a test or a log line can tell which guard produced the result.
+        // Unreachable today: the four own keys of
+        // PROPOSAL_TYPE_TO_CONTRACT_ACTION are exactly the four types named
+        // here plus create_project, which returns before this point.
+        unavailableError = `AI proposal type "${proposal.type}" is not implemented.`;
     }
     return {
       success: false,
