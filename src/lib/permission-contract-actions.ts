@@ -2,7 +2,7 @@
  * Contract-driven action state resolution.
  *
  * The preset tables below ARE the permission contract. `docs/permissions.contract.json`
- * and `Permissions.md` were removed in 9b4c292 and nothing replaced them, so editing a
+ * and `docs/Permissions.md` were removed in 9b4c292 and nothing replaced them, so editing a
  * preset cell here changes the product rule directly WHEREVER THAT CELL IS READ.
  *
  * That qualifier is load-bearing, because six of the sixteen cells are read by
