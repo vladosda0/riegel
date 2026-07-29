@@ -185,7 +185,17 @@ export function seamEstimateFinanceVisibilityMode(seam: ProjectAuthoritySeam): E
   return "none";
 }
 
-/** Per `domains.estimate.actions.export_csv` in permissions.contract.json (owner/co_owner only). */
+/**
+ * Estimate CSV export — owner/co_owner only.
+ *
+ * This is the LIVE gate (ProjectEstimate.tsx: the export handler and the button),
+ * and it hardcodes the roles. It does NOT read `ESTIMATE_PRESETS.export_csv`, which
+ * nothing reads. The two duplicate the same rule and are kept in sync by hand.
+ *
+ * Do not "fix" a CSV-export permission by editing that preset cell: the golden test
+ * will go red, you will update the expectation, and the product will not change.
+ * Edit this function. Wiring the cell up for real is rovno#241.
+ */
 export function seamAllowsEstimateExportCsv(seam: ProjectAuthoritySeam): boolean {
   const role = getProjectRole(seam);
   return role === "owner" || role === "co_owner";
