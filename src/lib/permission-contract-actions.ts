@@ -3,7 +3,18 @@
  *
  * The preset tables below ARE the permission contract. `docs/permissions.contract.json`
  * and `Permissions.md` were removed in 9b4c292 and nothing replaced them, so editing a
- * preset cell here changes the product rule directly and carries that weight.
+ * preset cell here changes the product rule directly WHEREVER THAT CELL IS READ.
+ *
+ * That qualifier is load-bearing, because six of the sixteen cells are read by
+ * nothing in production today: `edit_estimate_structure`, `export_csv`,
+ * `edit_checklist`, `upload_document`, `upload_media` and `classify` appear only in
+ * their type unions, in the tables below, and in a self-referential expectation
+ * table in `permissions.test.tsx`. Editing one of those is a no-op until a call
+ * site reads it, and the golden test will still go red, which makes the no-op look
+ * like a real change. See rovno#241. The cells that ARE live:
+ * estimate/`edit_estimate_rows`, tasks/{`manage_tasks`,`comment`,`change_status`},
+ * procurement/{`order`,`receive`,`use_from_stock`},
+ * documents_media/{`upload`,`delete`,`rename_or_archive`}.
  *
  * This module maps (role, domain, action) → ActionState using preset defaults.
  * It replaces ad-hoc boolean checks wherever a surface needs
