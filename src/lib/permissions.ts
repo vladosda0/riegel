@@ -185,7 +185,7 @@ export function seamEstimateFinanceVisibilityMode(seam: ProjectAuthoritySeam): E
   return "none";
 }
 
-/** Per `domains.estimate.actions.export_csv` in permissions.contract.json (owner/co_owner only). */
+/** Estimate CSV export — owner/co_owner only, per `ESTIMATE_PRESETS.export_csv`. */
 export function seamAllowsEstimateExportCsv(seam: ProjectAuthoritySeam): boolean {
   const role = getProjectRole(seam);
   return role === "owner" || role === "co_owner";

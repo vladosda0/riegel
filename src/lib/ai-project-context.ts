@@ -1,8 +1,6 @@
 /**
  * Permission-aware AI project context assembly.
  *
- * Execution semantics: permissions.contract.json → ai_enforcement + domains.ai_project_surface
- *
  * This module is the single source of truth for what project data AI may consume.
  * Every field included here must satisfy the user's effective visibility envelope;
  * hidden domains, hidden financial fields, and internal-only classifications are
