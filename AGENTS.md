@@ -107,9 +107,22 @@ Never treat UI or mock types as DB truth. If the contract is missing a field or 
 
 **Backend-shaped or data work**
 
-- `backend-truth/schema/tables.json`, `relations.json`, `rpc-functions.json`, `rls-summary.json`
-- `backend-truth/generated/supabase-types.ts`
-- Relevant `backend-truth/slices/*.json` and `backend-truth/contracts/*.md`
+- `backend-truth/generated/supabase-types.ts` — the compile-time source of truth. Generated from the
+  committed migrations and imported by 19 files in `src/`, so schema drift fails `npm run typecheck`
+  rather than reaching a user.
+- The migrations themselves, in `~/projects/rovno-db/supabase/migrations/`. **This is the only
+  complete picture.** An object's real definition is the result of every migration touching its name,
+  in timestamp order — so before concluding anything about a table, policy, trigger or function,
+  search for LATER migrations touching that same name.
+
+> **Do NOT treat `backend-truth/schema/`, `slices/` or `contracts/` as truth.** They are a partial
+> view and they do not say so. Generation runs over a curated allowlist: as of 2026-07-28, **65 of
+> 201 migrations are excluded**, and the exclusions include RLS ones. `workspace_documents` has real
+> RLS policies in `rovno-db` and does not appear in `rls-summary.json` at all. Nothing in `src/`
+> imports these files; they are read only by whoever trusts this list. A map that is silently
+> two-thirds complete is worse than no map for exactly the RLS and permission reasoning where being
+> wrong costs the most. They are useful as a fast orientation on a table you will then verify against
+> the migrations — never as the thing you verify against. Removal is tracked in rovno-db #106.
 
 **App architecture**
 
