@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { describeInviteCreateError } from "@/lib/invite-create-error";
+import { describeInviteCreateError, describeInviteSendError } from "@/lib/invite-error-copy";
 import { showTierLimitPaywall } from "@/lib/tier-limit-error";
 import {
   AlertTriangle,
@@ -767,7 +767,7 @@ function LegacyProjectParticipants() {
           },
         };
       } catch (err) {
-        const message = err instanceof Error ? err.message : t("participants.error.emailSendFallback");
+        const message = describeInviteSendError(err, t, t("participants.error.emailSendFallback"));
         return {
           createdInvite,
           emailDelivery: { kind: "failed", message },
@@ -877,7 +877,7 @@ function LegacyProjectParticipants() {
     onError: (error) => {
       toast({
         title: t("participants.toast.resendFailed"),
-        description: error instanceof Error ? error.message : t("participants.toast.resendFailedDesc"),
+        description: describeInviteSendError(error, t, t("participants.toast.resendFailedDesc")),
         variant: "destructive",
       });
     },
