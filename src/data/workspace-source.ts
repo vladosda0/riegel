@@ -591,10 +591,19 @@ async function messageFromFunctionsInvokeFailure(
       const raw = await ctx.clone().text().catch(() => "");
       const trimmed = raw.trim();
       if (trimmed) {
-        // A parsed `{ error }` / `{ message }` is the function speaking, so it is
-        // our own English and gets localized. Anything else in the body is not:
-        // an HTML error page from a proxy, a gateway timeout, a truncated
-        // response. That text is unplanned and therefore worth showing.
+        // A parsed `{ error }` is the FUNCTION speaking: all nineteen of its
+        // response bodies use that key, so this is our own English and gets
+        // localized. (The three `message:` occurrences in that file are fields of
+        // log objects, not response bodies.)
+        //
+        // A parsed `{ message }` is therefore NOT the function. It can only come
+        // from the platform in front of it: a function that is not deployed to
+        // this environment, a BOOT_ERROR, a worker limit, a Kong 401. Each of
+        // those is a whole-deployment condition and the message is the only clue
+        // to which one, so it is diagnostic. Classifying it with the function's
+        // own strings, as the first version of this did, threw that clue away
+        // while the branches below happily surfaced a raw proxy page and a bare
+        // HTTP status, which say strictly less.
         try {
           const j = JSON.parse(trimmed) as Record<string, unknown>;
           if (typeof j.error === "string") return { message: j.error, diagnostic: false };
@@ -602,7 +611,7 @@ async function messageFromFunctionsInvokeFailure(
             const m = (j.error as { message?: unknown }).message;
             if (typeof m === "string") return { message: m, diagnostic: false };
           }
-          if (typeof j.message === "string") return { message: j.message, diagnostic: false };
+          if (typeof j.message === "string") return { message: j.message, diagnostic: true };
         } catch {
           /* not JSON */
         }
