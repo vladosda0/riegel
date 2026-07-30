@@ -1112,6 +1112,44 @@ export class ProjectInviteNoLongerPendingError extends Error {
 }
 
 /**
+ * A pending invite for this address already exists on this project, so the
+ * insert hit `idx_project_invites_active_email`.
+ *
+ * This became reachable in ordinary use with rovno-db 20260729130100. Invites
+ * now expire, but nothing flips an expired one to `expired` -- expiry is a
+ * derived state, and the row stays `pending`, so it keeps its slot in that
+ * partial index. Fifteen days after an invite is ignored, re-inviting the same
+ * address fails here rather than at any check the UI performs, because the two
+ * client-side pre-checks (`pendingInviteEmailSet` and friends) validate against
+ * a React Query cache that has no idea the row is dead.
+ *
+ * Surfaced as a typed error rather than the raw PostgREST one because
+ * "duplicate key value violates unique constraint" is both English and useless:
+ * the actionable instruction is to revoke the outstanding invite, and the
+ * revoke button is already in the participants list.
+ */
+export class ProjectInviteAlreadyOutstandingError extends Error {
+  constructor(public readonly email: string) {
+    super(`A pending invite for ${email} already exists on this project.`);
+    this.name = "ProjectInviteAlreadyOutstandingError";
+  }
+}
+
+/**
+ * Narrow: a 23505 on this table can also come from the `unique (invite_token)`
+ * constraint, which would be a collision of two gen_random_uuid() values and
+ * emphatically not something to tell the user to fix by revoking an invite. So
+ * match the index by name and let anything else through untouched.
+ */
+function isActiveInviteEmailConflict(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { code?: unknown; message?: unknown };
+  if (candidate.code !== "23505") return false;
+  return typeof candidate.message === "string"
+    && candidate.message.includes("idx_project_invites_active_email");
+}
+
+/**
  * Revokes a pending invite (status → 'revoked'), keeping the row for history.
  *
  * Deliberately a dedicated status-only UPDATE: `updateWorkspaceProjectInvite`
@@ -1236,6 +1274,10 @@ export async function createWorkspaceProjectInvite(
     .select("*")
     .single();
 
+  if (isActiveInviteEmailConflict(error)) {
+    throw new ProjectInviteAlreadyOutstandingError(basePayload.email);
+  }
+
   if (error || !data) {
     throw error ?? new Error("Unable to create project invite");
   }
@@ -1273,8 +1315,13 @@ export async function updateWorkspaceProjectInvite(
         : {}),
       // status is spread only when explicitly provided — an axis/role edit must
       // never resurrect a concurrently revoked/accepted invite back to its
-      // stale status (there is no DB status-transition guard). Status changes
-      // go through revokeWorkspaceProjectInvite / accept_project_invite only.
+      // stale status. Status changes go through revokeWorkspaceProjectInvite /
+      // accept_project_invite only.
+      //
+      // In supabase mode this is now belt AND braces: rovno-db 20260729130100
+      // added guard_project_invite_status_transition, so a write back to
+      // 'pending' is rejected by the database. This branch is the BROWSER store,
+      // which has no such trigger, so the discipline still has to be kept here.
       ...(input.status !== undefined ? { status: input.status } : {}),
     }, mode.kind);
     if (!updated) {

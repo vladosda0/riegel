@@ -118,6 +118,7 @@ import type { EstimateV2ProjectSyncState } from "@/data/estimate-v2-store";
 import { getPlanningSource } from "@/data/planning-source";
 import { addEvent, getUserById } from "@/data/store";
 import { createWorkspaceProjectInvite, sendWorkspaceProjectInviteEmail } from "@/data/workspace-source";
+import { describeInviteCreateError } from "@/lib/invite-create-error";
 import {
   computeEffectiveDiscountBps,
   computeEffectiveMarkupBps,
@@ -1348,7 +1349,7 @@ export default function ProjectEstimate() {
         });
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("estimate.toast.inviteCreateFailedFallback");
+      const message = describeInviteCreateError(err, t, t("estimate.toast.inviteCreateFailedFallback"));
       toast({
         title: t("estimate.toast.inviteFailed.title"),
         description: message,

@@ -3834,5 +3834,7 @@
   "feedback.successTitle": "Спасибо, мы прочитаем",
   "feedback.successDescription": "Сообщение отправлено.",
   "feedback.errorTitle": "Не удалось отправить",
-  "feedback.errorDescription": "Попробуйте ещё раз через минуту. Текст сообщения сохранён."
+  "feedback.errorDescription": "Попробуйте ещё раз через минуту. Текст сообщения сохранён.",
+  "participants.error.inviteAlreadyOutstanding": "На этот адрес уже есть неотозванное приглашение в этом проекте. Отзовите его в списке участников и пригласите заново.",
+  "invite.error.invite_expired": "Срок действия ссылки истёк. Попросите пригласившего отправить новую."
 }

@@ -38,6 +38,7 @@ import {
   type WorkspaceProjectInvite,
 } from "@/data/workspace-source";
 import { workspaceQueryKeys } from "@/hooks/use-workspace-source";
+import { describeInviteCreateError } from "@/lib/invite-create-error";
 import { showTierLimitPaywall, showTierLimitPaywallByType } from "@/lib/tier-limit-error";
 import { getTierLimits } from "@/data/tier-limits";
 import { trackEvent } from "@/lib/analytics";
@@ -379,7 +380,7 @@ export default function ParticipantsScreen() {
       if (showTierLimitPaywall(error, t)) return;
       toast({
         title: t("participants.toast.inviteFailed"),
-        description: error instanceof Error ? error.message : t("participants.toast.inviteFailedDesc"),
+        description: describeInviteCreateError(error, t, t("participants.toast.inviteFailedDesc")),
         variant: "destructive",
       });
     },

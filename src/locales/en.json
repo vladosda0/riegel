@@ -3778,5 +3778,7 @@
   "feedback.successTitle": "Thanks — we'll read it",
   "feedback.successDescription": "Your message has been sent.",
   "feedback.errorTitle": "Could not send",
-  "feedback.errorDescription": "Please try again in a minute. Your message text is preserved."
+  "feedback.errorDescription": "Please try again in a minute. Your message text is preserved.",
+  "participants.error.inviteAlreadyOutstanding": "There is already an outstanding invite for this address on this project. Revoke it in the participants list, then invite again.",
+  "invite.error.invite_expired": "This invite link has expired. Ask whoever invited you to send a new one."
 }

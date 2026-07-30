@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { describeInviteCreateError } from "@/lib/invite-create-error";
 import { showTierLimitPaywall } from "@/lib/tier-limit-error";
 import {
   AlertTriangle,
@@ -839,7 +840,7 @@ function LegacyProjectParticipants() {
       if (showTierLimitPaywall(error, t)) return;
       toast({
         title: t("participants.toast.inviteFailed"),
-        description: error instanceof Error ? error.message : t("participants.toast.inviteFailedDesc"),
+        description: describeInviteCreateError(error, t, t("participants.toast.inviteFailedDesc")),
         variant: "destructive",
       });
     },

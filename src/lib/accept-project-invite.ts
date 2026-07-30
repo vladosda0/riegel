@@ -5,6 +5,7 @@ import type { Database as WorkspaceDatabase } from "../../backend-truth/generate
 export type AcceptProjectInviteErrorCode =
   | "invite_email_mismatch"
   | "invite_invalid_or_unavailable"
+  | "invite_expired"
   | "auth_required"
   | "project_owner_over_limit"
   | "unknown";
@@ -33,6 +34,21 @@ function mapAcceptInviteError(error: PostgrestError | Error | null): AcceptProje
     return {
       code: "invite_email_mismatch",
       message: "This invite was sent to a different email address.",
+      rawError: error,
+    };
+  }
+
+  // Raised by accept_project_invite when `expires_at` has passed and this is a
+  // FIRST acceptance (rovno-db 20260729130100). Kept separate from the
+  // invalid/used bucket on purpose: the recipient's next move is different --
+  // there is nothing wrong with their link or their account, they just need the
+  // inviter to send a new one. Without this branch the raw Postgres string
+  // reaches the invitee untranslated, because InviteAccept renders
+  // `invite.error.<code>` and falls back to `message` for `unknown`.
+  if (normalized.includes("invite has expired")) {
+    return {
+      code: "invite_expired",
+      message: "This invite link has expired. Ask whoever invited you to send a new one.",
       rawError: error,
     };
   }
