@@ -6,7 +6,9 @@ vi.mock("@/integrations/supabase/client", () => ({
   supabase: { rpc: rpcMock },
 }));
 
+import ruLocale from "@/locales/ru.json";
 import { acceptProjectInvite } from "@/lib/accept-project-invite";
+import type { AcceptProjectInviteErrorCode } from "@/lib/accept-project-invite";
 
 /**
  * `mapAcceptInviteError` is module-private, so these drive it through the only
@@ -74,6 +76,27 @@ describe("acceptProjectInvite error mapping", () => {
     if (!unauth.ok) expect(unauth.error.code).toBe("auth_required");
   });
 
+  it("maps the owner's seat-limit raises to project_owner_over_limit, not unknown", async () => {
+    // enforce_project_member_limits raises the bare exception name, so this is
+    // the literal message the RPC returns.
+    rpcMock.mockResolvedValue(rpcError("project_editor_limit_exceeded"));
+    const editor = await acceptProjectInvite("token-editor-limit");
+    expect(editor.ok).toBe(false);
+    if (editor.ok) return;
+    expect(editor.error.code).toBe("project_owner_over_limit");
+    // Owner-framed: the invitee cannot fix a limit on someone else's plan, so
+    // the copy must not tell them to change anything about their own account.
+    expect(editor.error.message).not.toContain("project_editor_limit_exceeded");
+
+    // Same branch, other half of the condition. Asserted so deleting the viewer
+    // clause cannot pass on the editor case alone.
+    rpcMock.mockResolvedValue(rpcError("project_viewer_limit_exceeded"));
+    const viewer = await acceptProjectInvite("token-viewer-limit");
+    expect(viewer.ok).toBe(false);
+    if (viewer.ok) return;
+    expect(viewer.error.code).toBe("project_owner_over_limit");
+  });
+
   it("returns ok with the invite row on success", async () => {
     rpcMock.mockResolvedValue({ data: { id: "invite-1" }, error: null });
 
@@ -82,5 +105,34 @@ describe("acceptProjectInvite error mapping", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.invite).toEqual({ id: "invite-1" });
+  });
+});
+
+/**
+ * A Record over the union rather than a plain array: adding a code to
+ * AcceptProjectInviteErrorCode fails TYPECHECK here until it is listed, and then
+ * fails the TEST below until it has a RU key. That two-step is the guard. The
+ * per-code test alone would not catch a new code, because a test nobody wrote
+ * cannot fail.
+ *
+ * RU only, deliberately. InviteAccept passes the mapper's English as
+ * `defaultValue`, so a missing EN key is invisible, while a missing RU key is
+ * exactly how `project_owner_over_limit` shipped English to Russian invitees.
+ */
+const ALL_ERROR_CODES: Record<AcceptProjectInviteErrorCode, true> = {
+  invite_email_mismatch: true,
+  invite_invalid_or_unavailable: true,
+  invite_expired: true,
+  auth_required: true,
+  project_owner_over_limit: true,
+  unknown: true,
+};
+
+describe("invite.error locale coverage", () => {
+  it.each(Object.keys(ALL_ERROR_CODES))("has a non-empty RU string for the '%s' code", (code) => {
+    const label = (ruLocale as Record<string, string>)[`invite.error.${code}`];
+
+    expect(typeof label).toBe("string");
+    expect(label?.trim() ?? "").not.toBe("");
   });
 });
