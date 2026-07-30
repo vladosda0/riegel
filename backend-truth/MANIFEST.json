@@ -555,6 +555,10 @@
     {
       "path": "supabase/migrations/20260727120000_drop_out_of_band_debug_rpcs.sql",
       "sha256": "0c42afcf8c6bef9041d59f15f1bde196fb33791e58aeedbcbb8e55dbef588357"
+    },
+    {
+      "path": "supabase/migrations/20260729130000_project_invites_expires_at.sql",
+      "sha256": "d5d8e648be750129358b2451d023f2927ba00689367ef97aad01e60ab6a9d757"
     }
   ],
   "generated_artifacts": [
@@ -721,6 +725,7 @@
     "sql/20260725190000_profiles_locale_default_ru.sql",
     "sql/20260726120000_drop_debug_org_rls_state2.sql",
     "sql/20260727120000_drop_out_of_band_debug_rpcs.sql",
+    "sql/20260729130000_project_invites_expires_at.sql",
     "generated/db-public-schema.ts",
     "generated/supabase-types.ts"
   ],
