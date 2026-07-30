@@ -1268,6 +1268,16 @@
             ],
             "onDelete": "set null"
           }
+        },
+        {
+          "name": "expires_at",
+          "sqlType": "timestamptz",
+          "tsType": "string",
+          "nullable": true,
+          "defaultSql": "(now() + interval '14 days')",
+          "primaryKey": false,
+          "unique": false,
+          "references": null
         }
       ],
       "constraints": [

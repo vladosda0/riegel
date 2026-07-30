@@ -255,6 +255,7 @@ export type Database = {
           "finance_visibility": "none" | "summary" | "detail"
           "internal_docs_visibility": "none" | "view" | "edit"
           "add_to_org_id": string | null
+          "expires_at": string | null
           }
           Insert: {
           "id"?: string
@@ -273,6 +274,7 @@ export type Database = {
           "finance_visibility"?: "none" | "summary" | "detail"
           "internal_docs_visibility"?: "none" | "view" | "edit"
           "add_to_org_id"?: string | null
+          "expires_at"?: string | null
           }
           Update: {
           "id"?: string
@@ -291,6 +293,7 @@ export type Database = {
           "finance_visibility"?: "none" | "summary" | "detail"
           "internal_docs_visibility"?: "none" | "view" | "edit"
           "add_to_org_id"?: string | null
+          "expires_at"?: string | null
           }
           Relationships: []
         }
