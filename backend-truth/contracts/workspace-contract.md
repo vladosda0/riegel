@@ -201,6 +201,7 @@ Triggers:
 | `finance_visibility` | `text` | no | `'none'` | no |
 | `internal_docs_visibility` | `text` | no | `'none'` | no |
 | `add_to_org_id` | `uuid` | yes |   | no |
+| `expires_at` | `timestamptz` | yes | `(now() + interval '14 days')` | no |
 
 Constraints:
 - unnamed check (expression `role in ('owner', 'co_owner', 'contractor', 'viewer')`)
