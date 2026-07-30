@@ -1,0 +1,134 @@
+---
+description: Format of the report written at every stop, and how to pick the next-step command — release commands first, raw git steps only when release mode does not apply.
+alwaysApply: true
+---
+
+# Stop report and next step
+
+Every turn that hands control back to the user ends with a **stop report**. The user reads it to answer four things without scrolling back:
+
+1. What state is the work in?
+2. What did the agent just do?
+3. Does a decision or an answer have to come from them?
+4. What is the next step?
+
+Two formats exist. Pick one; do not blend them.
+
+- **Full session report** — epics, multi-task coding sessions, long or autonomous runs (unattended code-writing routines, batch work). Keep the existing long-form format. This rule does not shorten it.
+- **Compact stop report** — everything else, which is most stops: a small follow-up, a pause while a subagent or adversarial audit finishes, an audit result, a research step, one targeted fix, a question answered.
+
+When it is not obvious which applies, use the compact report.
+
+---
+
+## Compact stop report — skeleton
+
+Bold inline labels, no headings, no tables. Sections in this order. **Omit any section that would be empty** — an omitted section is information; a padded one is noise.
+
+- **Работаем над:** one line — the goal and where it lives (branch / repo / PR). Conditional, see below.
+- **Сделано:** what actually changed, as facts, with `path/to/file.ts:42` where it helps.
+- **Состояние:** shippable / needs work / broken — plus what was verified and what was not. Conditional, see below.
+- **Ждём:** what is in flight and what happens when it comes back. Pause stops only.
+- **Вопросы:** decisions or answers that must come from the user. Real blockers only.
+- **Дальше:** the next step, with the command to run if there is one.
+
+Labels above are Russian because that is the user's language. Write the report — labels included — in whatever language the user is writing in.
+
+### When to include **Работаем над**
+
+Include it when the user may have lost the thread:
+
+- first stop after a plan, an epic, or a task switch
+- the stop follows a wait (subagent, audit, CI) or a long turn
+- branch, repo, or environment changed since the last report
+- more than a couple of exchanges since the goal was last named
+
+Skip it in a tight back-and-forth where the user's own last message named the subject. Repeating it one line later is noise.
+
+### When to include **Состояние**
+
+Include it when there is state the user cannot see:
+
+- uncommitted changes, unpushed commits, an open PR, a branch that diverged
+- checks that failed, were skipped, or were never run
+- background work still running
+- staging or prod deploy state changed
+
+Skip it on read-only work (research, audit, explanation) that left the tree clean — **Сделано** already says everything.
+
+---
+
+## Length discipline
+
+No fixed line count. Instead:
+
+- Every line carries something the user does not already have. Cut restatements of their request, recaps of what was already said this turn, and process narration ("прочитал файл, затем поискал…").
+- Facts over adjectives. «3 теста падают в `estimate-sync.test.ts`» beats «есть проблемы».
+- One clause per bullet. If a bullet needs a "but", split it or move the caveat into **Состояние**.
+- Do not list what was considered and rejected unless the user asked for options.
+- A pause stop is 2–4 lines. Do not pad it to look thorough.
+
+---
+
+## Next step — command priority
+
+**Дальше** names **one** command. Two only when there is a genuine fork. Never a menu.
+
+### Prefer the release commands
+
+When the work is genuinely finished — verified in scope, no open questions, **Вопросы** empty — recommend the release path, not the individual git steps:
+
+| Command | Recommend when |
+|---|---|
+| `/release-dev` | App work is done and ready for **staging** (`dev`). The normal ship step in `rovno`. |
+| `/release-prod` | Staging was checked and the change is ready for **production** (`main`). Never before staging. |
+| `/db-prod` | Database / migration work is ready for the **production** DB. Lives in `rovno-db`; Cloud staging first. |
+
+These wrap the whole ritual — checks, commit, PR, merge, deploy ordering. Recommending `/commit-push` → `/open-pr` → `/merge` as a sequence instead is a downgrade; do not do it.
+
+### Raw commands only when release mode does not apply
+
+`/commit-push`, `/open-pr`, `/merge` are the fallback, and the report must say **why** release mode is not the recommendation:
+
+- **Work is unfinished** — a checkpoint is worth saving, nothing is shippable yet → `/commit-push`.
+- **Review or CI feedback is needed first** — the change is done but wants eyes or a pipeline run before merge → `/open-pr`.
+- **The release path is blocked** — `backend-truth/` sync PR pending, migration not applied on staging, verification failed, contract gap open. Name the blocker, then the raw step that is safe now.
+- **A PR is already open** and only the merge step remains → `/merge`.
+- **Non-standard flow** the release commands do not cover (hotfix, revert, branch surgery), or the user explicitly asked for a specific git step.
+
+Never recommend a release command in a report that also carries an open **Вопросы** item or an unverified critical assumption in **Состояние** — that contradicts itself. Resolve it, or recommend the fallback and say what is missing.
+
+### Not every stop needs a command
+
+Research answers, audits, and pauses usually end with a plain next step («подтвердишь план — начинаю с адаптера») or with nothing at all. A git command when nothing changed is noise. This overrides any urge to close with a ritual — see `15-slash-command-reminders.mdc`, which caps suggestions at two and forbids them on pure Q&A.
+
+---
+
+## Examples
+
+Pause while an audit runs:
+
+> **Работаем над:** гейт интеграций Telegram, ветка `fix/tg-gate`.
+> **Ждём:** adversarial-аудит диффа, пингнёт сам. Вернётся с списком дыр или «чисто» — тогда правлю и прогоняю `npm run verify`.
+> От тебя сейчас ничего не нужно.
+
+Audit finished, one decision needed:
+
+> **Сделано:** прошёл `src/data/store.ts` и `use-mock-data.ts` на mock-vs-real: 4 места читают демо-стор в проде, 1 из них — `permissions.ts:88`.
+> **Состояние:** только чтение, дифф пустой. Не проверял: ветку procurement, туда не заходил.
+> **Вопросы:** `permissions.ts:88` — чинить в этой сессии или отдельной задачей? Затрагивает роли, blast radius шире остальных трёх.
+> **Дальше:** ответишь по 88 — правлю остальные три в одном коммите.
+
+Ready to ship:
+
+> **Сделано:** canonical для публичных роутов + редирект `www` → apex, `src/App.tsx:120`, `index.html`.
+> **Состояние:** `npm run verify` зелёный, дифф чистый, только эти два файла. Прод не трогали.
+> **Дальше:** `/release-dev` — на стейджинг, там проверить редирект живьём перед продом.
+
+---
+
+## Interaction with other rules
+
+- `50-verification-and-stop-condition.mdc` — what to verify before stopping. **Состояние** is where its "verified / not verified / remaining risk" output lands.
+- `00-core-operating-boundary.mdc` — the human runs git. The report **recommends** a command; it does not run it unasked.
+- `45-environment-and-release-clarity.mdc` — name the environment (local / staging / production) in **Состояние** and **Дальше**. Never "the server".

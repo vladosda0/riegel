@@ -30,6 +30,14 @@ The user has custom slash commands under `~/.cursor/commands/` (global) and proj
 
 Do **not** suggest `/rovno-db-migration-note` here—that command is for the `rovno-db` repo. If the user must change the database, say the work belongs in `rovno-db` and offer `/rovno-db-migration-note` only after they open that workspace.
 
+## Ship / release commands (Claude Code, `~/.claude/commands/`)
+
+The user's release commands wrap the full ritual and are the **preferred** recommendation when work is finished: `/release-dev` (→ staging `dev`), `/release-prod` (→ production `main`, staging first), `/db-prod` (production DB / migrations, in `rovno-db`).
+
+The raw git steps — `/commit-push`, `/open-pr`, `/merge` — are the **fallback**, used only when release mode does not apply (unfinished work, review needed first, blocked release path, PR already open, non-standard flow), and the reply must say which of those it is.
+
+Priority rules, section shape, and worked examples: **`55-stop-report-and-next-step.mdc`**. It governs the closing lines of a reply; this rule governs mid-work ritual suggestions.
+
 ## Phrasing
 
 Use this shape (adapt wording):

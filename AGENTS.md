@@ -206,7 +206,7 @@ This repo mixes **real** integration and **mock/demo** paths. Classify before ch
 - Use Cursor skill **`verification-and-regression-pass`** and/or **`rollback-aware-diff-review`** for non-trivial closeout.
 - Optional Codex closeout: if available, `~/.codex/skills/finish-gate/SKILL.md` for structured handoff.
 
-State what was verified and what was not.
+State what was verified and what was not — that goes in the `Состояние` line of the stop report (§16).
 
 ---
 
@@ -260,7 +260,38 @@ If prod is broken / unsure → **immediately notify the user** describing what h
 
 ---
 
-## 16. Quick reference
+## 16. Stop reports and the next-step command
+
+Canonical spec: **`.cursor/rules/55-stop-report-and-next-step.mdc`**. Summary, so no file read is needed at stop time:
+
+Every turn that hands control back ends with a report. Two formats — **do not blend them**:
+
+- **Full session report** — epics, multi-task coding sessions, long or autonomous runs. Existing long-form format, unchanged.
+- **Compact stop report** — the default for everything else: small follow-ups, a pause while a subagent/adversarial audit finishes, audit results, research steps, one targeted fix, a question answered.
+
+Compact skeleton — bold inline labels, no headings, **omit any empty section**, write it in the user's language:
+
+```
+**Работаем над:** goal + branch/repo/PR — only when the thread may be lost (after a wait, a task switch, a plan, or a few exchanges since the goal was named)
+**Сделано:** facts, with path/to/file.ts:42
+**Состояние:** shippable / needs work / broken + verified vs not — only when there is state the user cannot see (uncommitted work, open PR, skipped checks, deploy state)
+**Ждём:** what is in flight and what happens when it returns — pause stops only (2–4 lines total, no padding)
+**Вопросы:** real blockers needing the user's decision
+**Дальше:** the next step, with a command if there is one
+```
+
+**Next-step command priority.** `Дальше` names **one** command (two only for a genuine fork), never a menu:
+
+- Work genuinely finished, verified, no open questions → the release commands: **`/release-dev`** (→ staging `dev`, the normal ship step here), **`/release-prod`** (→ production `main`, only after staging was checked), **`/db-prod`** (production DB / migrations, in `rovno-db`, Cloud staging first). They wrap the whole ritual; suggesting `/commit-push` → `/open-pr` → `/merge` as a sequence instead is a downgrade.
+- **`/commit-push`, `/open-pr`, `/merge` are the fallback**, and the report says why release mode does not apply: work unfinished (checkpoint only), review/CI needed first, release path blocked (`backend-truth/` sync PR pending, migration not on staging, verification failed), a PR already open with only the merge left, or a non-standard flow (hotfix, revert, branch surgery).
+- Never recommend a release command in a report that still carries a **Вопросы** item or an unverified critical assumption.
+- Research answers, audits, and pauses often need **no command at all** — a plain next step, or nothing.
+
+A portable, repo-agnostic version for `~/.claude/CLAUDE.md` lives in **`docs/claude-stop-report-global.md`**.
+
+---
+
+## 17. Quick reference
 
 | Area        | Location |
 |------------|----------|
