@@ -525,22 +525,64 @@ async function loadSupabaseClient(): Promise<TypedSupabaseClient> {
   return supabase as unknown as TypedSupabaseClient;
 }
 
-function messageFromEdgeFunctionFailure(error: unknown, data: unknown): string {
-  const fromJson = parseEdgeFunctionErrorBody(data);
-  if (fromJson) return fromJson;
-  if (error && typeof error === "object" && "message" in error && typeof (error as { message: unknown }).message === "string") {
-    return (error as { message: string }).message;
+/**
+ * A failure message plus whether it is worth showing a user verbatim.
+ *
+ * `diagnostic: false` means the text is OUR OWN English -- something the edge
+ * function put in its `{ "error": ... }` body, or a client-side assertion. It has
+ * to be replaced before it reaches a Russian toast, and the caller has localized
+ * copy for it.
+ *
+ * `diagnostic: true` means nobody planned this message: a network failure, a
+ * proxy page, an HTTP status with no body. It is the only description of what
+ * went wrong that exists, so swallowing it makes the toast useless exactly when
+ * something unforeseen happened.
+ *
+ * Carrying the ORIGIN rather than the text is the point. `send-project-invite`
+ * answers with fourteen fixed strings AND two dynamic branches that render
+ * whatever `ProjectInviteEmailConfigError` carries (missing env var, malformed
+ * PROJECT_INVITE_BASE_URL, and so on). Any list of strings kept on this side is
+ * incomplete the moment the function grows a message, and the incompleteness is
+ * silent: the new string simply falls through into the UI in English. A review
+ * round caught exactly that after the first version of this enumerated eleven of
+ * them and called the list exhaustive.
+ */
+interface EdgeFunctionFailure {
+  readonly message: string;
+  readonly diagnostic: boolean;
+}
+
+/**
+ * Thrown by `sendWorkspaceProjectInviteEmail` so the UI can tell OUR English from
+ * an unplanned failure without matching on message text. See EdgeFunctionFailure
+ * for what `diagnostic` means; `describeInviteSendError` is the consumer.
+ */
+export class ProjectInviteEmailSendError extends Error {
+  constructor(message: string, public readonly diagnostic: boolean) {
+    super(message);
+    this.name = "ProjectInviteEmailSendError";
   }
-  return "Unable to send invite email";
+}
+
+function messageFromEdgeFunctionFailure(error: unknown, data: unknown): EdgeFunctionFailure {
+  const fromJson = parseEdgeFunctionErrorBody(data);
+  if (fromJson) return { message: fromJson, diagnostic: false };
+  if (error && typeof error === "object" && "message" in error && typeof (error as { message: unknown }).message === "string") {
+    return { message: (error as { message: string }).message, diagnostic: true };
+  }
+  return { message: "Unable to send invite email", diagnostic: false };
 }
 
 /**
  * When `functions.invoke` fails with `FunctionsHttpError`, `error.context` is the raw `Response`
  * (body not yet consumed). Read JSON `{ error }` or text so toasts show the backend reason.
  */
-async function messageFromFunctionsInvokeFailure(error: unknown, data: unknown): Promise<string> {
+async function messageFromFunctionsInvokeFailure(
+  error: unknown,
+  data: unknown,
+): Promise<EdgeFunctionFailure> {
   const fromData = parseEdgeFunctionErrorBody(data);
-  if (fromData) return fromData;
+  if (fromData) return { message: fromData, diagnostic: false };
 
   if (error && typeof error === "object" && "context" in error) {
     const ctx = (error as { context?: unknown }).context;
@@ -549,21 +591,29 @@ async function messageFromFunctionsInvokeFailure(error: unknown, data: unknown):
       const raw = await ctx.clone().text().catch(() => "");
       const trimmed = raw.trim();
       if (trimmed) {
+        // A parsed `{ error }` / `{ message }` is the function speaking, so it is
+        // our own English and gets localized. Anything else in the body is not:
+        // an HTML error page from a proxy, a gateway timeout, a truncated
+        // response. That text is unplanned and therefore worth showing.
         try {
           const j = JSON.parse(trimmed) as Record<string, unknown>;
-          if (typeof j.error === "string") return j.error;
+          if (typeof j.error === "string") return { message: j.error, diagnostic: false };
           if (j.error && typeof j.error === "object" && j.error !== null && "message" in j.error) {
             const m = (j.error as { message?: unknown }).message;
-            if (typeof m === "string") return m;
+            if (typeof m === "string") return { message: m, diagnostic: false };
           }
-          if (typeof j.message === "string") return j.message;
+          if (typeof j.message === "string") return { message: j.message, diagnostic: false };
         } catch {
           /* not JSON */
         }
-        return trimmed.length <= 400 ? trimmed : `${trimmed.slice(0, 400)}…`;
+        const body = trimmed.length <= 400 ? trimmed : `${trimmed.slice(0, 400)}…`;
+        return { message: body, diagnostic: true };
       }
       const statusText = ctx.statusText?.trim();
-      return statusText ? `HTTP ${status} ${statusText}` : `HTTP ${status}`;
+      return {
+        message: statusText ? `HTTP ${status} ${statusText}` : `HTTP ${status}`,
+        diagnostic: true,
+      };
     }
   }
 
@@ -618,7 +668,8 @@ export async function sendWorkspaceProjectInviteEmail(
   });
 
   if (error) {
-    throw new Error(await messageFromFunctionsInvokeFailure(error, data));
+    const failure = await messageFromFunctionsInvokeFailure(error, data);
+    throw new ProjectInviteEmailSendError(failure.message, failure.diagnostic);
   }
 
   const parsed = parseSendProjectInviteSuccess(data, inviteId);
@@ -628,10 +679,12 @@ export async function sendWorkspaceProjectInviteEmail(
 
   const bodyError = parseEdgeFunctionErrorBody(data);
   if (bodyError) {
-    throw new Error(bodyError);
+    throw new ProjectInviteEmailSendError(bodyError, false);
   }
 
-  throw new Error("Unexpected response from send-project-invite");
+  // A 200 whose body is neither a success nor an `{ error }`. Not diagnostic: the
+  // string names an internal contract and tells a user nothing they can act on.
+  throw new ProjectInviteEmailSendError("Unexpected response from send-project-invite", false);
 }
 
 export async function resolveWorkspaceMode(): Promise<WorkspaceMode> {

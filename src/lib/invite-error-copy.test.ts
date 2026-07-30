@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ProjectInviteAlreadyOutstandingError } from "@/data/workspace-source";
+import {
+  ProjectInviteAlreadyOutstandingError,
+  ProjectInviteEmailSendError,
+} from "@/data/workspace-source";
 import ruLocale from "@/locales/ru.json";
 import { describeInviteCreateError, describeInviteSendError } from "@/lib/invite-error-copy";
 
@@ -69,51 +72,60 @@ describe("describeInviteCreateError", () => {
  * went straight into a Russian toast. These pin that none of them can now.
  */
 describe("describeInviteSendError", () => {
+  // The three the owner can act on keep their own copy, matched on text.
   it("maps the expiry 409 to its own localized key", () => {
-    expect(describeInviteSendError(new Error("Invite has expired"), t, "fallback"))
+    expect(describeInviteSendError(new ProjectInviteEmailSendError("Invite has expired", false), t, "fallback"))
       .toBe("participants.error.sendExpired");
   });
 
   it("maps the not-pending 409", () => {
-    expect(describeInviteSendError(new Error("Invite is no longer pending"), t, "fallback"))
+    expect(describeInviteSendError(new ProjectInviteEmailSendError("Invite is no longer pending", false), t, "fallback"))
       .toBe("participants.error.sendNoLongerPending");
   });
 
   it("maps the 404", () => {
-    expect(describeInviteSendError(new Error("Invite not found"), t, "fallback"))
+    expect(describeInviteSendError(new ProjectInviteEmailSendError("Invite not found", false), t, "fallback"))
       .toBe("participants.error.sendNotFound");
   });
 
-  it("gives every OTHER backend string the localized fallback rather than English", () => {
-    // The whole remaining surface of the edge function, verbatim from
-    // supabase/functions/send-project-invite/index.ts. None is actionable by the
-    // owner, so none earns its own copy; what matters is that none is rendered.
-    const serverFaults = [
-      "Method not allowed",
-      "Authorization header is required",
-      "Invalid JSON body",
-      "inviteId must be a UUID string",
-      "Failed to load invite",
-      "Failed to load project",
-      "Project not found",
-      "Failed to load inviter profile",
-      "Inviter profile not found",
-      "Inviter profile is missing a displayable name",
+  /**
+   * The assertion that replaced an enumerated fault list. These are not a sample
+   * of known strings: they include the DYNAMIC config-error branch, which no list
+   * in this repo could have covered, and which a review round found missing from
+   * the first version. What makes them localize is the origin flag, so a message
+   * the function grows tomorrow localizes too, without touching this file.
+   */
+  it("localizes ANY non-diagnostic message from the function, listed or not", () => {
+    const fromTheFunction = [
       "Failed to send invite email",
+      "Inviter profile is missing a displayable name",
+      "inviteId must be a UUID string",
+      // the dynamic branches, i.e. the ones an enumeration missed
+      "Missing required environment variable: RESEND_API_KEY",
+      "PROJECT_INVITE_BASE_URL must be a valid absolute URL",
+      "Accept URL is required",
+      // and a string that does not exist yet, standing in for the next one added
+      "Some condition nobody has written yet",
     ];
 
-    for (const fault of serverFaults) {
-      expect(describeInviteSendError(new Error(fault), t, "fallback")).toBe("fallback");
+    for (const message of fromTheFunction) {
+      expect(describeInviteSendError(new ProjectInviteEmailSendError(message, false), t, "fallback"))
+        .toBe("fallback");
     }
   });
 
-  it("PRESERVES the message of an error the function never produced", () => {
-    // The counter-direction, and the reason the fault list is enumerated rather
-    // than being a catch-all. A network failure, a timeout or a supabase-js
-    // fault carries the only description of what went wrong that exists;
-    // replacing it with a generic would make the toast useless precisely when
-    // something unforeseen happened. Two pre-existing tests in
-    // ProjectParticipants.test.tsx assert this end to end.
+  it("PRESERVES a diagnostic message, which is the counter-direction", () => {
+    // An unplanned failure: a proxy page, a bare HTTP status, a network error.
+    // Nobody wrote this text, so it is the only description of the problem there
+    // is; collapsing it to a generic would make the toast useless precisely when
+    // something unforeseen happened.
+    expect(describeInviteSendError(new ProjectInviteEmailSendError("HTTP 502 Bad Gateway", true), t, "fallback"))
+      .toBe("HTTP 502 Bad Gateway");
+  });
+
+  it("PRESERVES the message of a plain Error from outside the send path", () => {
+    // Two pre-existing tests in ProjectParticipants.test.tsx assert this end to
+    // end with "SMTP unavailable" and "Rate limited".
     expect(describeInviteSendError(new Error("SMTP unavailable"), t, "fallback"))
       .toBe("SMTP unavailable");
     expect(describeInviteSendError(new Error("Rate limited"), t, "fallback"))
@@ -126,12 +138,6 @@ describe("describeInviteSendError", () => {
   });
 });
 
-/**
- * The keys above are asserted as strings, which proves the branch was taken but
- * not that anything is written for it. This closes that: a mapped key with no RU
- * string renders the raw key to the user, which is worse than the English it
- * replaced.
- */
 describe("invite send/create copy exists in RU", () => {
   it.each([
     "participants.error.inviteAlreadyOutstanding",
