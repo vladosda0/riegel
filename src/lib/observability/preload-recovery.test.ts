@@ -117,7 +117,7 @@ describe("reportDeferredRecovery", () => {
     expect(captureMessage).toHaveBeenCalledWith(
       expect.stringContaining("preload failure"),
       expect.objectContaining({
-        tags: { source: "preload-recovery" },
+        tags: { source: "preload-recovery", recoveryKind: "preload" },
         extra: expect.objectContaining({ reason: REAL_MESSAGE, attemptedAt: expect.any(String) }),
       }),
     );

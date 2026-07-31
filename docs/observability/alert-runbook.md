@@ -110,11 +110,23 @@ broken deploy when it usually isn't.
   look at when it shows up, so it belongs in the weekly digest rather than being
   filed away as a silent counter. It still does not page — A1 needs a ~10×
   spike, which a healthy trickle of single-user recoveries will never reach.
+- **Recovery for the silent CSS case:** `src/lib/observability/stylesheet-guard.ts`
+  covers the half `vite:preloadError` cannot see, where the host answers a dead
+  `/assets/*.css` with `index.html` and the browser fires `load`. It reports as
+  `Recovered from a stylesheet served as non-CSS by reloading`, tagged
+  `recoveryKind=stylesheet`, and **shares the one-reload-per-session budget**
+  above, so a deploy that breaks a stylesheet and a chunk at once still reloads
+  only once. Details of the detection are under the gaps below.
 
-#### Two known host-side gaps behind this alert (Timeweb / Caddy, not fixable in this repo)
+#### Two known host-side gaps behind this alert (Timeweb / Caddy)
 
-Verified against prod on 2026-07-27, and still open. Both need a change on
-Timeweb's side; the app-side recovery above is what we can do without them.
+Verified against prod on 2026-07-27, and both still present on the host. They
+originate in its web server, but Timeweb has declined to make either
+configurable and has no plans to (see below), so closing them is on us.
+
+Status: **gap 2's user-visible symptom is now mitigated in the app**
+(`stylesheet-guard.ts`, below). Gap 1 is not, and neither gap is *fixed* — the
+host still serves no `Cache-Control` and still answers a dead asset with `200`.
 
 1. **No `Cache-Control` header at all** on `index.html` or the hashed assets
    (`curl -I https://rovno.ai/` shows only `etag` / `last-modified`). Browsers
@@ -132,22 +144,73 @@ Timeweb's side; the app-side recovery above is what we can do without them.
    failure. Wanted: serve the SPA fallback for navigation requests only, and
    return a real 404 under `/assets/*`.
 
-**The dashboard route is ruled out** (checked 2026-07-27, app `Rovno.ai`
-ID 183673). The «Настройки» tab of an App Platform frontend app exposes exactly
-five blocks — «Настройки деплоя» (framework, Node version, build command,
-dependencies, build dir, project path, env vars, branch, autodeploy),
-«Конфигурация», «Лимит входящих запросов», «Домены», «Проект». There is no
-header and no routing/rewrite setting anywhere in it, and App Platform reads no
-repo-level config file either (no `_headers` / `_redirects` / `.htaccess` /
-`Caddyfile` equivalent is documented or supported). So the only two paths are a
-**support request** to Timeweb, or **switching the app to a Dockerfile deploy**
-so we ship our own web server config — the latter changes the app type and its
-pricing model, so it is a deliberate decision, not a quick fix.
+**Both are permanent on App Platform. Do not re-investigate the platform.**
+Timeweb support answered on 2026-07-27, for apps `Rovno.ai` (ID 183673) and
+`rovno-staging` (ID 189624), which have the two gaps identically:
 
-Staging (`rovno-staging`, ID 189624) has both gaps identically, so any request
-should cover both apps. A drafted support ticket (in Russian, with the curl
-evidence) is the next action; replace this whole subsection with the resolved
-state once the change lands.
+> В App Platform отсутствует возможность изменять конфигурацию Caddy. Доступны
+> только те настройки, которые предусмотрены в панели управления. […] Планов на
+> реализацию подобного функционала нет.
+
+They recommended moving the project to a VDS for full server control, and
+suggested filing the request at <https://timeweb.cloud/my/ideas>.
+
+Three platform routes were checked and are all dead ends, so that nobody spends
+the afternoon again:
+
+- **The panel.** An App Platform frontend app's «Настройки» tab exposes exactly
+  five blocks — «Настройки деплоя» (framework, Node version, build command,
+  dependencies, build dir, project path, env vars, branch, autodeploy),
+  «Конфигурация», «Лимит входящих запросов», «Домены», «Проект». No header
+  setting, no routing or rewrite setting.
+- **A repo-level config file.** App Platform reads none. There is no documented
+  or supported `_headers` / `_redirects` / `.htaccess` / `Caddyfile` equivalent.
+- **Timeweb CDN in front of the app.** Its «Кэширование в браузере» option does
+  add a `Cache-Control` header, but as a *single global TTL* for the whole
+  resource, with no per-path or per-extension rules anywhere in its settings. It
+  therefore cannot express the split this needs (`no-cache` on HTML *and*
+  `immutable` on `/assets/*`), it does nothing at all for gap 2 (the origin
+  still answers `200 text/html`), and it is designed to serve a separate
+  delivery domain rather than front the apex. Not a fix.
+
+##### How gap 2 is detected in the app (built 2026-07-27)
+
+The signal is not the one you would first guess. Measured against prod by
+injecting a `<link rel=stylesheet>` and reading it back:
+
+| href | event | `link.sheet` | `content-type` |
+| --- | --- | --- | --- |
+| `/assets/landing-DOESNOTEXIST.css` (SPA fallback) | `load` | `CSSStyleSheet(0 rules)` | `text/html` |
+| `/assets/index-CB2HeGfr.css` (real) | `load` | `CSSStyleSheet(1352 rules)` | `text/css` |
+
+`link.sheet` is **not** `null`. The sheet object exists and parses to zero rules,
+because HTML is not valid CSS. So the trigger is a sheet that parsed to nothing,
+and the check is deliberately two-stage: zero rules alone is only a *suspect*,
+because a legitimately empty CSS chunk looks identical. Each suspect is confirmed
+by re-reading its `content-type` (`cache: "force-cache"`, so it normally costs no
+network), and only a non-CSS type reloads. Anything inconclusive declines —
+an offline confirm fetch, or a cross-origin sheet whose `cssRules` throws —
+because reloading on a guess is worse than the unstyled page being fixed.
+
+Not handled on purpose: a stylesheet that fires `error`. Lazy-chunk CSS already
+reaches `vite:preloadError`, and a second reload path for a genuine network error
+would reload offline users for something that is not this bug. Revisit if the
+host ever does start returning real 404s.
+
+##### Still open
+
+1. **Gap 1 has no mitigation yet.** The intended one is a build-stamped version
+   check: `__APP_RELEASE__` is already baked into the bundle (see
+   `vite.config.ts`), so a small artifact fetched with `cache: "no-store"` and
+   compared against it would detect that the loaded document is stale. What that
+   should *do* on detection is an open product call (silent reload on the next
+   navigation, a prompt, or nothing but telemetry), which is why it is not built.
+2. **A Dockerfile deploy** on App Platform, shipping our own web server config.
+   Actually fixes both gaps at the layer where they belong, and restores real
+   404s in the access logs, which no in-app guard can do. Changes the app type
+   and its pricing model.
+3. **A VDS**, Timeweb's own suggestion. Full control, most ops burden, and it
+   couples frontend availability to a server we maintain.
 
 ## Muting / vacation mode (Open Question #8)
 

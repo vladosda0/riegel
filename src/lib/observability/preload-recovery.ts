@@ -23,18 +23,30 @@ import { captureMessage } from "@/lib/observability/sentry";
  * RootErrorBoundary, whose «Обновить страницу» button hands the decision back
  * to the user instead of trapping them in a reload cycle.
  *
- * Note what is NOT covered: Timeweb's Caddy answers a missing `/assets/*` with
- * the SPA fallback (`200 text/html`, verified against prod), and Chromium fires
- * `load` — not `error` — for a stylesheet served as HTML. So a stale *CSS*
- * hash yields an unstyled page and never reaches this handler; a stale *JS*
- * hash does reach it, because a module script with an HTML MIME type is a hard
- * import failure. Closing the CSS half needs a real 404 for `/assets/*` on the
- * host, which is not configurable from this repo — see
- * docs/observability/alert-runbook.md § A4.
+ * What does NOT reach this handler: Timeweb's Caddy answers a missing
+ * `/assets/*` with the SPA fallback (`200 text/html`, verified against prod),
+ * and Chromium fires `load` — not `error` — for a stylesheet served as HTML. So
+ * a stale *CSS* hash yields an unstyled page and no event here; a stale *JS*
+ * hash does reach us, because a module script with an HTML MIME type is a hard
+ * import failure.
+ *
+ * Timeweb has declined to make that 404 configurable and has no plans to
+ * (support, 2026-07-27 — see docs/observability/alert-runbook.md § A4), so the
+ * CSS half is covered from here instead, by ./stylesheet-guard.ts. It shares
+ * this module's reload budget through `attemptRecoveryReload`: the cap is ONE
+ * reload per browsing session across BOTH detectors, so a deploy that breaks a
+ * stylesheet and a chunk at once still cannot produce two reloads.
  */
 
 /** sessionStorage key. Its presence is the "retry already spent" guard. */
 const SESSION_KEY = "rovno.preloadRecovery";
+
+/**
+ * Which detector spent the reload. Only affects the wording of the deferred
+ * Sentry message: the two failures have different causes and want to be told
+ * apart in the weekly digest, even though they share one budget.
+ */
+export type RecoveryKind = "preload" | "stylesheet";
 
 interface RecoveryRecord {
   /** Vite's error message, which carries the asset URL that failed. */
@@ -43,6 +55,21 @@ interface RecoveryRecord {
   at: string;
   /** True once the deferred Sentry report has gone out. */
   reported: boolean;
+  /**
+   * Absent on records written before this field existed, and on anything a
+   * future version writes that we do not recognise; both read back as
+   * "preload", which is the older of the two behaviours.
+   */
+  kind: RecoveryKind;
+}
+
+const RECOVERY_MESSAGES: Record<RecoveryKind, string> = {
+  preload: "Recovered from a Vite preload failure by reloading",
+  stylesheet: "Recovered from a stylesheet served as non-CSS by reloading",
+};
+
+function parseKind(value: unknown): RecoveryKind {
+  return value === "stylesheet" ? "stylesheet" : "preload";
 }
 
 /** `vite:preloadError` is a plain Event with the rejection hung off `payload`. */
@@ -64,9 +91,9 @@ function readRecord(): RecoveryRecord | null {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return null;
-    const { reason, at, reported } = parsed as Record<string, unknown>;
+    const { reason, at, reported, kind } = parsed as Record<string, unknown>;
     if (typeof reason !== "string" || typeof at !== "string") return null;
-    return { reason, at, reported: reported === true };
+    return { reason, at, reported: reported === true, kind: parseKind(kind) };
   } catch {
     return null;
   }
@@ -100,6 +127,36 @@ export interface PreloadErrorHandlerOptions {
   suppressReload: boolean;
 }
 
+/**
+ * Spend the session's single reload, or decline.
+ *
+ * The one place that owns the budget, so every detector competes for the same
+ * one reload. Returns true only when a reload was actually triggered, which is
+ * what lets a caller fall back to its own honest-failure path.
+ */
+export function attemptRecoveryReload(
+  kind: RecoveryKind,
+  reason: string,
+  options: PreloadErrorHandlerOptions,
+): boolean {
+  if (options.suppressReload) {
+    console.warn(`[${kind}] ${reason} — automatic reload suppressed in dev`);
+    return false;
+  }
+
+  // Retry already spent this session: decline.
+  if (readRecord()) return false;
+
+  // No storage means no loop guard, and an unguarded reload on a
+  // permanently broken asset is worse than the error screen.
+  if (!writeRecord({ kind, reason, at: new Date().toISOString(), reported: false })) {
+    return false;
+  }
+
+  options.reload();
+  return true;
+}
+
 export function createPreloadErrorHandler(
   options: PreloadErrorHandlerOptions,
 ): (event: Event) => void {
@@ -111,19 +168,7 @@ export function createPreloadErrorHandler(
     // missing stylesheet; letting it throw means that if the reload does not
     // land we show an honest error screen instead of a silently broken page.
 
-    if (options.suppressReload) {
-      console.warn(`[preload] ${reason} — automatic reload suppressed in dev`);
-      return;
-    }
-
-    // Retry already spent this session: let the error through.
-    if (readRecord()) return;
-
-    // No storage means no loop guard, and an unguarded reload on a
-    // permanently broken asset is worse than the error screen.
-    if (!writeRecord({ reason, at: new Date().toISOString(), reported: false })) return;
-
-    options.reload();
+    attemptRecoveryReload("preload", reason, options);
   };
 }
 
@@ -139,8 +184,8 @@ export function reportDeferredRecovery(): void {
   // Marked before reporting, so a throw inside capture cannot double-report.
   writeRecord({ ...record, reported: true });
 
-  captureMessage("Recovered from a Vite preload failure by reloading", {
-    tags: { source: "preload-recovery" },
+  captureMessage(RECOVERY_MESSAGES[record.kind], {
+    tags: { source: "preload-recovery", recoveryKind: record.kind },
     extra: { reason: record.reason, attemptedAt: record.at },
   });
 }
