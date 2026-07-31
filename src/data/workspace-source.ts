@@ -525,22 +525,64 @@ async function loadSupabaseClient(): Promise<TypedSupabaseClient> {
   return supabase as unknown as TypedSupabaseClient;
 }
 
-function messageFromEdgeFunctionFailure(error: unknown, data: unknown): string {
-  const fromJson = parseEdgeFunctionErrorBody(data);
-  if (fromJson) return fromJson;
-  if (error && typeof error === "object" && "message" in error && typeof (error as { message: unknown }).message === "string") {
-    return (error as { message: string }).message;
+/**
+ * A failure message plus whether it is worth showing a user verbatim.
+ *
+ * `diagnostic: false` means the text is OUR OWN English -- something the edge
+ * function put in its `{ "error": ... }` body, or a client-side assertion. It has
+ * to be replaced before it reaches a Russian toast, and the caller has localized
+ * copy for it.
+ *
+ * `diagnostic: true` means nobody planned this message: a network failure, a
+ * proxy page, an HTTP status with no body. It is the only description of what
+ * went wrong that exists, so swallowing it makes the toast useless exactly when
+ * something unforeseen happened.
+ *
+ * Carrying the ORIGIN rather than the text is the point. `send-project-invite`
+ * answers with fourteen fixed strings AND two dynamic branches that render
+ * whatever `ProjectInviteEmailConfigError` carries (missing env var, malformed
+ * PROJECT_INVITE_BASE_URL, and so on). Any list of strings kept on this side is
+ * incomplete the moment the function grows a message, and the incompleteness is
+ * silent: the new string simply falls through into the UI in English. A review
+ * round caught exactly that after the first version of this enumerated eleven of
+ * them and called the list exhaustive.
+ */
+interface EdgeFunctionFailure {
+  readonly message: string;
+  readonly diagnostic: boolean;
+}
+
+/**
+ * Thrown by `sendWorkspaceProjectInviteEmail` so the UI can tell OUR English from
+ * an unplanned failure without matching on message text. See EdgeFunctionFailure
+ * for what `diagnostic` means; `describeInviteSendError` is the consumer.
+ */
+export class ProjectInviteEmailSendError extends Error {
+  constructor(message: string, public readonly diagnostic: boolean) {
+    super(message);
+    this.name = "ProjectInviteEmailSendError";
   }
-  return "Unable to send invite email";
+}
+
+function messageFromEdgeFunctionFailure(error: unknown, data: unknown): EdgeFunctionFailure {
+  const fromJson = parseEdgeFunctionErrorBody(data);
+  if (fromJson) return { message: fromJson, diagnostic: false };
+  if (error && typeof error === "object" && "message" in error && typeof (error as { message: unknown }).message === "string") {
+    return { message: (error as { message: string }).message, diagnostic: true };
+  }
+  return { message: "Unable to send invite email", diagnostic: false };
 }
 
 /**
  * When `functions.invoke` fails with `FunctionsHttpError`, `error.context` is the raw `Response`
  * (body not yet consumed). Read JSON `{ error }` or text so toasts show the backend reason.
  */
-async function messageFromFunctionsInvokeFailure(error: unknown, data: unknown): Promise<string> {
+async function messageFromFunctionsInvokeFailure(
+  error: unknown,
+  data: unknown,
+): Promise<EdgeFunctionFailure> {
   const fromData = parseEdgeFunctionErrorBody(data);
-  if (fromData) return fromData;
+  if (fromData) return { message: fromData, diagnostic: false };
 
   if (error && typeof error === "object" && "context" in error) {
     const ctx = (error as { context?: unknown }).context;
@@ -549,21 +591,49 @@ async function messageFromFunctionsInvokeFailure(error: unknown, data: unknown):
       const raw = await ctx.clone().text().catch(() => "");
       const trimmed = raw.trim();
       if (trimmed) {
+        // A parsed `{ error }` is the FUNCTION speaking. All SEVENTEEN of its
+        // error responses use that key -- fourteen fixed strings plus two dynamic
+        // branches -- and so does withSentry's uncaught-throw 500. The only
+        // bodies that are not `{ error }` are the success payload and the OPTIONS
+        // `"ok"`, neither of which reaches here. So this is our own English and
+        // gets localized. (The `message:` occurrences in that file are fields of
+        // console.error log objects, not response bodies.)
+        //
+        // A parsed `{ message }` is therefore NOT the function; it is the
+        // platform in front of it. Most of those are whole-deployment conditions
+        // whose text is the only clue which one it is -- a function not deployed
+        // to this environment, a BOOT_ERROR -- and swallowing that while the
+        // branches below surface a raw proxy page and a bare HTTP status, which
+        // say strictly less, would be inconsistent as well as unhelpful.
+        //
+        // But NOT all of them, and the exception is the common one. A gateway 401
+        // or 403 is per-USER, not per-deployment: a session that lapsed between
+        // page load and pressing the button produces `{"code":401,"message":"Invalid
+        // JWT"}`, and "Invalid JWT" is both English and useless to the person
+        // reading it. Auth statuses therefore keep the localized copy; everything
+        // else keeps its text.
         try {
           const j = JSON.parse(trimmed) as Record<string, unknown>;
-          if (typeof j.error === "string") return j.error;
+          if (typeof j.error === "string") return { message: j.error, diagnostic: false };
           if (j.error && typeof j.error === "object" && j.error !== null && "message" in j.error) {
             const m = (j.error as { message?: unknown }).message;
-            if (typeof m === "string") return m;
+            if (typeof m === "string") return { message: m, diagnostic: false };
           }
-          if (typeof j.message === "string") return j.message;
+          if (typeof j.message === "string") {
+            const isAuthStatus = status === 401 || status === 403;
+            return { message: j.message, diagnostic: !isAuthStatus };
+          }
         } catch {
           /* not JSON */
         }
-        return trimmed.length <= 400 ? trimmed : `${trimmed.slice(0, 400)}…`;
+        const body = trimmed.length <= 400 ? trimmed : `${trimmed.slice(0, 400)}…`;
+        return { message: body, diagnostic: true };
       }
       const statusText = ctx.statusText?.trim();
-      return statusText ? `HTTP ${status} ${statusText}` : `HTTP ${status}`;
+      return {
+        message: statusText ? `HTTP ${status} ${statusText}` : `HTTP ${status}`,
+        diagnostic: true,
+      };
     }
   }
 
@@ -618,7 +688,8 @@ export async function sendWorkspaceProjectInviteEmail(
   });
 
   if (error) {
-    throw new Error(await messageFromFunctionsInvokeFailure(error, data));
+    const failure = await messageFromFunctionsInvokeFailure(error, data);
+    throw new ProjectInviteEmailSendError(failure.message, failure.diagnostic);
   }
 
   const parsed = parseSendProjectInviteSuccess(data, inviteId);
@@ -628,10 +699,12 @@ export async function sendWorkspaceProjectInviteEmail(
 
   const bodyError = parseEdgeFunctionErrorBody(data);
   if (bodyError) {
-    throw new Error(bodyError);
+    throw new ProjectInviteEmailSendError(bodyError, false);
   }
 
-  throw new Error("Unexpected response from send-project-invite");
+  // A 200 whose body is neither a success nor an `{ error }`. Not diagnostic: the
+  // string names an internal contract and tells a user nothing they can act on.
+  throw new ProjectInviteEmailSendError("Unexpected response from send-project-invite", false);
 }
 
 export async function resolveWorkspaceMode(): Promise<WorkspaceMode> {
@@ -1112,6 +1185,44 @@ export class ProjectInviteNoLongerPendingError extends Error {
 }
 
 /**
+ * A pending invite for this address already exists on this project, so the
+ * insert hit `idx_project_invites_active_email`.
+ *
+ * This became reachable in ordinary use with rovno-db 20260729130100. Invites
+ * now expire, but nothing flips an expired one to `expired` -- expiry is a
+ * derived state, and the row stays `pending`, so it keeps its slot in that
+ * partial index. Fifteen days after an invite is ignored, re-inviting the same
+ * address fails here rather than at any check the UI performs, because the two
+ * client-side pre-checks (`pendingInviteEmailSet` and friends) validate against
+ * a React Query cache that has no idea the row is dead.
+ *
+ * Surfaced as a typed error rather than the raw PostgREST one because
+ * "duplicate key value violates unique constraint" is both English and useless:
+ * the actionable instruction is to revoke the outstanding invite, and the
+ * revoke button is already in the participants list.
+ */
+export class ProjectInviteAlreadyOutstandingError extends Error {
+  constructor(public readonly email: string) {
+    super(`A pending invite for ${email} already exists on this project.`);
+    this.name = "ProjectInviteAlreadyOutstandingError";
+  }
+}
+
+/**
+ * Narrow: a 23505 on this table can also come from the `unique (invite_token)`
+ * constraint, which would be a collision of two gen_random_uuid() values and
+ * emphatically not something to tell the user to fix by revoking an invite. So
+ * match the index by name and let anything else through untouched.
+ */
+function isActiveInviteEmailConflict(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { code?: unknown; message?: unknown };
+  if (candidate.code !== "23505") return false;
+  return typeof candidate.message === "string"
+    && candidate.message.includes("idx_project_invites_active_email");
+}
+
+/**
  * Revokes a pending invite (status → 'revoked'), keeping the row for history.
  *
  * Deliberately a dedicated status-only UPDATE: `updateWorkspaceProjectInvite`
@@ -1236,6 +1347,10 @@ export async function createWorkspaceProjectInvite(
     .select("*")
     .single();
 
+  if (isActiveInviteEmailConflict(error)) {
+    throw new ProjectInviteAlreadyOutstandingError(basePayload.email);
+  }
+
   if (error || !data) {
     throw error ?? new Error("Unable to create project invite");
   }
@@ -1273,8 +1388,13 @@ export async function updateWorkspaceProjectInvite(
         : {}),
       // status is spread only when explicitly provided — an axis/role edit must
       // never resurrect a concurrently revoked/accepted invite back to its
-      // stale status (there is no DB status-transition guard). Status changes
-      // go through revokeWorkspaceProjectInvite / accept_project_invite only.
+      // stale status. Status changes go through revokeWorkspaceProjectInvite /
+      // accept_project_invite only.
+      //
+      // In supabase mode this is now belt AND braces: rovno-db 20260729130100
+      // added guard_project_invite_status_transition, so a write back to
+      // 'pending' is rejected by the database. This branch is the BROWSER store,
+      // which has no such trigger, so the discipline still has to be kept here.
       ...(input.status !== undefined ? { status: input.status } : {}),
     }, mode.kind);
     if (!updated) {

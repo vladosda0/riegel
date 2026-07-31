@@ -82,7 +82,15 @@ export function PendingInvitationsBlock() {
       if (!result.ok) {
         toast({
           title: t("invitations.acceptFailed"),
-          description: result.error.message,
+          // Resolve the CODE, not the message. `error.message` is developer
+          // English written in accept-project-invite.ts, so rendering it put a
+          // raw English sentence in a Russian toast for every failure this block
+          // can reach. InviteAccept.tsx:153 already resolves the code this way;
+          // this was the one acceptance surface that did not, and the new
+          // `invite_expired` code would have added a third English string to it.
+          description: t(`invite.error.${result.error.code}`, {
+            defaultValue: result.error.message,
+          }),
           variant: "destructive",
         });
         return;
