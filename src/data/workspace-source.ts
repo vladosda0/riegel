@@ -591,19 +591,27 @@ async function messageFromFunctionsInvokeFailure(
       const raw = await ctx.clone().text().catch(() => "");
       const trimmed = raw.trim();
       if (trimmed) {
-        // A parsed `{ error }` is the FUNCTION speaking: all nineteen of its
-        // response bodies use that key, so this is our own English and gets
-        // localized. (The three `message:` occurrences in that file are fields of
-        // log objects, not response bodies.)
+        // A parsed `{ error }` is the FUNCTION speaking. All SEVENTEEN of its
+        // error responses use that key -- fourteen fixed strings plus two dynamic
+        // branches -- and so does withSentry's uncaught-throw 500. The only
+        // bodies that are not `{ error }` are the success payload and the OPTIONS
+        // `"ok"`, neither of which reaches here. So this is our own English and
+        // gets localized. (The `message:` occurrences in that file are fields of
+        // console.error log objects, not response bodies.)
         //
-        // A parsed `{ message }` is therefore NOT the function. It can only come
-        // from the platform in front of it: a function that is not deployed to
-        // this environment, a BOOT_ERROR, a worker limit, a Kong 401. Each of
-        // those is a whole-deployment condition and the message is the only clue
-        // to which one, so it is diagnostic. Classifying it with the function's
-        // own strings, as the first version of this did, threw that clue away
-        // while the branches below happily surfaced a raw proxy page and a bare
-        // HTTP status, which say strictly less.
+        // A parsed `{ message }` is therefore NOT the function; it is the
+        // platform in front of it. Most of those are whole-deployment conditions
+        // whose text is the only clue which one it is -- a function not deployed
+        // to this environment, a BOOT_ERROR -- and swallowing that while the
+        // branches below surface a raw proxy page and a bare HTTP status, which
+        // say strictly less, would be inconsistent as well as unhelpful.
+        //
+        // But NOT all of them, and the exception is the common one. A gateway 401
+        // or 403 is per-USER, not per-deployment: a session that lapsed between
+        // page load and pressing the button produces `{"code":401,"message":"Invalid
+        // JWT"}`, and "Invalid JWT" is both English and useless to the person
+        // reading it. Auth statuses therefore keep the localized copy; everything
+        // else keeps its text.
         try {
           const j = JSON.parse(trimmed) as Record<string, unknown>;
           if (typeof j.error === "string") return { message: j.error, diagnostic: false };
@@ -611,7 +619,10 @@ async function messageFromFunctionsInvokeFailure(
             const m = (j.error as { message?: unknown }).message;
             if (typeof m === "string") return { message: m, diagnostic: false };
           }
-          if (typeof j.message === "string") return { message: j.message, diagnostic: true };
+          if (typeof j.message === "string") {
+            const isAuthStatus = status === 401 || status === 403;
+            return { message: j.message, diagnostic: !isAuthStatus };
+          }
         } catch {
           /* not JSON */
         }

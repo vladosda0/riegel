@@ -3,13 +3,13 @@ import * as store from "@/data/store";
 import { describeInviteSendError } from "@/lib/invite-error-copy";
 import {
   createWorkspaceProjectInvite,
-  ProjectInviteEmailSendError,
   DEFAULT_PROFILE_PREFERENCES,
   filterActiveProjectRows,
   getWorkspaceSource,
   mapProfileRowToUser,
   mapProjectMemberRowToMember,
   mapProjectRowToProject,
+  ProjectInviteEmailSendError,
   selectWorkspaceMode,
   sendWorkspaceProjectInviteEmail,
   updateWorkspaceProjectInvite,
@@ -493,6 +493,23 @@ describe("sendWorkspaceProjectInviteEmail failure classification", () => {
 
     expect(err.diagnostic).toBe(true);
     expect(describeInviteSendError(err, (k) => k, "fallback")).toBe("Requested function was not found");
+  });
+
+  it("keeps a gateway 401 NON-diagnostic, because it is per-user and unreadable", async () => {
+    // A session that lapsed between page load and pressing the button. The
+    // envelope is the platform's, so it takes the {message} branch, but "Invalid
+    // JWT" is English and tells the person reading it nothing they can act on --
+    // unlike a BOOT_ERROR, which is the deployment-wide case that branch exists
+    // for. Status is what separates them.
+    invokeMock.mockResolvedValue(
+      httpErrorWith(JSON.stringify({ code: 401, message: "Invalid JWT" }), 401),
+    );
+
+    const err = await caught();
+
+    expect(err.message).toBe("Invalid JWT");
+    expect(err.diagnostic).toBe(false);
+    expect(describeInviteSendError(err, (k) => k, "fallback")).toBe("fallback");
   });
 
   it("marks a bodyless response as diagnostic", async () => {
