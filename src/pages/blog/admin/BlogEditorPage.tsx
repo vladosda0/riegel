@@ -9,7 +9,7 @@
 // Hardcoded Russian on purpose — the blog is a RU-first editorial surface,
 // same convention as the landing (no i18n keys there either).
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import type { Editor } from "@tiptap/react";
 import {
@@ -90,16 +90,22 @@ function deriveExcerpt(text: string): string {
   return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), 120))}…`;
 }
 
-function useAutoResize(): (el: HTMLTextAreaElement | null) => void {
-  return useCallback((el: HTMLTextAreaElement | null) => {
+/**
+ * Grow a textarea to fit its content. Driven by the VALUE, not by DOM events:
+ * the form hydrates from the loaded post one render AFTER the field mounts, and
+ * a programmatic value change fires no `input` event. An event-driven version
+ * therefore measured the still-empty field once at mount and left a wrapped
+ * subtitle clipped to a single row until the first keystroke resized it.
+ */
+function useAutoResize(value: string): React.RefObject<HTMLTextAreaElement> {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
     if (!el) return;
-    const resize = () => {
-      el.style.height = "auto";
-      el.style.height = `${el.scrollHeight}px`;
-    };
-    resize();
-    el.addEventListener("input", resize);
-  }, []);
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value]);
+  return ref;
 }
 
 export default function BlogEditorPage() {
@@ -142,8 +148,8 @@ export default function BlogEditorPage() {
   const contentBrokenRef = useRef(false);
   const coverInputRef = useRef<HTMLInputElement>(null);
 
-  const titleResize = useAutoResize();
-  const subtitleResize = useAutoResize();
+  const titleRef = useAutoResize(form.title);
+  const subtitleRef = useAutoResize(form.subtitle);
 
   // Hydrate the form once when editing an existing post.
   useEffect(() => {
@@ -648,7 +654,7 @@ export default function BlogEditorPage() {
 
             {/* Title / subtitle */}
             <textarea
-              ref={titleResize}
+              ref={titleRef}
               value={form.title}
               onChange={(e) => patchForm({ title: e.target.value })}
               placeholder="Название"
@@ -660,7 +666,7 @@ export default function BlogEditorPage() {
               }}
             />
             <textarea
-              ref={subtitleResize}
+              ref={subtitleRef}
               value={form.subtitle}
               onChange={(e) => patchForm({ subtitle: e.target.value })}
               placeholder="Подзаголовок (необязательно)"
