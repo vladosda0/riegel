@@ -319,11 +319,33 @@ export default function ProjectTasks() {
     })();
   }, [canChangeTaskStatus, tasks, toast, workspaceMode, invalidateProjectTasks, pid, t]);
 
+  // A prompt whose compare-and-set can no longer land converges exactly the way
+  // the RPC's own P0002 path does: refetch and tell the user the list moved. A
+  // bare `return` here would leave the confirm button silently dead.
+  const convergeStalePrompt = useCallback(async () => {
+    await invalidateProjectTasks();
+    toast({
+      title: t("tasks.toast.taskRefreshed.title"),
+      description: t("tasks.toast.taskRefreshed.description"),
+    });
+  }, [invalidateProjectTasks, toast, t]);
+
   // Confirm Done
   const handleConfirmDone = useCallback(async () => {
     if (!donePrompt) return;
     const task = tasks.find((entry) => entry.id === donePrompt.taskId);
-    if (!task) return;
+    // The task either left this session's list (deleted, re-projected under a new
+    // id, or RLS-filtered) or another session moved it since the prompt opened.
+    // The CAS cannot pass either way, so converge BEFORE the upload loop runs:
+    // those photos are finalized as is_final rows that nothing rolls back and
+    // that the server would count toward a LATER Done attempt's photo guard.
+    if (!task || task.status !== donePrompt.expectedStatus) {
+      setDonePrompt(null);
+      setDoneFiles([]);
+      setDoneComment("");
+      await convergeStalePrompt();
+      return;
+    }
     if (task.checklist.some((item) => !item.done)) {
       toast({
         title: t("tasks.toast.cannotMarkDone.title"),
@@ -370,8 +392,9 @@ export default function ProjectTasks() {
       trackEvent("task_marked_done", {
         project_id: pid,
         task_id: donePrompt.taskId,
-        // The CAS only passes when the DB still holds the captured status, so
-        // that is the status this transition actually moved from.
+        // The status the user acted on. The RPC path asserts it via the CAS, but
+        // the demo/local source and the pre-P3 fallback ignore expectedStatus, so
+        // this is not a guaranteed DB pre-image on every path.
         from_status: donePrompt.expectedStatus,
       });
 
@@ -381,11 +404,15 @@ export default function ProjectTasks() {
       toast({ title: t("tasks.toast.markedDone") });
     } catch (error) {
       if (error instanceof TaskNoLongerAvailableError) {
+        // Reaching here means the status write lost the race AFTER the upload
+        // loop completed, so the acceptance photos are already attached and
+        // final. Say so plainly instead of the generic "the list refreshed",
+        // which would leave the user guessing where their photos went.
         await invalidateProjectTasks();
         setDonePrompt(null);
         toast({
-          title: t("tasks.toast.taskRefreshed.title"),
-          description: t("tasks.toast.taskRefreshed.description"),
+          title: t("tasks.toast.donePhotosKept.title"),
+          description: t("tasks.toast.donePhotosKept.description"),
         });
         return;
       }
@@ -407,6 +434,7 @@ export default function ProjectTasks() {
     finalizeUpload,
     workspaceMode,
     invalidateProjectTasks,
+    convergeStalePrompt,
     toast,
     pid,
     t,
@@ -416,7 +444,17 @@ export default function ProjectTasks() {
   const handleConfirmBlocked = useCallback(async () => {
     if (!blockedPrompt) return;
     const blockedTask = tasks.find((entry) => entry.id === blockedPrompt.taskId);
-    if (!blockedTask) return; // symmetric with handleConfirmDone
+    // Gone from this session's list: the RPC would raise P0002 anyway, so
+    // converge here rather than returning and leaving a dead button. Unlike the
+    // Done path this does NOT also pre-check a status mismatch — there are no
+    // uploads to protect, so the server CAS stays authoritative and a status
+    // that bounced back to the captured value still lands.
+    if (!blockedTask) {
+      setBlockedPrompt(null);
+      setBlockedReason("");
+      await convergeStalePrompt();
+      return;
+    }
     try {
       const source = await getPlanningSource(
         workspaceMode.kind === "pending-supabase" ? undefined : workspaceMode,
@@ -431,6 +469,7 @@ export default function ProjectTasks() {
       trackEvent("task_marked_blocked", {
         project_id: pid,
         task_id: blockedPrompt.taskId,
+        // Same caveat as the Done path: asserted by the CAS on the RPC path only.
         from_status: blockedPrompt.expectedStatus,
       });
       setBlockedPrompt(null);
@@ -452,7 +491,7 @@ export default function ProjectTasks() {
         variant: "destructive",
       });
     }
-  }, [blockedPrompt, blockedReason, tasks, workspaceMode, invalidateProjectTasks, toast, pid, t]);
+  }, [blockedPrompt, blockedReason, tasks, workspaceMode, invalidateProjectTasks, convergeStalePrompt, toast, pid, t]);
 
   const handleChecklistToggle = useCallback(async (
     taskId: string,

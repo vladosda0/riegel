@@ -1480,6 +1480,8 @@
   "projectData.financeSummary.withoutHr": "без ФОТ",
   "tasks.toast.taskRefreshed.title": "Список задач обновлён",
   "tasks.toast.taskRefreshed.description": "Задача изменилась, пока вы её просматривали. Список обновлён — попробуйте ещё раз.",
+  "tasks.toast.donePhotosKept.title": "Фото сохранены, задача не завершена",
+  "tasks.toast.donePhotosKept.description": "Пока вы добавляли фото, задачу изменил кто-то другой, поэтому она не отмечена выполненной. Фото прикреплены — откройте задачу и отметьте её выполненной снова, если это ещё актуально.",
   "estimate.header.statusLabel": "Статус",
   "estimate.header.versionBadge": "Смета v{{version}}",
   "estimate.header.versionTooltip": "Поделись ссылкой с клиентом для согласования последней версии сметы.",
