@@ -196,13 +196,19 @@ export default function ProjectTasks() {
   const [dropStatus, setDropStatus] = useState<TaskStatus | null>(null);
 
   // --- Done prompt ---
-  const [donePrompt, setDonePrompt] = useState<{ taskId: string } | null>(null);
+  // `expectedStatus` is captured when the prompt OPENS, not read back at confirm
+  // time. The window between the two is user-paced (picking photos, typing a
+  // reason) and the tasks query refetches inside it (refetchOnWindowFocus, and
+  // projection invalidation), so re-reading the live list would adopt another
+  // session's concurrent move as the "expected" value and the CAS in
+  // change_task_status_v2 would always agree with itself.
+  const [donePrompt, setDonePrompt] = useState<{ taskId: string; expectedStatus: TaskStatus } | null>(null);
   const [doneFiles, setDoneFiles] = useState<File[]>([]);
   const [doneUploading, setDoneUploading] = useState(false);
   const [doneComment, setDoneComment] = useState("");
 
-  // --- Blocked prompt ---
-  const [blockedPrompt, setBlockedPrompt] = useState<{ taskId: string } | null>(null);
+  // --- Blocked prompt --- (same capture-at-open rule as the Done prompt above)
+  const [blockedPrompt, setBlockedPrompt] = useState<{ taskId: string; expectedStatus: TaskStatus } | null>(null);
   const [blockedReason, setBlockedReason] = useState("");
 
   // Derived
@@ -266,7 +272,7 @@ export default function ProjectTasks() {
       }
       setBlockedPrompt(null); // close any existing prompt
       setSelectedTaskId(null);
-      setDonePrompt({ taskId });
+      setDonePrompt({ taskId, expectedStatus: task.status });
       setDoneFiles([]);
       setDoneComment("");
       return;
@@ -274,7 +280,7 @@ export default function ProjectTasks() {
     if (newStatus === "blocked") {
       setDonePrompt(null); // close any existing prompt
       setSelectedTaskId(null);
-      setBlockedPrompt({ taskId });
+      setBlockedPrompt({ taskId, expectedStatus: task.status });
       setBlockedReason("");
       return;
     }
@@ -357,14 +363,16 @@ export default function ProjectTasks() {
       // The RPC inserts the acceptance comment once (server-side) alongside the
       // status change; the same text also rode along as the photo caption above.
       await source.changeTaskStatus(donePrompt.taskId, "done", {
-        expectedStatus: task.status,
+        expectedStatus: donePrompt.expectedStatus,
         commentBody: doneComment.trim() || undefined,
       });
       await invalidateProjectTasks();
       trackEvent("task_marked_done", {
         project_id: pid,
         task_id: donePrompt.taskId,
-        from_status: task.status,
+        // The CAS only passes when the DB still holds the captured status, so
+        // that is the status this transition actually moved from.
+        from_status: donePrompt.expectedStatus,
       });
 
       setDonePrompt(null);
@@ -408,6 +416,7 @@ export default function ProjectTasks() {
   const handleConfirmBlocked = useCallback(async () => {
     if (!blockedPrompt) return;
     const blockedTask = tasks.find((entry) => entry.id === blockedPrompt.taskId);
+    if (!blockedTask) return; // symmetric with handleConfirmDone
     try {
       const source = await getPlanningSource(
         workspaceMode.kind === "pending-supabase" ? undefined : workspaceMode,
@@ -415,14 +424,14 @@ export default function ProjectTasks() {
       // The RPC enforces the reason-required guard and inserts the blocker
       // comment once, server-side, alongside the status change.
       await source.changeTaskStatus(blockedPrompt.taskId, "blocked", {
-        expectedStatus: blockedTask?.status,
+        expectedStatus: blockedPrompt.expectedStatus,
         commentBody: t("tasks.toast.blockerPrefix", { reason: blockedReason.trim() }),
       });
       await invalidateProjectTasks();
       trackEvent("task_marked_blocked", {
         project_id: pid,
         task_id: blockedPrompt.taskId,
-        from_status: blockedTask?.status ?? "unknown",
+        from_status: blockedPrompt.expectedStatus,
       });
       setBlockedPrompt(null);
       setBlockedReason("");

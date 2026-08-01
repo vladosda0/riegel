@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   useEstimateV2ProjectionCapability: vi.fn(),
   useMediaUploadMutations: vi.fn(),
   getCurrentUser: vi.fn(),
+  getPlanningSource: vi.fn(),
+  changeTaskStatus: vi.fn(),
 }));
 
 vi.mock("@/hooks/use-mock-data", () => ({
@@ -70,7 +72,7 @@ vi.mock("@/data/store", () => ({
 }));
 
 vi.mock("@/data/planning-source", () => ({
-  getPlanningSource: vi.fn(),
+  getPlanningSource: mocks.getPlanningSource,
   TaskNoLongerAvailableError: class TaskNoLongerAvailableError extends Error {},
 }));
 
@@ -189,6 +191,9 @@ describe("ProjectTasks", () => {
     });
     mocks.useTasks.mockReturnValue([buildTask()]);
     mocks.getCurrentUser.mockReturnValue({ id: "user-1", name: "Owner" });
+    mocks.changeTaskStatus.mockReset();
+    mocks.changeTaskStatus.mockResolvedValue(undefined);
+    mocks.getPlanningSource.mockResolvedValue({ changeTaskStatus: mocks.changeTaskStatus });
     mocks.usePermission.mockReturnValue(buildPermission("owner"));
     mocks.useMedia.mockReturnValue([]);
     mocks.useWorkspaceMode.mockReturnValue({ kind: "supabase", profileId: "user-1" });
@@ -338,5 +343,70 @@ describe("ProjectTasks", () => {
     fireEvent.click(screen.getByRole("button", { name: /Assigned to me/i }));
 
     expect(screen.getByText("Estimate task")).toBeInTheDocument();
+  });
+
+  it("sends the status captured when the Blocked prompt opened, not one refetched meanwhile", async () => {
+    mocks.usePermission.mockReturnValue(buildPermission("contractor"));
+    mocks.useTasks.mockReturnValue([buildTask({ status: "in_progress" })]);
+
+    renderProjectTasks();
+
+    fireEvent.click(screen.getByText("Estimate task"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Blocked" }));
+
+    // Another session moves the task while the reason is being typed; the tasks
+    // query refetches (refetchOnWindowFocus / projection invalidation) and the
+    // live list now reads "done". Typing re-renders with that fresh list.
+    mocks.useTasks.mockReturnValue([buildTask({ status: "done" })]);
+    fireEvent.change(screen.getByPlaceholderText("Describe the reason this task is blocked…"), {
+      target: { value: "Waiting on materials" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Mark Blocked/i }));
+
+    await waitFor(() => expect(mocks.changeTaskStatus).toHaveBeenCalled());
+    expect(mocks.changeTaskStatus).toHaveBeenCalledWith(
+      "task-1",
+      "blocked",
+      expect.objectContaining({ expectedStatus: "in_progress" }),
+    );
+  });
+
+  it("sends the status captured when the Done prompt opened, not one refetched meanwhile", async () => {
+    const prepareUpload = vi.fn().mockResolvedValue({
+      bucket: "media",
+      objectPath: "project-1/photo.jpg",
+      uploadIntentId: "intent-1",
+    });
+    const uploadBytes = vi.fn().mockResolvedValue(undefined);
+    const finalizeUpload = vi.fn().mockResolvedValue(undefined);
+    mocks.useMediaUploadMutations.mockReturnValue({ prepareUpload, uploadBytes, finalizeUpload });
+    mocks.usePermission.mockReturnValue(buildPermission("contractor"));
+    mocks.useTasks.mockReturnValue([buildTask({ status: "in_progress" })]);
+
+    const { container } = renderProjectTasks();
+
+    fireEvent.click(screen.getByText("Estimate task"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Done" }));
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(fileInput, {
+      target: { files: [new File(["photo"], "photo.jpg", { type: "image/jpeg" })] },
+    });
+
+    // Same background refetch as above, this time across the photo picker.
+    mocks.useTasks.mockReturnValue([buildTask({ status: "done" })]);
+    fireEvent.change(screen.getByPlaceholderText("Any notes about completion…"), {
+      target: { value: "All finished" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
+
+    await waitFor(() => expect(mocks.changeTaskStatus).toHaveBeenCalled());
+    expect(mocks.changeTaskStatus).toHaveBeenCalledWith(
+      "task-1",
+      "done",
+      expect.objectContaining({ expectedStatus: "in_progress" }),
+    );
   });
 });
