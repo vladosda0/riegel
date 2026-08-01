@@ -446,9 +446,12 @@ export default function ProjectTasks() {
     const blockedTask = tasks.find((entry) => entry.id === blockedPrompt.taskId);
     // Gone from this session's list: the RPC would raise P0002 anyway, so
     // converge here rather than returning and leaving a dead button. Unlike the
-    // Done path this does NOT also pre-check a status mismatch — there are no
-    // uploads to protect, so the server CAS stays authoritative and a status
-    // that bounced back to the captured value still lands.
+    // Done path this does NOT also pre-check a status mismatch — there is no
+    // upload to protect, so a stale confirm costs only a round-trip, and on the
+    // RPC path its CAS converges it while letting a status that bounced back to
+    // the captured value still land. Note the CAS does not run on the demo/local
+    // source or the pre-P3 fallback (see the from_status caveat above); that gap
+    // is pre-existing and identical on every status path in this file.
     if (!blockedTask) {
       setBlockedPrompt(null);
       setBlockedReason("");
