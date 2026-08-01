@@ -1462,6 +1462,8 @@
   "projectData.financeSummary.withoutHr": "excl. HR payroll",
   "tasks.toast.taskRefreshed.title": "Task list refreshed",
   "tasks.toast.taskRefreshed.description": "This task changed while you were viewing it. The list has been updated — try again.",
+  "tasks.toast.donePhotosKept.title": "Photos saved, task not completed",
+  "tasks.toast.donePhotosKept.description": "Someone else changed this task while you were adding photos, so it was not marked done. Your photos are already attached and were not lost.",
   "estimate.header.statusLabel": "Status",
   "estimate.header.versionBadge": "Estimate v{{version}}",
   "estimate.header.versionTooltip": "Share link with client for approval of the latest estimate version.",

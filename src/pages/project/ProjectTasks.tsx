@@ -115,6 +115,11 @@ export default function ProjectTasks() {
   const { toast } = useToast();
   const authRole = getAuthRole();
   const currentUser = getCurrentUser();
+  // In Supabase mode getCurrentUser() resolves to the empty local-store user
+  // (nothing writes `auth-local-profile`), so its id is "". The viewer's real
+  // identity there is the workspace profile id. Everything keyed on "me" — the
+  // assigned-to-me filter, comment authorship — must resolve through this.
+  const viewerId = workspaceMode.kind === "supabase" ? workspaceMode.profileId : currentUser.id;
   const tasksAccess = getProjectDomainAccess(perm.seam, "tasks");
   const canManageTasks = projectDomainAllowsManage(tasksAccess);
   const canContributeTasks = projectDomainAllowsContribute(tasksAccess);
@@ -191,13 +196,19 @@ export default function ProjectTasks() {
   const [dropStatus, setDropStatus] = useState<TaskStatus | null>(null);
 
   // --- Done prompt ---
-  const [donePrompt, setDonePrompt] = useState<{ taskId: string } | null>(null);
+  // `expectedStatus` is captured when the prompt OPENS, not read back at confirm
+  // time. The window between the two is user-paced (picking photos, typing a
+  // reason) and the tasks query refetches inside it (refetchOnWindowFocus, and
+  // projection invalidation), so re-reading the live list would adopt another
+  // session's concurrent move as the "expected" value and the CAS in
+  // change_task_status_v2 would always agree with itself.
+  const [donePrompt, setDonePrompt] = useState<{ taskId: string; expectedStatus: TaskStatus } | null>(null);
   const [doneFiles, setDoneFiles] = useState<File[]>([]);
   const [doneUploading, setDoneUploading] = useState(false);
   const [doneComment, setDoneComment] = useState("");
 
-  // --- Blocked prompt ---
-  const [blockedPrompt, setBlockedPrompt] = useState<{ taskId: string } | null>(null);
+  // --- Blocked prompt --- (same capture-at-open rule as the Done prompt above)
+  const [blockedPrompt, setBlockedPrompt] = useState<{ taskId: string; expectedStatus: TaskStatus } | null>(null);
   const [blockedReason, setBlockedReason] = useState("");
 
   // Derived
@@ -213,7 +224,7 @@ export default function ProjectTasks() {
 
   // Filter tasks
   let filteredTasks = activeTab === "all" ? tasks : tasks.filter((entry) => entry.stage_id === activeTab);
-  if (assignedToMe) filteredTasks = filteredTasks.filter((entry) => getTaskAssigneeIds(entry, t).includes(currentUser.id));
+  if (assignedToMe) filteredTasks = filteredTasks.filter((entry) => getTaskAssigneeIds(entry, t).includes(viewerId));
 
   const getColumnTasks = (status: TaskStatus) => filteredTasks.filter((entry) => entry.status === status);
   const invalidateProjectStages = useCallback(async () => {
@@ -261,7 +272,7 @@ export default function ProjectTasks() {
       }
       setBlockedPrompt(null); // close any existing prompt
       setSelectedTaskId(null);
-      setDonePrompt({ taskId });
+      setDonePrompt({ taskId, expectedStatus: task.status });
       setDoneFiles([]);
       setDoneComment("");
       return;
@@ -269,7 +280,7 @@ export default function ProjectTasks() {
     if (newStatus === "blocked") {
       setDonePrompt(null); // close any existing prompt
       setSelectedTaskId(null);
-      setBlockedPrompt({ taskId });
+      setBlockedPrompt({ taskId, expectedStatus: task.status });
       setBlockedReason("");
       return;
     }
@@ -308,11 +319,33 @@ export default function ProjectTasks() {
     })();
   }, [canChangeTaskStatus, tasks, toast, workspaceMode, invalidateProjectTasks, pid, t]);
 
+  // A prompt whose compare-and-set can no longer land converges exactly the way
+  // the RPC's own P0002 path does: refetch and tell the user the list moved. A
+  // bare `return` here would leave the confirm button silently dead.
+  const convergeStalePrompt = useCallback(async () => {
+    await invalidateProjectTasks();
+    toast({
+      title: t("tasks.toast.taskRefreshed.title"),
+      description: t("tasks.toast.taskRefreshed.description"),
+    });
+  }, [invalidateProjectTasks, toast, t]);
+
   // Confirm Done
   const handleConfirmDone = useCallback(async () => {
     if (!donePrompt) return;
     const task = tasks.find((entry) => entry.id === donePrompt.taskId);
-    if (!task) return;
+    // The task either left this session's list (deleted, re-projected under a new
+    // id, or RLS-filtered) or another session moved it since the prompt opened.
+    // The CAS cannot pass either way, so converge BEFORE the upload loop runs:
+    // those photos are finalized as is_final rows that nothing rolls back and
+    // that the server would count toward a LATER Done attempt's photo guard.
+    if (!task || task.status !== donePrompt.expectedStatus) {
+      setDonePrompt(null);
+      setDoneFiles([]);
+      setDoneComment("");
+      await convergeStalePrompt();
+      return;
+    }
     if (task.checklist.some((item) => !item.done)) {
       toast({
         title: t("tasks.toast.cannotMarkDone.title"),
@@ -352,14 +385,17 @@ export default function ProjectTasks() {
       // The RPC inserts the acceptance comment once (server-side) alongside the
       // status change; the same text also rode along as the photo caption above.
       await source.changeTaskStatus(donePrompt.taskId, "done", {
-        expectedStatus: task.status,
+        expectedStatus: donePrompt.expectedStatus,
         commentBody: doneComment.trim() || undefined,
       });
       await invalidateProjectTasks();
       trackEvent("task_marked_done", {
         project_id: pid,
         task_id: donePrompt.taskId,
-        from_status: task.status,
+        // The status the user acted on. The RPC path asserts it via the CAS, but
+        // the demo/local source and the pre-P3 fallback ignore expectedStatus, so
+        // this is not a guaranteed DB pre-image on every path.
+        from_status: donePrompt.expectedStatus,
       });
 
       setDonePrompt(null);
@@ -368,11 +404,15 @@ export default function ProjectTasks() {
       toast({ title: t("tasks.toast.markedDone") });
     } catch (error) {
       if (error instanceof TaskNoLongerAvailableError) {
+        // Reaching here means the status write lost the race AFTER the upload
+        // loop completed, so the acceptance photos are already attached and
+        // final. Say so plainly instead of the generic "the list refreshed",
+        // which would leave the user guessing where their photos went.
         await invalidateProjectTasks();
         setDonePrompt(null);
         toast({
-          title: t("tasks.toast.taskRefreshed.title"),
-          description: t("tasks.toast.taskRefreshed.description"),
+          title: t("tasks.toast.donePhotosKept.title"),
+          description: t("tasks.toast.donePhotosKept.description"),
         });
         return;
       }
@@ -394,6 +434,7 @@ export default function ProjectTasks() {
     finalizeUpload,
     workspaceMode,
     invalidateProjectTasks,
+    convergeStalePrompt,
     toast,
     pid,
     t,
@@ -403,6 +444,20 @@ export default function ProjectTasks() {
   const handleConfirmBlocked = useCallback(async () => {
     if (!blockedPrompt) return;
     const blockedTask = tasks.find((entry) => entry.id === blockedPrompt.taskId);
+    // Gone from this session's list: the RPC would raise P0002 anyway, so
+    // converge here rather than returning and leaving a dead button. Unlike the
+    // Done path this does NOT also pre-check a status mismatch — there is no
+    // upload to protect, so a stale confirm costs only a round-trip, and on the
+    // RPC path its CAS converges it while letting a status that bounced back to
+    // the captured value still land. Note the CAS does not run on the demo/local
+    // source or the pre-P3 fallback (see the from_status caveat above); that gap
+    // is pre-existing and identical on every status path in this file.
+    if (!blockedTask) {
+      setBlockedPrompt(null);
+      setBlockedReason("");
+      await convergeStalePrompt();
+      return;
+    }
     try {
       const source = await getPlanningSource(
         workspaceMode.kind === "pending-supabase" ? undefined : workspaceMode,
@@ -410,14 +465,15 @@ export default function ProjectTasks() {
       // The RPC enforces the reason-required guard and inserts the blocker
       // comment once, server-side, alongside the status change.
       await source.changeTaskStatus(blockedPrompt.taskId, "blocked", {
-        expectedStatus: blockedTask?.status,
+        expectedStatus: blockedPrompt.expectedStatus,
         commentBody: t("tasks.toast.blockerPrefix", { reason: blockedReason.trim() }),
       });
       await invalidateProjectTasks();
       trackEvent("task_marked_blocked", {
         project_id: pid,
         task_id: blockedPrompt.taskId,
-        from_status: blockedTask?.status ?? "unknown",
+        // Same caveat as the Done path: asserted by the CAS on the RPC path only.
+        from_status: blockedPrompt.expectedStatus,
       });
       setBlockedPrompt(null);
       setBlockedReason("");
@@ -438,7 +494,7 @@ export default function ProjectTasks() {
         variant: "destructive",
       });
     }
-  }, [blockedPrompt, blockedReason, tasks, workspaceMode, invalidateProjectTasks, toast, pid, t]);
+  }, [blockedPrompt, blockedReason, tasks, workspaceMode, invalidateProjectTasks, convergeStalePrompt, toast, pid, t]);
 
   const handleChecklistToggle = useCallback(async (
     taskId: string,
@@ -502,8 +558,7 @@ export default function ProjectTasks() {
       const source = await getPlanningSource(
         workspaceMode.kind === "pending-supabase" ? undefined : workspaceMode,
       );
-      const authorId = workspaceMode.kind === "supabase" ? workspaceMode.profileId : currentUser.id;
-      await source.createTaskComment(taskId, body.trim(), authorId);
+      await source.createTaskComment(taskId, body.trim(), viewerId);
       await invalidateProjectTasks();
       toast({ title: t("tasks.toast.commentAdded") });
     } catch (error) {
@@ -513,7 +568,7 @@ export default function ProjectTasks() {
         variant: "destructive",
       });
     }
-  }, [canCommentOnTasks, workspaceMode, currentUser.id, invalidateProjectTasks, toast, t]);
+  }, [canCommentOnTasks, workspaceMode, viewerId, invalidateProjectTasks, toast, t]);
 
   const handleTaskTitleChange = useCallback(async (taskId: string, title: string) => {
     await updateTaskFact(taskId, { title });

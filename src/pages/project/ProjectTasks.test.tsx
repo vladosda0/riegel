@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +17,10 @@ const mocks = vi.hoisted(() => ({
   useEstimateV2Project: vi.fn(),
   useEstimateV2ProjectionCapability: vi.fn(),
   useMediaUploadMutations: vi.fn(),
+  getCurrentUser: vi.fn(),
+  getPlanningSource: vi.fn(),
+  changeTaskStatus: vi.fn(),
+  toast: vi.fn(),
 }));
 
 vi.mock("@/hooks/use-mock-data", () => ({
@@ -60,7 +64,7 @@ vi.mock("@/lib/permissions", async (importOriginal) => {
 
 vi.mock("@/data/store", () => ({
   getUserById: (id: string) => (id === "user-1" ? { id, name: "Owner" } : null),
-  getCurrentUser: () => ({ id: "user-1", name: "Owner" }),
+  getCurrentUser: mocks.getCurrentUser,
   updateTask: vi.fn(),
   addTask: vi.fn(),
   deleteTask: vi.fn(),
@@ -69,7 +73,7 @@ vi.mock("@/data/store", () => ({
 }));
 
 vi.mock("@/data/planning-source", () => ({
-  getPlanningSource: vi.fn(),
+  getPlanningSource: mocks.getPlanningSource,
   TaskNoLongerAvailableError: class TaskNoLongerAvailableError extends Error {},
 }));
 
@@ -82,7 +86,7 @@ vi.mock("@/lib/analytics", () => ({
 }));
 
 vi.mock("@/hooks/use-toast", () => ({
-  useToast: () => ({ toast: vi.fn() }),
+  useToast: () => ({ toast: mocks.toast }),
 }));
 
 function renderProjectTasks() {
@@ -103,6 +107,27 @@ function renderProjectTasks() {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+}
+
+function buildTask(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "task-1",
+    project_id: "project-1",
+    stage_id: "stage-1",
+    estimateV2WorkId: "work-1",
+    title: "Estimate task",
+    description: "Desc",
+    status: "not_started",
+    assignee_id: "user-1",
+    assignees: [{ id: "user-1", name: "Owner", email: null }],
+    checklist: [],
+    comments: [],
+    attachments: [],
+    photos: [],
+    linked_estimate_item_ids: [],
+    created_at: "2026-03-01T00:00:00.000Z",
+    ...overrides,
+  };
 }
 
 function buildPermission(role: MemberRole) {
@@ -165,25 +190,12 @@ describe("ProjectTasks", () => {
         },
       ],
     });
-    mocks.useTasks.mockReturnValue([
-      {
-        id: "task-1",
-        project_id: "project-1",
-        stage_id: "stage-1",
-        estimateV2WorkId: "work-1",
-        title: "Estimate task",
-        description: "Desc",
-        status: "not_started",
-        assignee_id: "user-1",
-        assignees: [{ id: "user-1", name: "Owner", email: null }],
-        checklist: [],
-        comments: [],
-        attachments: [],
-        photos: [],
-        linked_estimate_item_ids: [],
-        created_at: "2026-03-01T00:00:00.000Z",
-      },
-    ]);
+    mocks.useTasks.mockReturnValue([buildTask()]);
+    mocks.getCurrentUser.mockReturnValue({ id: "user-1", name: "Owner" });
+    mocks.changeTaskStatus.mockReset();
+    mocks.changeTaskStatus.mockResolvedValue(undefined);
+    mocks.toast.mockClear();
+    mocks.getPlanningSource.mockResolvedValue({ changeTaskStatus: mocks.changeTaskStatus });
     mocks.usePermission.mockReturnValue(buildPermission("owner"));
     mocks.useMedia.mockReturnValue([]);
     mocks.useWorkspaceMode.mockReturnValue({ kind: "supabase", profileId: "user-1" });
@@ -310,5 +322,160 @@ describe("ProjectTasks", () => {
     // the task's status through re-projection and converges concurrent moves via
     // P0002, so the projection-behind hard-block is gone.
     expect(screen.getByRole("button", { name: "In progress" })).toBeEnabled();
+  });
+
+  it("keys the assigned-to-me filter on the Supabase profile id, not the empty local user", () => {
+    // Production shape in Supabase mode: nothing writes `auth-local-profile`, so
+    // getCurrentUser() returns the empty user and its id is "". Keying the filter
+    // on that id matched nothing and blanked the whole board for contractors.
+    mocks.getCurrentUser.mockReturnValue({ id: "", name: "" });
+    mocks.usePermission.mockReturnValue(buildPermission("contractor"));
+    mocks.useWorkspaceMode.mockReturnValue({ kind: "supabase", profileId: "profile-9" });
+    mocks.useTasks.mockReturnValue([
+      buildTask({
+        assignee_id: "profile-9",
+        assignees: [{ id: "profile-9", name: "Contractor", email: null }],
+      }),
+    ]);
+
+    renderProjectTasks();
+
+    expect(screen.getByText("Estimate task")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Assigned to me/i }));
+
+    expect(screen.getByText("Estimate task")).toBeInTheDocument();
+  });
+
+  it("sends the status captured when the Blocked prompt opened, not one refetched meanwhile", async () => {
+    mocks.usePermission.mockReturnValue(buildPermission("contractor"));
+    mocks.useTasks.mockReturnValue([buildTask({ status: "in_progress" })]);
+
+    renderProjectTasks();
+
+    fireEvent.click(screen.getByText("Estimate task"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Blocked" }));
+
+    // Another session moves the task while the reason is being typed; the tasks
+    // query refetches (refetchOnWindowFocus / projection invalidation) and the
+    // live list now reads "done". Typing re-renders with that fresh list.
+    mocks.useTasks.mockReturnValue([buildTask({ status: "done" })]);
+    fireEvent.change(screen.getByPlaceholderText("Describe the reason this task is blocked…"), {
+      target: { value: "Waiting on materials" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Mark Blocked/i }));
+
+    await waitFor(() => expect(mocks.changeTaskStatus).toHaveBeenCalled());
+    expect(mocks.changeTaskStatus).toHaveBeenCalledWith(
+      "task-1",
+      "blocked",
+      expect.objectContaining({ expectedStatus: "in_progress" }),
+    );
+  });
+
+  it("converges instead of dead-ending when the blocked task leaves the list", async () => {
+    mocks.usePermission.mockReturnValue(buildPermission("contractor"));
+    mocks.useTasks.mockReturnValue([buildTask({ status: "in_progress" })]);
+
+    renderProjectTasks();
+
+    fireEvent.click(screen.getByText("Estimate task"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Blocked" }));
+
+    // The task leaves this session's list entirely: deleted by another session,
+    // re-projected under a new id, or filtered out by RLS.
+    mocks.useTasks.mockReturnValue([]);
+    fireEvent.change(screen.getByPlaceholderText("Describe the reason this task is blocked…"), {
+      target: { value: "Waiting on materials" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Mark Blocked/i }));
+
+    // Must not be a silently dead button: the prompt closes and the user is told.
+    await waitFor(() =>
+      expect(mocks.toast).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Task list refreshed" }),
+      ),
+    );
+    expect(mocks.changeTaskStatus).not.toHaveBeenCalled();
+    expect(
+      screen.queryByPlaceholderText("Describe the reason this task is blocked…"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not upload acceptance photos when the Done prompt already went stale", async () => {
+    const prepareUpload = vi.fn().mockResolvedValue({
+      bucket: "media",
+      objectPath: "project-1/photo.jpg",
+      uploadIntentId: "intent-1",
+    });
+    const uploadBytes = vi.fn().mockResolvedValue(undefined);
+    const finalizeUpload = vi.fn().mockResolvedValue(undefined);
+    mocks.useMediaUploadMutations.mockReturnValue({ prepareUpload, uploadBytes, finalizeUpload });
+    mocks.usePermission.mockReturnValue(buildPermission("contractor"));
+    mocks.useTasks.mockReturnValue([buildTask({ status: "in_progress" })]);
+
+    const { container } = renderProjectTasks();
+
+    fireEvent.click(screen.getByText("Estimate task"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Done" }));
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(fileInput, {
+      target: { files: [new File(["photo"], "photo.jpg", { type: "image/jpeg" })] },
+    });
+
+    // Another session moves the task while the photos are being picked.
+    mocks.useTasks.mockReturnValue([buildTask({ status: "blocked" })]);
+    fireEvent.change(screen.getByPlaceholderText("Any notes about completion…"), {
+      target: { value: "All finished" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
+
+    await waitFor(() =>
+      expect(mocks.toast).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Task list refreshed" }),
+      ),
+    );
+    // The CAS could not have passed, so nothing may be finalized as is_final:
+    // those rows are not rolled back and would satisfy a later Done attempt.
+    expect(prepareUpload).not.toHaveBeenCalled();
+    expect(uploadBytes).not.toHaveBeenCalled();
+    expect(finalizeUpload).not.toHaveBeenCalled();
+    expect(mocks.changeTaskStatus).not.toHaveBeenCalled();
+  });
+
+  it("sends the captured status on a Done confirm that is still current", async () => {
+    const prepareUpload = vi.fn().mockResolvedValue({
+      bucket: "media",
+      objectPath: "project-1/photo.jpg",
+      uploadIntentId: "intent-1",
+    });
+    const uploadBytes = vi.fn().mockResolvedValue(undefined);
+    const finalizeUpload = vi.fn().mockResolvedValue(undefined);
+    mocks.useMediaUploadMutations.mockReturnValue({ prepareUpload, uploadBytes, finalizeUpload });
+    mocks.usePermission.mockReturnValue(buildPermission("contractor"));
+    mocks.useTasks.mockReturnValue([buildTask({ status: "in_progress" })]);
+
+    const { container } = renderProjectTasks();
+
+    fireEvent.click(screen.getByText("Estimate task"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Done" }));
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(fileInput, {
+      target: { files: [new File(["photo"], "photo.jpg", { type: "image/jpeg" })] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
+
+    await waitFor(() => expect(mocks.changeTaskStatus).toHaveBeenCalled());
+    expect(mocks.changeTaskStatus).toHaveBeenCalledWith(
+      "task-1",
+      "done",
+      expect.objectContaining({ expectedStatus: "in_progress" }),
+    );
+    expect(finalizeUpload).toHaveBeenCalled();
   });
 });
