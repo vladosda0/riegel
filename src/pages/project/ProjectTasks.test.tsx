@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   useEstimateV2Project: vi.fn(),
   useEstimateV2ProjectionCapability: vi.fn(),
   useMediaUploadMutations: vi.fn(),
+  getCurrentUser: vi.fn(),
 }));
 
 vi.mock("@/hooks/use-mock-data", () => ({
@@ -60,7 +61,7 @@ vi.mock("@/lib/permissions", async (importOriginal) => {
 
 vi.mock("@/data/store", () => ({
   getUserById: (id: string) => (id === "user-1" ? { id, name: "Owner" } : null),
-  getCurrentUser: () => ({ id: "user-1", name: "Owner" }),
+  getCurrentUser: mocks.getCurrentUser,
   updateTask: vi.fn(),
   addTask: vi.fn(),
   deleteTask: vi.fn(),
@@ -103,6 +104,27 @@ function renderProjectTasks() {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+}
+
+function buildTask(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "task-1",
+    project_id: "project-1",
+    stage_id: "stage-1",
+    estimateV2WorkId: "work-1",
+    title: "Estimate task",
+    description: "Desc",
+    status: "not_started",
+    assignee_id: "user-1",
+    assignees: [{ id: "user-1", name: "Owner", email: null }],
+    checklist: [],
+    comments: [],
+    attachments: [],
+    photos: [],
+    linked_estimate_item_ids: [],
+    created_at: "2026-03-01T00:00:00.000Z",
+    ...overrides,
+  };
 }
 
 function buildPermission(role: MemberRole) {
@@ -165,25 +187,8 @@ describe("ProjectTasks", () => {
         },
       ],
     });
-    mocks.useTasks.mockReturnValue([
-      {
-        id: "task-1",
-        project_id: "project-1",
-        stage_id: "stage-1",
-        estimateV2WorkId: "work-1",
-        title: "Estimate task",
-        description: "Desc",
-        status: "not_started",
-        assignee_id: "user-1",
-        assignees: [{ id: "user-1", name: "Owner", email: null }],
-        checklist: [],
-        comments: [],
-        attachments: [],
-        photos: [],
-        linked_estimate_item_ids: [],
-        created_at: "2026-03-01T00:00:00.000Z",
-      },
-    ]);
+    mocks.useTasks.mockReturnValue([buildTask()]);
+    mocks.getCurrentUser.mockReturnValue({ id: "user-1", name: "Owner" });
     mocks.usePermission.mockReturnValue(buildPermission("owner"));
     mocks.useMedia.mockReturnValue([]);
     mocks.useWorkspaceMode.mockReturnValue({ kind: "supabase", profileId: "user-1" });
@@ -310,5 +315,28 @@ describe("ProjectTasks", () => {
     // the task's status through re-projection and converges concurrent moves via
     // P0002, so the projection-behind hard-block is gone.
     expect(screen.getByRole("button", { name: "In progress" })).toBeEnabled();
+  });
+
+  it("keys the assigned-to-me filter on the Supabase profile id, not the empty local user", () => {
+    // Production shape in Supabase mode: nothing writes `auth-local-profile`, so
+    // getCurrentUser() returns the empty user and its id is "". Keying the filter
+    // on that id matched nothing and blanked the whole board for contractors.
+    mocks.getCurrentUser.mockReturnValue({ id: "", name: "" });
+    mocks.usePermission.mockReturnValue(buildPermission("contractor"));
+    mocks.useWorkspaceMode.mockReturnValue({ kind: "supabase", profileId: "profile-9" });
+    mocks.useTasks.mockReturnValue([
+      buildTask({
+        assignee_id: "profile-9",
+        assignees: [{ id: "profile-9", name: "Contractor", email: null }],
+      }),
+    ]);
+
+    renderProjectTasks();
+
+    expect(screen.getByText("Estimate task")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Assigned to me/i }));
+
+    expect(screen.getByText("Estimate task")).toBeInTheDocument();
   });
 });

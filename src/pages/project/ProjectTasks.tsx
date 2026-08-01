@@ -115,6 +115,11 @@ export default function ProjectTasks() {
   const { toast } = useToast();
   const authRole = getAuthRole();
   const currentUser = getCurrentUser();
+  // In Supabase mode getCurrentUser() resolves to the empty local-store user
+  // (nothing writes `auth-local-profile`), so its id is "". The viewer's real
+  // identity there is the workspace profile id. Everything keyed on "me" — the
+  // assigned-to-me filter, comment authorship — must resolve through this.
+  const viewerId = workspaceMode.kind === "supabase" ? workspaceMode.profileId : currentUser.id;
   const tasksAccess = getProjectDomainAccess(perm.seam, "tasks");
   const canManageTasks = projectDomainAllowsManage(tasksAccess);
   const canContributeTasks = projectDomainAllowsContribute(tasksAccess);
@@ -213,7 +218,7 @@ export default function ProjectTasks() {
 
   // Filter tasks
   let filteredTasks = activeTab === "all" ? tasks : tasks.filter((entry) => entry.stage_id === activeTab);
-  if (assignedToMe) filteredTasks = filteredTasks.filter((entry) => getTaskAssigneeIds(entry, t).includes(currentUser.id));
+  if (assignedToMe) filteredTasks = filteredTasks.filter((entry) => getTaskAssigneeIds(entry, t).includes(viewerId));
 
   const getColumnTasks = (status: TaskStatus) => filteredTasks.filter((entry) => entry.status === status);
   const invalidateProjectStages = useCallback(async () => {
@@ -502,8 +507,7 @@ export default function ProjectTasks() {
       const source = await getPlanningSource(
         workspaceMode.kind === "pending-supabase" ? undefined : workspaceMode,
       );
-      const authorId = workspaceMode.kind === "supabase" ? workspaceMode.profileId : currentUser.id;
-      await source.createTaskComment(taskId, body.trim(), authorId);
+      await source.createTaskComment(taskId, body.trim(), viewerId);
       await invalidateProjectTasks();
       toast({ title: t("tasks.toast.commentAdded") });
     } catch (error) {
@@ -513,7 +517,7 @@ export default function ProjectTasks() {
         variant: "destructive",
       });
     }
-  }, [canCommentOnTasks, workspaceMode, currentUser.id, invalidateProjectTasks, toast, t]);
+  }, [canCommentOnTasks, workspaceMode, viewerId, invalidateProjectTasks, toast, t]);
 
   const handleTaskTitleChange = useCallback(async (taskId: string, title: string) => {
     await updateTaskFact(taskId, { title });
