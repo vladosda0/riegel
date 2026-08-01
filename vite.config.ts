@@ -5,23 +5,71 @@ import { execSync } from "node:child_process";
 import { componentTagger } from "lovable-tagger";
 
 /**
+ * Env vars carrying a commit SHA, in precedence order. VITE_COMMIT_SHA is ours
+ * (set it explicitly in a build environment without .git); the rest are what
+ * common build platforms inject on their own, so a host that ships no .git can
+ * still produce a tagged release without anyone configuring anything.
+ */
+const COMMIT_SHA_ENV_VARS = [
+  "VITE_COMMIT_SHA",
+  "GITHUB_SHA",
+  "CI_COMMIT_SHA",
+  "SOURCE_COMMIT",
+  "GIT_COMMIT",
+] as const;
+
+/**
  * Release identifier baked into the bundle for Sentry release tagging
- * (`__APP_RELEASE__`, see src/lib/observability/sentry.ts). Prefers an
- * explicit VITE_COMMIT_SHA env var (for build environments without .git),
- * falls back to `git rev-parse`, then to "unknown" — never fails the build.
+ * (`__APP_RELEASE__`, see src/lib/observability/sentry.ts). Prefers an explicit
+ * SHA from the environment, falls back to `git rev-parse`, then to "unknown" —
+ * never fails the build.
  */
 function resolveAppRelease(): string {
-  const fromEnv = process.env.VITE_COMMIT_SHA?.trim();
-  if (fromEnv) return fromEnv;
-  try {
-    return (
-      execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] })
-        .toString()
-        .trim() || "unknown"
-    );
-  } catch {
-    return "unknown";
+  for (const name of COMMIT_SHA_ENV_VARS) {
+    const fromEnv = process.env[name]?.trim();
+    if (fromEnv) return shortenSha(fromEnv);
   }
+  try {
+    // `-c safe.directory=*`: build containers normally run as a different user
+    // than the one owning the checkout, and plain `git rev-parse` then aborts
+    // with "detected dubious ownership in repository" — which used to be
+    // swallowed silently and is the most likely reason prod events were tagged
+    // release=unknown.
+    const sha = execSync("git -c safe.directory='*' rev-parse --short HEAD", {
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+      .toString()
+      .trim();
+    if (sha) return sha;
+    warnUnknownRelease("`git rev-parse` returned an empty string");
+  } catch (error) {
+    warnUnknownRelease(error instanceof Error ? error.message : String(error));
+  }
+  return "unknown";
+}
+
+/**
+ * Normalizes a full 40-char SHA to the 7-char form `git rev-parse --short`
+ * emits, so releases do not fragment in Sentry depending on which build
+ * environment produced them (the same commit must be one release, not two).
+ * Anything that is not a full SHA — a tag, a branch name, a short SHA — is
+ * passed through untouched.
+ */
+function shortenSha(value: string): string {
+  return /^[0-9a-f]{40}$/i.test(value) ? value.slice(0, 7) : value;
+}
+
+/**
+ * Loud on purpose. A silent "unknown" cost us release grouping and any hope of
+ * readable stack traces on prod without anyone noticing; the next build that
+ * hits this prints the reason straight into the build log. Never throws — a
+ * missing SHA must not fail the build.
+ */
+function warnUnknownRelease(reason: string): void {
+  console.warn(
+    `[build] release SHA unresolved — errors will be reported as release=unknown. ` +
+      `Set VITE_COMMIT_SHA in the build environment. Reason: ${reason}`,
+  );
 }
 
 // Vitest + @vitejs/plugin-react-swc can stall at high CPU while transforming

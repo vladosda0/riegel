@@ -83,6 +83,111 @@ function removeEarlyHandlers(): void {
 }
 
 /**
+ * Message patterns produced by scripts we do not ship.
+ *
+ * `window.webkit.messageHandlers` is the WKWebView native bridge. In-app
+ * browsers (Threads, VK, Telegram) inject their own shim that calls it on
+ * `pagehide` without checking it exists. Verified against a real production
+ * event: iPhone / "Mobile Safari UI/WKWebView", frames `sendPageHideMessage`
+ * → `sendDataToNative`. Those frames are injected INLINE into the document,
+ * so they report our own origin — `denyUrls` cannot catch them and matching
+ * the message is the only reliable handle.
+ */
+const THIRD_PARTY_MESSAGE_PATTERNS: readonly RegExp[] = [/webkit\.messageHandlers/i];
+
+/** Stack frames served from these origins are never our bundle. */
+const THIRD_PARTY_FRAME_PREFIXES: readonly string[] = [
+  "chrome-extension://",
+  "moz-extension://",
+  "safari-extension://",
+  "safari-web-extension://",
+];
+
+interface SentryFrameLike {
+  filename?: unknown;
+}
+interface SentryExceptionLike {
+  value?: unknown;
+  stacktrace?: { frames?: unknown };
+  mechanism?: { parent_id?: unknown };
+}
+
+function matchesNoisePattern(text: unknown): boolean {
+  return typeof text === "string" && THIRD_PARTY_MESSAGE_PATTERNS.some((re) => re.test(text));
+}
+
+/** Frame filenames Sentry itself refuses to treat as a source URL. */
+const UNUSABLE_FRAME_FILENAMES = new Set(["<anonymous>", "[native code]"]);
+
+/**
+ * The URL the error was actually thrown from, mirroring Sentry's own
+ * `_getLastValidUrl`: frames are ordered oldest-first, so the throwing frame
+ * is the LAST one carrying a usable filename.
+ */
+function throwingFrameUrl(value: SentryExceptionLike): string | null {
+  const frames = value?.stacktrace?.frames;
+  if (!Array.isArray(frames)) return null;
+  for (let i = frames.length - 1; i >= 0; i--) {
+    const filename = (frames[i] as SentryFrameLike)?.filename;
+    // Only the two synthetic filenames are skipped; on the first REAL frame
+    // we stop and return whatever it has, `null` included. Continuing past a
+    // frameless frame to an older one is how you end up blaming an unrelated
+    // deeper caller — an error crossing an async or native boundary inside a
+    // handler that an extension wrapped would be attributed to the extension
+    // and dropped, which is the exact case this module must not drop.
+    if (typeof filename === "string" && UNUSABLE_FRAME_FILENAMES.has(filename)) continue;
+    return typeof filename === "string" && filename !== "" ? filename : null;
+  }
+  return null;
+}
+
+/**
+ * True when an event comes from an injected third-party script rather than
+ * from our code. Such events are unactionable: we cannot fix a bridge shim
+ * that a social app's in-app browser installs, and they crowd out real
+ * regressions plus burn the GlitchTip quota.
+ *
+ * Applied in `beforeSend` rather than `ignoreErrors` so it is one testable
+ * pure function covering every path into the SDK, including the early-buffer
+ * replay in `initErrorTracking`.
+ */
+export function isThirdPartyNoise(event: Record<string, unknown>): boolean {
+  try {
+    if (matchesNoisePattern(event.message)) return true;
+
+    const values = (event.exception as { values?: unknown } | undefined)?.values;
+    if (!Array.isArray(values)) return false;
+
+    const exceptions = values.map((raw) => raw as SentryExceptionLike);
+
+    // Both checks below consider exactly ONE exception, the root.
+    // `linkedErrorsIntegration` is a default browser integration and expands
+    // `new Error(msg, { cause })` chains into several `exception.values`, so
+    // scanning them all would discard a real regression in our bundle merely
+    // because some wrapped cause came from an extension. Sentry's own
+    // `_getEventFilterUrl` picks the root exception — the one with no
+    // `mechanism.parent_id` — and ignores the rest; do the same.
+    const root =
+      exceptions.find((value) => value?.mechanism?.parent_id === undefined) ??
+      exceptions[exceptions.length - 1];
+    if (!root) return false;
+
+    // Symmetric with the frame check on purpose. Scanning the whole chain for
+    // the message was the same defect one level up: `new Error("save failed",
+    // { cause: bridgeShimError })` would have discarded a genuine regression
+    // in our bundle because a wrapped cause mentioned the bridge.
+    if (matchesNoisePattern(root.value)) return true;
+
+    const url = throwingFrameUrl(root);
+    if (url === null) return false;
+    return THIRD_PARTY_FRAME_PREFIXES.some((prefix) => url.startsWith(prefix));
+  } catch {
+    // Never let the filter itself drop or break a real report.
+    return false;
+  }
+}
+
+/**
  * Kick off error tracking. Called once from main.tsx BEFORE render; returns
  * immediately (the SDK chunk downloads in parallel with the app rendering).
  * No-op without a DSN.
@@ -107,8 +212,11 @@ export function initErrorTracking(): void {
         // PostgREST / edge-function error messages carry useful detail past
         // Sentry's 250-char default.
         maxValueLength: 1000,
-        beforeSend: (event) =>
-          scrubEventSafe(event as unknown as Record<string, unknown>) as typeof event | null,
+        beforeSend: (event) => {
+          const raw = event as unknown as Record<string, unknown>;
+          if (isThirdPartyNoise(raw)) return null;
+          return scrubEventSafe(raw) as typeof event | null;
+        },
         ignoreErrors: [
           // Benign browser noise, standard Sentry hygiene.
           "ResizeObserver loop limit exceeded",

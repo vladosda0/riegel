@@ -294,14 +294,66 @@ export function trackEventOncePerSession(
  * build time, so when no counter is configured esbuild dead-code-eliminates
  * this whole loader from the bundle — no `mc.yandex.ru` request, no init.
  *
- * Session replay is deliberately disabled below: it records PII and is gated
- * behind a separate consent + field-masking workstream (152-ФЗ). Only
- * clickmap / accurateTrackBounce / trackLinks remain on.
+ * Session replay (Вебвизор) is ON as of 2026-07-25. Know exactly what that
+ * means before touching it: Вебвизор replays the RENDERED DOM, so whatever is
+ * on screen — project titles, counterparties, addresses, amounts — is captured
+ * and sent to Yandex. The counter setting "Записывать все поля" is OFF, which
+ * suppresses the contents of form INPUTS only (passwords included); it does
+ * NOT mask displayed text. Nothing in the app carries `ym-hide-content`, so
+ * nothing is masked today.
+ *
+ * That exposure is disclosed in the privacy policy (src/pages/legal/Privacy.tsx
+ * §9) and was accepted deliberately by the operator on 2026-07-26 under a filed
+ * 152-ФЗ processing notification. If you ever need to narrow it, the mechanism
+ * is a `ym-hide-content` class on the sensitive containers (estimates,
+ * procurement, HR), which keeps the acquisition funnel recorded while dropping
+ * client data. Keep Privacy.tsx §9 in sync with whatever this does.
+ *
+ * Own / agent test visits are excluded two ways: the counter's "Не учитывать
+ * мои визиты" filter (covers browsers logged into a Yandex account with
+ * counter access) and the `?no-analytics=1` opt-out below (covers everything
+ * else, including mobile and clean agent browsers).
  */
+/** localStorage key marking this browser as excluded from analytics. */
+const ANALYTICS_OPT_OUT_KEY = "rovno-analytics-opt-out";
+
+/**
+ * Own/agent test traffic must not land in the product funnel. LOADING a page
+ * with `?no-analytics=1` marks this browser; `?no-analytics=0` clears the
+ * mark. Once marked, the browser stays excluded until cleared.
+ *
+ * Scope, precisely:
+ *  - Read only from `initMetrika()` at bootstrap, so the param takes effect on
+ *    a full page load. Carrying it through a client-side SPA navigation does
+ *    nothing until the next load — paste the URL into the address bar.
+ *  - Covers Metrika ENTIRELY: the early return runs before `window.ym` is
+ *    defined, and every reader (`trackEvent`, `setAnalyticsUserId`,
+ *    `MetrikaPageviewTracker`) bails when it is not a function, so goals,
+ *    pageviews and Вебвизор all stop together.
+ *  - Deliberately does NOT gate Sentry/GlitchTip. An error hit while testing
+ *    is a real error worth keeping; only the product funnel needs protecting
+ *    from our own traffic.
+ *
+ * Fails OPEN: if storage is unavailable (private mode, quota), we keep
+ * tracking rather than silently losing a real visitor.
+ */
+export function isAnalyticsOptedOut(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const param = new URLSearchParams(window.location.search).get("no-analytics");
+    if (param === "1") localStorage.setItem(ANALYTICS_OPT_OUT_KEY, "1");
+    else if (param === "0") localStorage.removeItem(ANALYTICS_OPT_OUT_KEY);
+    return localStorage.getItem(ANALYTICS_OPT_OUT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export function initMetrika(): void {
   if (!import.meta.env.VITE_METRIKA_COUNTER_ID) return;
   if (METRIKA_COUNTER_ID === null) return;
   if (typeof window === "undefined" || typeof document === "undefined") return;
+  if (isAnalyticsOptedOut()) return;
 
   const counterId = METRIKA_COUNTER_ID;
   const src = `https://mc.yandex.ru/metrika/tag.js?id=${counterId}`;
@@ -333,11 +385,34 @@ export function initMetrika(): void {
   }
 
   ym(counterId, "init", {
-    webvisor: false,
+    // Session recording. The dashboard toggle alone records nothing — the tag
+    // must also be initialised with this flag (it was `false` from the
+    // Mixpanel→Metrika migration, which is why the Вебвизор report stayed
+    // empty). Field CONTENTS are deliberately NOT recorded: the counter
+    // setting "Записывать все поля" is off, so recordings carry behaviour
+    // only and never the client names / addresses / amounts users type
+    // (152-ФЗ, same reasoning as the Sentry scrubber).
+    webvisor: true,
     clickmap: true,
     accurateTrackBounce: true,
     trackLinks: true,
     referrer: document.referrer,
-    url: location.href,
+    // NEVER the raw href. On /auth/callback the fragment still carries
+    // `access_token` and `refresh_token` at init time — supabase-js only
+    // clears it after an async round-trip, and never at all when the link
+    // failed — and a refresh token is a full-account credential. Fragments
+    // are never meaningful to analytics anyway, so drop them everywhere
+    // rather than special-casing the auth routes.
+    url: hrefWithoutFragment(),
   });
+}
+
+/**
+ * `location.href` with any `#fragment` removed. Everything we hand Metrika —
+ * the init url and every SPA pageview hit — must go through this: the auth
+ * callback carries `access_token` / `refresh_token` in its fragment, and a
+ * refresh token is a full-account credential.
+ */
+export function hrefWithoutFragment(): string {
+  return `${location.origin}${location.pathname}${location.search}`;
 }
