@@ -4,6 +4,7 @@
 // feature cards (Variant A). Mobile / prefers-reduced-motion: native swipe
 // strip with arrows + dots (Variant B). Tokens come from landing.css.
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 
 const KF_EMERALD = "oklch(0.60 0.085 158)"; // restrained success tone for "Получено"
 
@@ -205,32 +206,36 @@ const KFCheck = ({ on }: { on?: boolean }) => (
 );
 
 // ---- The six mini-UIs ------------------------------------------------------
-const MiniEstimate = () => (
-  <>
-    <KFRow>
-      <KFLabel>Укладка плитки, м²</KFLabel>
-      <KFNum>10 × 1 500 ₽</KFNum>
-    </KFRow>
-    <KFRow>
-      <KFLabel>Розетки, шт.</KFLabel>
-      <KFNum>6 × 4 200 ₽</KFNum>
-    </KFRow>
-    <KFRow highlight>
-      <KFLabel>Итого</KFLabel>
-      <KFNum>40 200 ₽</KFNum>
-    </KFRow>
-    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 2 }}>
-      <KFChip tone="muted">Внутренняя 32 000 ₽</KFChip>
-      <KFChip tone="accent">Клиентская 40 200 ₽</KFChip>
-    </div>
-  </>
-);
+const MiniEstimate = () => {
+  const { t } = useTranslation();
+  return (
+    <>
+      <KFRow>
+        <KFLabel>{t("landing.features.mini.estimate.tiling")}</KFLabel>
+        <KFNum>{t("landing.features.mini.estimate.tilingQty")}</KFNum>
+      </KFRow>
+      <KFRow>
+        <KFLabel>{t("landing.features.mini.estimate.sockets")}</KFLabel>
+        <KFNum>{t("landing.features.mini.estimate.socketsQty")}</KFNum>
+      </KFRow>
+      <KFRow highlight>
+        <KFLabel>{t("landing.features.mini.estimate.total")}</KFLabel>
+        <KFNum>{t("landing.features.mini.estimate.totalAmount")}</KFNum>
+      </KFRow>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 2 }}>
+        <KFChip tone="muted">{t("landing.features.mini.estimate.internal")}</KFChip>
+        <KFChip tone="accent">{t("landing.features.mini.estimate.client")}</KFChip>
+      </div>
+    </>
+  );
+};
 
 const MiniBuilder = () => {
+  const { t } = useTranslation();
   const rows: [string, string, boolean][] = [
-    ["Фундамент", "8 работ · 24 ресурса", true],
-    ["Электрика", "12 работ · 31 ресурс", true],
-    ["Кровля", "9 работ · 18 ресурсов", false],
+    [t("landing.features.mini.builder.foundation"), t("landing.features.mini.builder.foundationMeta"), true],
+    [t("landing.features.mini.builder.electrical"), t("landing.features.mini.builder.electricalMeta"), true],
+    [t("landing.features.mini.builder.roofing"), t("landing.features.mini.builder.roofingMeta"), false],
   ];
   return (
     <>
@@ -260,16 +265,18 @@ const MiniBuilder = () => {
         }}
       >
         <KFIcon name="check" size={14} stroke="var(--rv-cream)" sw={2.4} />
-        Применить выбранное (2 эт. / 20 раб.)
+        {t("landing.features.mini.builder.apply")}
       </div>
     </>
   );
 };
 
-const MiniProcurement = () => (
+const MiniProcurement = () => {
+  const { t } = useTranslation();
+  return (
   <>
     <KFRow>
-      <KFLabel>Заказ: Плитка, 12 м²</KFLabel>
+      <KFLabel>{t("landing.features.mini.procure.order")}</KFLabel>
       <span
         style={{
           display: "inline-flex",
@@ -280,7 +287,7 @@ const MiniProcurement = () => (
           whiteSpace: "nowrap",
         }}
       >
-        <KFDot c="var(--rv-orange)" />В пути
+        <KFDot c="var(--rv-orange)" />{t("landing.features.mini.procure.inTransit")}
       </span>
     </KFRow>
     <div style={{ borderTop: "1px dashed rgba(30,92,203,0.28)", margin: "3px 0" }} />
@@ -295,8 +302,8 @@ const MiniProcurement = () => (
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <span style={{ opacity: 0.7, whiteSpace: "nowrap" }}>Бюджет закупок</span>
-        <KFNum>40 200 ₽</KFNum>
+        <span style={{ opacity: 0.7, whiteSpace: "nowrap" }}>{t("landing.features.mini.procure.budget")}</span>
+        <KFNum>{t("landing.features.mini.procure.budgetAmount")}</KFNum>
       </div>
       <div
         style={{
@@ -313,17 +320,21 @@ const MiniProcurement = () => (
       </div>
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, opacity: 0.78, whiteSpace: "nowrap" }}>
-          <KFDot c={KF_EMERALD} />Получено <b style={{ fontWeight: 600 }}>24 000 ₽</b>
+          <KFDot c={KF_EMERALD} />{t("landing.features.mini.procure.received")}{" "}
+          <b style={{ fontWeight: 600 }}>{t("landing.features.mini.procure.receivedAmount")}</b>
         </span>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 600, whiteSpace: "nowrap" }}>
-          <KFDot c="var(--rv-blue)" />Осталось заказать 16 200 ₽
+          <KFDot c="var(--rv-blue)" />{t("landing.features.mini.procure.remaining")}
         </span>
       </div>
     </div>
   </>
-);
+  );
+};
 
-const MiniChat = () => (
+const MiniChat = () => {
+  const { t } = useTranslation();
+  return (
   <>
     <div style={{ display: "flex", justifyContent: "flex-end" }}>
       <span
@@ -339,7 +350,7 @@ const MiniChat = () => (
           lineHeight: "16px",
         }}
       >
-        Сколько плитки нужно?
+        {t("landing.features.mini.chat.question")}
       </span>
     </div>
     <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
@@ -369,7 +380,9 @@ const MiniChat = () => (
           lineHeight: "17px",
         }}
       >
-        Для кухни 10 м² нужно <b style={{ fontWeight: 600 }}>12 м²</b> с запасом на подрезку.
+        {t("landing.features.mini.chat.answerBefore")}{" "}
+        <b style={{ fontWeight: 600 }}>{t("landing.features.mini.chat.answerAmount")}</b>{" "}
+        {t("landing.features.mini.chat.answerAfter")}
       </span>
     </div>
     <div
@@ -384,7 +397,7 @@ const MiniChat = () => (
       }}
     >
       <span style={{ flex: 1, fontFamily: "var(--font-mono-ui)", fontSize: 12, color: "rgba(30,92,203,0.5)" }}>
-        Спросить ассистента…
+        {t("landing.features.mini.chat.placeholder")}
       </span>
       <span
         style={{
@@ -402,9 +415,12 @@ const MiniChat = () => (
       </span>
     </div>
   </>
-);
+  );
+};
 
-const MiniPhoto = () => (
+const MiniPhoto = () => {
+  const { t } = useTranslation();
+  return (
   <>
     <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
       <span
@@ -424,10 +440,10 @@ const MiniPhoto = () => (
       </span>
       <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
         <span style={{ fontFamily: "var(--font-body)", fontSize: 13, fontWeight: 600, color: "var(--rv-blue)" }}>
-          Замер ниши под шкаф
+          {t("landing.features.mini.photo.caption")}
         </span>
         <span style={{ fontFamily: "var(--font-mono-ui)", fontSize: 11, opacity: 0.56, color: "var(--rv-blue)" }}>
-          фото с объекта
+          {t("landing.features.mini.photo.source")}
         </span>
       </div>
     </div>
@@ -445,75 +461,45 @@ const MiniPhoto = () => (
     >
       <KFIcon name="bot" size={15} stroke="var(--rv-blue)" sw={1.9} style={{ marginTop: 1 }} />
       <span style={{ fontFamily: "var(--font-mono-ui)", fontSize: 11.5, lineHeight: "16px", color: "var(--rv-blue)" }}>
-        <b style={{ fontWeight: 600 }}>Анализ фото:</b> добавить нишу 0,6 м² в смету
+        <b style={{ fontWeight: 600 }}>{t("landing.features.mini.photo.analysisLabel")}</b>{" "}
+        {t("landing.features.mini.photo.analysisText")}
       </span>
     </div>
   </>
-);
+  );
+};
 
 const MiniDocs = () => {
+  const { t } = useTranslation();
+  const internal = t("landing.features.mini.docs.internal");
   const docs: [string, string, "muted" | "accent"][] = [
-    ["Инструкция по монтажу окон", "Внутренний", "muted"],
-    ["План квартиры для клиента", "Общий", "accent"],
-    ["Акт скрытых работ", "Внутренний", "muted"],
+    [t("landing.features.mini.docs.windows"), internal, "muted"],
+    [t("landing.features.mini.docs.plan"), t("landing.features.mini.docs.shared"), "accent"],
+    [t("landing.features.mini.docs.act"), internal, "muted"],
   ];
   return (
     <>
-      {docs.map(([n, b, t]) => (
+      {docs.map(([n, b, tone]) => (
         <KFRow key={n}>
           <KFIcon name="files" size={15} stroke="rgba(30,92,203,0.7)" sw={1.7} />
           <KFLabel>{n}</KFLabel>
-          <KFBadge tone={t}>{b}</KFBadge>
+          <KFBadge tone={tone}>{b}</KFBadge>
         </KFRow>
       ))}
     </>
   );
 };
 
-type KFFeature = { id: string; icon: string; pill: string; mini: ReactNode; note: string };
+// Copy lives in the locale files; the card only carries the key, so this stays a
+// module-level constant (no hook) while still re-rendering on a language switch.
+type KFFeature = { id: string; icon: string; mini: ReactNode };
 const KF_FEATURES: KFFeature[] = [
-  {
-    id: "estimate",
-    icon: "receipt",
-    pill: "Смета",
-    mini: <MiniEstimate />,
-    note: "Ведите смету по позициям — работы, материалы, расценки. Две цены: внутренняя и клиентская, клиент видит только свою.",
-  },
-  {
-    id: "builder",
-    icon: "layers",
-    pill: "Конструктор сметы",
-    mini: <MiniBuilder />,
-    note: "Собирайте смету из готового каталога: 30 типовых этапов с работами и ресурсами — выберите нужное и примените.",
-  },
-  {
-    id: "procure",
-    icon: "box",
-    pill: "Закупки",
-    mini: <MiniProcurement />,
-    note: "Заказывайте прямо из позиций сметы — видно бюджет, что получено и сколько осталось заказать.",
-  },
-  {
-    id: "chat",
-    icon: "bot",
-    pill: "Чат с ИИ",
-    mini: <MiniChat />,
-    note: "Спросите по проекту — ассистент знает смету, задачи и закупки и отвечает по делу, а не общими словами.",
-  },
-  {
-    id: "photo",
-    icon: "image",
-    pill: "Фото",
-    mini: <MiniPhoto />,
-    note: "Прикрепите фото с площадки — ассистент проанализирует снимок и подскажет правки в смете и задачах.",
-  },
-  {
-    id: "docs",
-    icon: "files",
-    pill: "Документы",
-    mini: <MiniDocs />,
-    note: "Договоры, сметы, акты и чертежи — в одном месте. Отмечайте общими для клиента или внутренними для команды.",
-  },
+  { id: "estimate", icon: "receipt", mini: <MiniEstimate /> },
+  { id: "builder", icon: "layers", mini: <MiniBuilder /> },
+  { id: "procure", icon: "box", mini: <MiniProcurement /> },
+  { id: "chat", icon: "bot", mini: <MiniChat /> },
+  { id: "photo", icon: "image", mini: <MiniPhoto /> },
+  { id: "docs", icon: "files", mini: <MiniDocs /> },
 ];
 
 const KFPill = ({ icon, children }: { icon: string; children: ReactNode }) => (
@@ -540,6 +526,7 @@ const KFPill = ({ icon, children }: { icon: string; children: ReactNode }) => (
 
 // ===========================================================================
 export function KeyFeatures() {
+  const { t } = useTranslation();
   const [pinned, setPinned] = useState(true);
   const [idx, setIdx] = useState(0);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -670,7 +657,7 @@ export function KeyFeatures() {
         textWrap: "balance",
       })}
     >
-      Шесть инструментов — одна среда
+      {t("landing.features.title")}
     </h2>
   );
   const sub = (
@@ -684,14 +671,14 @@ export function KeyFeatures() {
         maxWidth: 360,
       }}
     >
-      Смета, закупки, фото и документы работают на одних данных проекта.
+      {t("landing.features.subtitle")}
     </p>
   );
 
   const renderCard = (f: KFFeature, i: number) => {
     const inner = (
       <>
-        <KFPill icon={f.icon}>{f.pill}</KFPill>
+        <KFPill icon={f.icon}>{t(`landing.features.${f.id}.pill`)}</KFPill>
         <div style={{ display: "flex", flexDirection: "column", gap: 9, minHeight: 0 }}>{f.mini}</div>
         <p
           style={sx({
@@ -705,7 +692,7 @@ export function KeyFeatures() {
             flexShrink: 0,
           })}
         >
-          {f.note}
+          {t(`landing.features.${f.id}.note`)}
         </p>
       </>
     );
@@ -826,7 +813,7 @@ export function KeyFeatures() {
               <button
                 key={ic}
                 onClick={() => scrollBy(d)}
-                aria-label={d < 0 ? "Назад" : "Вперёд"}
+                aria-label={d < 0 ? t("landing.features.prev") : t("landing.features.next")}
                 style={{
                   all: "unset",
                   cursor: "pointer",
