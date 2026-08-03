@@ -4,15 +4,20 @@
 // + Involve body, blue-as-text-on-cream. Tokens live in landing.css.
 //
 // Differences from the static handoff (the "port to React" wiring):
-//  - CTAs route through the app: primary "Начать проект" -> getStartedPath
-//    (auth-aware), "Войти" -> /auth/login, "Посмотреть демо" -> demo session.
+//  - CTAs route through the app: the primary one -> getStartedPath (auth-aware),
+//    log-in -> /auth/login, the demo one -> a demo session.
 //  - Nav + footer links are real in-page anchors / router routes.
-//  - Footer requisites use the real entity: ИП Горлов В. А. · ИНН 575309671587.
+//  - Footer requisites use the real entity (see landing.footer.legalLine).
+//  - All copy is localized (RU/EN) through the `landing.*` keys; the pricing
+//    section reuses the shared `pricing.*` namespace so the landing and the
+//    in-app pricing block can't drift apart.
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { PLANS, type PlanCode } from "@/data/plans";
 import { formatRubFromKopecks } from "@/lib/billing";
 import type { RuntimeAuthStatus } from "@/hooks/use-runtime-auth";
+import { LanguageSwitcher } from "./LanguageSwitcher";
 
 const E = "cubic-bezier(0.4,0,0.2,1)";
 
@@ -23,14 +28,16 @@ export type LandingCtaProps = {
   onDemo: () => void;
 };
 
+/** Anchors are stable; only the label is localized (hence the key, not the text). */
 const NAV_LINKS = [
-  { label: "Возможности", href: "#features" },
-  { label: "Процесс", href: "#process" },
-  { label: "Тарифы", href: "#pricing" },
-  { label: "FAQ", href: "#faq" },
+  { key: "landing.nav.features", href: "#features" },
+  { key: "landing.nav.process", href: "#process" },
+  { key: "landing.nav.pricing", href: "#pricing" },
+  { key: "landing.nav.faq", href: "#faq" },
 ];
 
 export function Nav({ startPath, homeLink = false, authStatus = "guest" }: { startPath: string; homeLink?: boolean; authStatus?: RuntimeAuthStatus }) {
+  const { t } = useTranslation();
   // homeLink: rendered on a subpage (e.g. /blog) — the logo routes to "/"
   // instead of scrolling to top. (Section anchors are always absolute "/#..."
   // links now, so they land on the landing page from any origin regardless.)
@@ -90,31 +97,32 @@ export function Nav({ startPath, homeLink = false, authStatus = "guest" }: { sta
           }}
         >
           {homeLink ? (
-            <Link to="/" title="На главную" aria-label="На главную" style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
+            <Link to="/" title={t("landing.nav.home")} aria-label={t("landing.nav.home")} style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
               <img
                 src="/logo.svg"
-                alt="ровно"
+                alt={t("landing.nav.logoAlt")}
                 style={{ display: "block", height: c ? 34 : 52, width: "auto", transition: `height .42s ${E}` }}
               />
             </Link>
           ) : (
             <div
               onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-              title="Наверх"
+              title={t("landing.nav.toTop")}
               role="button"
-              aria-label="Наверх"
+              aria-label={t("landing.nav.toTop")}
               style={{ display: "flex", alignItems: "center", flexShrink: 0, cursor: "pointer" }}
             >
               {/* App's canonical logo lockup (public/logo.svg), shown larger than in-app. */}
               <img
                 src="/logo.svg"
-                alt="ровно"
+                alt={t("landing.nav.logoAlt")}
                 style={{ display: "block", height: c ? 34 : 52, width: "auto", transition: `height .42s ${E}` }}
               />
             </div>
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 0, flexShrink: 0 }}>
             <div
+              className="rv-nav-tools"
               style={{
                 display: "flex",
                 gap: 32,
@@ -132,14 +140,15 @@ export function Nav({ startPath, homeLink = false, authStatus = "guest" }: { sta
                     like /blog. As a router <Link> it stays a client-side nav (no
                     full reload) and ScrollToHash lands it on the section. */}
                 {NAV_LINKS.map((x) => (
-                  <Link key={x.label} to={{ pathname: "/", hash: x.href }} style={{ fontFamily: "var(--font-body)", fontSize: 15, color: "var(--rv-blue)", textDecoration: "none", opacity: 0.72 }}>
-                    {x.label}
+                  <Link key={x.key} to={{ pathname: "/", hash: x.href }} style={{ fontFamily: "var(--font-body)", fontSize: 15, color: "var(--rv-blue)", textDecoration: "none", opacity: 0.72 }}>
+                    {t(x.key)}
                   </Link>
                 ))}
                 <Link to="/blog/" style={{ fontFamily: "var(--font-body)", fontSize: 15, color: "var(--rv-blue)", textDecoration: "none", opacity: 0.72 }}>
-                  Блог
+                  {t("landing.nav.blog")}
                 </Link>
               </div>
+              <LanguageSwitcher tone="blue" />
               {authStatus !== "authenticated" && (
                 <Link
                   className="rv-btn rv-btn--secondary"
@@ -148,7 +157,7 @@ export function Nav({ startPath, homeLink = false, authStatus = "guest" }: { sta
                   tabIndex={authStatus === "loading" ? -1 : undefined}
                   style={{ fontSize: 20, padding: "8px 14px", visibility: authStatus === "loading" ? "hidden" : "visible" }}
                 >
-                  Войти
+                  {t("landing.nav.login")}
                 </Link>
               )}
             </div>
@@ -168,7 +177,7 @@ export function Nav({ startPath, homeLink = false, authStatus = "guest" }: { sta
                 aria-hidden="true"
                 style={{ fontSize: 20, padding: "8px 16px", flexShrink: 0, borderRadius: c ? 999 : "var(--r-md)", pointerEvents: "none", transition: `background .12s ${E}, color .12s ${E}, border-color .12s ${E}, transform .12s ${E}, border-radius .42s ${E}` }}
               >
-                Начать проект
+                {t("landing.nav.getStarted")}
               </span>
             ) : (
               <Link
@@ -176,7 +185,7 @@ export function Nav({ startPath, homeLink = false, authStatus = "guest" }: { sta
                 to={startPath}
                 style={{ fontSize: 20, padding: "8px 16px", flexShrink: 0, borderRadius: c ? 999 : "var(--r-md)", transition: `background .12s ${E}, color .12s ${E}, border-color .12s ${E}, transform .12s ${E}, border-radius .42s ${E}` }}
               >
-                {isAuthed ? "В приложение" : "Начать проект"}
+                {isAuthed ? t("landing.nav.openApp") : t("landing.nav.getStarted")}
               </Link>
             )}
           </div>
@@ -187,10 +196,11 @@ export function Nav({ startPath, homeLink = false, authStatus = "guest" }: { sta
 }
 
 function LogStream() {
+  const { t } = useTranslation();
   const items = [
-    { icon: "list", text: "План работ по этапу «черновая отделка» собран" },
-    { icon: "check", text: "Чек-лист проверки качества фундамента создан" },
-    { icon: "layers", text: "Список фотофиксации ДО заливки бетона готов" },
+    { icon: "list", text: t("landing.hero.log.plan") },
+    { icon: "check", text: t("landing.hero.log.checklist") },
+    { icon: "layers", text: t("landing.hero.log.photos") },
   ];
   const icons: Record<string, ReactNode> = {
     list: <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />,
@@ -203,7 +213,11 @@ function LogStream() {
     ),
   };
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24, width: 480, maxWidth: "100%" }}>
+    // width:480 as a FIXED width was the landing's horizontal-scroll bug: once the
+    // hero stacks to a single column, a grid item's default `min-width: auto`
+    // refuses to shrink below this child, so the track — and the page — stayed
+    // 480px wide on a 375px phone. Cap it instead of demanding it.
+    <div style={{ display: "flex", flexDirection: "column", gap: 24, width: "100%", maxWidth: 480 }}>
       {items.map((it, i) => (
         <div key={i} style={{ display: "flex", alignItems: "center", gap: 16, color: "var(--rv-blue)", opacity: 0.72 }}>
           <span style={{ flex: 1, fontFamily: "var(--font-body)", fontSize: 14, lineHeight: "20px" }}>{it.text}</span>
@@ -217,28 +231,32 @@ function LogStream() {
 }
 
 export function Hero({ startPath, onDemo }: LandingCtaProps) {
+  const { t } = useTranslation();
   return (
     <section className="rv-section rv-hero" style={{ padding: "96px 48px 64px", display: "grid", gridTemplateColumns: "512px 1fr", gap: 48 }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 32, justifyContent: "center" }}>
+      {/* minWidth:0 on both grid items: without it they inherit `min-width: auto`
+          and refuse to shrink below their content, which is how a single wide
+          child turns into a horizontally scrollable page on a phone. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 32, justifyContent: "center", minWidth: 0 }}>
         <span className="rv-caption" style={{ fontSize: 12, color: "var(--rv-blue)", letterSpacing: ".02em" }}>
-          УМНОЕ ПРОСТРАНСТВО ДЛЯ СТРОИТЕЛЬСТВА
+          {t("landing.hero.eyebrow")}
         </span>
         <h1 style={{ fontFamily: "var(--font-display)", fontSize: 72, lineHeight: 1, letterSpacing: "-0.03em", color: "var(--rv-blue)", margin: 0 }}>
-          Rovno управляет стройкой, а не хаосом
+          {t("landing.hero.title")}
         </h1>
         <p style={{ fontFamily: "var(--font-body)", fontSize: 18, lineHeight: "24px", color: "var(--rv-blue)", opacity: 0.8, maxWidth: 440 }}>
-          Система собирает задачи, сметы, закупки, фото и документы в одном пространстве.
+          {t("landing.hero.subtitle")}
         </p>
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
           <Link className="rv-btn rv-btn--primary" to={startPath}>
-            Начать проект
+            {t("landing.hero.ctaPrimary")}
           </Link>
           <button className="rv-btn rv-btn--secondary" onClick={onDemo}>
-            Посмотреть демо
+            {t("landing.hero.ctaSecondary")}
           </button>
         </div>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", justifyContent: "flex-end", alignItems: "flex-end" }}>
+      <div style={{ display: "flex", flexDirection: "column", justifyContent: "flex-end", alignItems: "flex-end", minWidth: 0 }}>
         <LogStream />
       </div>
     </section>
@@ -246,25 +264,26 @@ export function Hero({ startPath, onDemo }: LandingCtaProps) {
 }
 
 export function Problem() {
+  const { t } = useTranslation();
   return (
     <section className="rv-section" style={{ padding: "128px 48px", display: "flex", justifyContent: "center" }}>
       <div style={{ maxWidth: 560, display: "flex", flexDirection: "column", gap: 24, textAlign: "left" }}>
         <h2 style={{ fontFamily: "var(--font-display)", fontSize: 48, lineHeight: 1, letterSpacing: "-0.03em", color: "var(--rv-blue)" }}>
-          Где на стройке появляются проблемы?
+          {t("landing.problem.title")}
         </h2>
         <p style={{ fontFamily: "var(--font-body)", fontSize: 18, lineHeight: "26px", color: "var(--rv-blue)" }}>
-          Ошибки в строительстве редко происходят из-за одного неправильного действия. Они появляются постепенно.
+          {t("landing.problem.p1")}
           <br />
           <br />
-          Замечания остаются в мессенджерах, а фотографии теряются. Кто должен был проверить — неясно. Этап закрывают, хотя часть работ ещё не подтверждена.
+          {t("landing.problem.p2")}
           <br />
           <br />
-          В итоге появляются переделки, задержки и споры.
+          {t("landing.problem.p3")}
           <br />
           <br />
-          <b>Проблема не в людях!</b>
+          <b>{t("landing.problem.emphasis")}</b>
           <br />
-          Проблема в отсутствии системы фиксации.
+          {t("landing.problem.p4")}
         </p>
       </div>
     </section>
@@ -272,21 +291,22 @@ export function Problem() {
 }
 
 export function Process() {
+  const { t } = useTranslation();
   const steps = [
-    { n: "01", t: "Планирование", d: "Составили смету — получили структуру этапов, чек-листы, контрольные точки." },
-    { n: "02", t: "Выполнение", d: "Задачи у подрядчика, материалы в закупке, фото и документы в одном месте." },
-    { n: "03", t: "Проверка", d: "Фотофиксация, сверка с чек-листом, подтверждение качества." },
-    { n: "04", t: "Закрытие", d: "Акт, финансовая сверка, этап зафиксирован — спорить не о чем." },
+    { n: "01", title: t("landing.process.step1.title"), d: t("landing.process.step1.desc") },
+    { n: "02", title: t("landing.process.step2.title"), d: t("landing.process.step2.desc") },
+    { n: "03", title: t("landing.process.step3.title"), d: t("landing.process.step3.desc") },
+    { n: "04", title: t("landing.process.step4.title"), d: t("landing.process.step4.desc") },
   ];
   return (
     <section id="process" className="rv-section olive" style={{ padding: "96px 48px" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 48 }}>
-        <h2 style={{ fontFamily: "var(--font-display)", fontSize: 48, lineHeight: 1, letterSpacing: "-0.03em", maxWidth: 600 }}>Процесс, который идёт сам</h2>
+        <h2 style={{ fontFamily: "var(--font-display)", fontSize: 48, lineHeight: 1, letterSpacing: "-0.03em", maxWidth: 600 }}>{t("landing.process.title")}</h2>
         <div className="rv-cols rv-cols-4" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 24 }}>
           {steps.map((s) => (
             <div key={s.n} style={{ display: "flex", flexDirection: "column", gap: 12, borderTop: "1px solid var(--line-cream)", paddingTop: 16 }}>
               <span style={{ fontFamily: "var(--font-mono-ui)", fontSize: 11, letterSpacing: ".08em", opacity: 0.72 }}>{s.n}</span>
-              <span style={{ fontFamily: "var(--font-display)", fontSize: 28, lineHeight: 1, letterSpacing: "-0.02em" }}>{s.t}</span>
+              <span style={{ fontFamily: "var(--font-display)", fontSize: 28, lineHeight: 1, letterSpacing: "-0.02em" }}>{s.title}</span>
               <span style={{ fontFamily: "var(--font-body)", fontSize: 14, lineHeight: "20px", opacity: 0.88 }}>{s.d}</span>
             </div>
           ))}
@@ -318,10 +338,11 @@ const RV_ARC_TONES: Record<ArcTone, { panel: string; ink: string }> = {
 };
 
 export function BrandArc({ tone = "sage" }: { tone?: ArcTone }) {
+  const { t } = useTranslation();
   const c = RV_ARC_TONES[tone] || RV_ARC_TONES.sage;
   const cid = "rvArcClip-" + tone;
   return (
-    <svg viewBox="0 0 1632 382" width="100%" preserveAspectRatio="xMidYMid meet" style={{ display: "block", height: "auto" }} role="img" aria-label="ровно — фирменный графический элемент">
+    <svg viewBox="0 0 1632 382" width="100%" preserveAspectRatio="xMidYMid meet" style={{ display: "block", height: "auto" }} role="img" aria-label={t("landing.brandArc.alt")}>
       <defs>
         <clipPath id={cid}>
           <rect width="1632" height="382" rx="32" />
@@ -420,22 +441,23 @@ function UseCaseScene({ kind, sceneStyle }: { kind: string; sceneStyle: string }
 }
 
 export function UseCases({ showScenes = true, sceneStyle = "Контур" }: { showScenes?: boolean; sceneStyle?: string }) {
+  const { t } = useTranslation();
   const cases = [
-    { kind: "apartment", t: "Ремонт квартиры", d: "Частный заказчик + бригада. Прозрачность этапов и экономия денег." },
-    { kind: "office", t: "Офис / коммерция", d: "Множество подрядчиков, один координатор, единая смета." },
-    { kind: "house", t: "Загородный дом", d: "От проекта до ландшафта. Документы и фото собраны в одном месте." },
-    { kind: "company", t: "Строительная компания", d: "Несколько объектов параллельно. Общий ИИ-супервайзер." },
+    { kind: "apartment", title: t("landing.usecases.apartment.title"), d: t("landing.usecases.apartment.desc") },
+    { kind: "office", title: t("landing.usecases.office.title"), d: t("landing.usecases.office.desc") },
+    { kind: "house", title: t("landing.usecases.house.title"), d: t("landing.usecases.house.desc") },
+    { kind: "company", title: t("landing.usecases.company.title"), d: t("landing.usecases.company.desc") },
   ];
   return (
     <section id="usecases" className="rv-section blue" style={{ padding: "96px 48px" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 48 }}>
-        <h2 style={{ fontFamily: "var(--font-display)", fontSize: 48, lineHeight: 1, letterSpacing: "-0.03em" }}>Кому подходит</h2>
+        <h2 style={{ fontFamily: "var(--font-display)", fontSize: 48, lineHeight: 1, letterSpacing: "-0.03em" }}>{t("landing.usecases.title")}</h2>
         <div className="rv-cols rv-cols-4" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 16 }}>
           {cases.map((c) => (
-            <div key={c.t} style={{ border: "1px solid var(--line-cream)", borderRadius: 16, padding: 24, display: "flex", flexDirection: "column", gap: 16, minHeight: 220, justifyContent: "space-between" }}>
+            <div key={c.kind} style={{ border: "1px solid var(--line-cream)", borderRadius: 16, padding: 24, display: "flex", flexDirection: "column", gap: 16, minHeight: 220, justifyContent: "space-between" }}>
               {showScenes ? <UseCaseScene kind={c.kind} sceneStyle={sceneStyle} /> : <div style={{ height: 72, background: "rgba(237,235,215,0.08)", borderRadius: 8 }} />}
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <span style={{ fontFamily: "var(--font-display)", fontSize: 22, lineHeight: 1, letterSpacing: "-0.02em" }}>{c.t}</span>
+                <span style={{ fontFamily: "var(--font-display)", fontSize: 22, lineHeight: 1, letterSpacing: "-0.02em" }}>{c.title}</span>
                 <span style={{ fontFamily: "var(--font-body)", fontSize: 13, lineHeight: "18px", opacity: 0.8 }}>{c.d}</span>
               </div>
             </div>
@@ -467,32 +489,51 @@ const PRICING_ORIGINAL_KOPECKS: Partial<Record<PlanCode, number>> = {
 };
 
 export function Pricing({ startPath }: { startPath: string }) {
+  const { t } = useTranslation();
+  // Plan names, AI tier labels and quota lines come from the shared `pricing.*`
+  // namespace that the in-app pricing block already uses, so the two can't drift
+  // apart. `PLANS[code].display_name` stays the fallback: it mirrors backend
+  // billing truth, and a missing key must never render a raw key string here.
   const plans: Plan[] = [
     {
       code: "free",
-      name: PLANS.free.display_name,
-      cap: "Для знакомства с системой",
-      ai: { label: "Базовый ИИ", quotas: ["50 сообщений в ИИ-чате / мес", "1 проверка документа / мес", "1 анализ фото / мес"] },
-      feat: ["1 пользователь", "1 смета с базовой аналитикой"],
-      cta: "Начать бесплатно",
+      name: t("pricing.plans.free.name", PLANS.free.display_name),
+      cap: t("landing.pricing.free.cap"),
+      ai: {
+        label: t("pricing.plans.free.ai.title"),
+        quotas: [t("pricing.plans.free.ai.chat"), t("pricing.plans.free.ai.doc"), t("pricing.plans.free.ai.photo")],
+      },
+      feat: [t("landing.pricing.free.feat1"), t("landing.pricing.free.feat2")],
+      cta: t("landing.pricing.free.cta"),
     },
     {
       code: "master",
-      name: PLANS.master.display_name,
-      cap: "Для частных мастеров и маленьких команд",
+      name: t("pricing.plans.master.name", PLANS.master.display_name),
+      cap: t("landing.pricing.master.cap"),
       featured: true,
-      badge: "Рекомендуем",
-      ai: { label: "ИИ-напарник", quotas: ["500 сообщений в ИИ-чате / мес", "10 проверок документов / мес", "15 анализов фото / мес"] },
-      feat: ["ИИ в Telegram и Max с той же памятью", "До 2 пользователей · неограниченно гостей", "Неограниченно смет + сводная аналитика"],
-      cta: "Продолжить",
+      badge: t("pricing.recommendedBadge"),
+      ai: {
+        label: t("pricing.plans.master.ai.title"),
+        quotas: [t("pricing.plans.master.ai.chat"), t("pricing.plans.master.ai.doc"), t("pricing.plans.master.ai.photo")],
+      },
+      feat: [t("landing.pricing.master.feat1"), t("landing.pricing.master.feat2"), t("landing.pricing.master.feat3")],
+      cta: t("pricing.cta.continue"),
     },
     {
       code: "brigade",
-      name: PLANS.brigade.display_name,
-      cap: "Для подрядчиков и компаний",
-      ai: { label: "Командный ИИ", quotas: ["2 000 сообщений в ИИ-чате / мес", "50 проверок документов / мес", "100 анализов фото / мес"] },
-      feat: ["ИИ в Telegram и Max — со смартфона", "Неограниченно пользователей", "Организация с общими документами", "Визитка компании · приоритетный доступ"],
-      cta: "Продолжить",
+      name: t("pricing.plans.brigade.name", PLANS.brigade.display_name),
+      cap: t("landing.pricing.brigade.cap"),
+      ai: {
+        label: t("pricing.plans.brigade.ai.title"),
+        quotas: [t("pricing.plans.brigade.ai.chat"), t("pricing.plans.brigade.ai.doc"), t("pricing.plans.brigade.ai.photo")],
+      },
+      feat: [
+        t("landing.pricing.brigade.feat1"),
+        t("landing.pricing.brigade.feat2"),
+        t("landing.pricing.brigade.feat3"),
+        t("landing.pricing.brigade.feat4"),
+      ],
+      cta: t("pricing.cta.continue"),
     },
   ];
   const Check = ({ c }: { c: string }) => (
@@ -503,9 +544,9 @@ export function Pricing({ startPath }: { startPath: string }) {
   return (
     <section id="pricing" className="rv-section" style={{ padding: "96px 48px 72px" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <h2 style={{ fontFamily: "var(--font-display)", fontSize: 48, lineHeight: 1, letterSpacing: "-0.03em", color: "var(--rv-blue)" }}>Тарифы</h2>
+        <h2 style={{ fontFamily: "var(--font-display)", fontSize: 48, lineHeight: 1, letterSpacing: "-0.03em", color: "var(--rv-blue)" }}>{t("landing.pricing.title")}</h2>
         <p style={{ fontFamily: "var(--font-body)", fontSize: 18, lineHeight: "24px", color: "var(--rv-blue)", opacity: 0.72, marginBottom: 32 }}>
-          Выберите тариф, который подходит вашей задаче.
+          {t("landing.pricing.subtitle")}
         </p>
         <div className="rv-cols rv-cols-3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 24, alignItems: "start" }}>
           {plans.map((p) => {
@@ -517,7 +558,7 @@ export function Pricing({ startPath }: { startPath: string }) {
             const oldLabel = originalKopecks != null ? formatRubFromKopecks(originalKopecks) : null;
             return (
               <div
-                key={p.name}
+                key={p.code}
                 style={{
                   padding: 32,
                   borderRadius: 16,
@@ -544,7 +585,7 @@ export function Pricing({ startPath }: { startPath: string }) {
                   {oldLabel && <span style={{ fontFamily: "var(--font-body)", fontSize: 15, opacity: 0.5, textDecoration: "line-through" }}>{oldLabel}</span>}
                   <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
                     <span style={{ fontFamily: "var(--font-display)", fontSize: 48, lineHeight: 1, letterSpacing: "-0.03em" }}>{priceLabel}</span>
-                    {amountKopecks !== 0 && <span style={{ fontFamily: "var(--font-body)", fontSize: 14, opacity: 0.56 }}>/ месяц</span>}
+                    {amountKopecks !== 0 && <span style={{ fontFamily: "var(--font-body)", fontSize: 14, opacity: 0.56 }}>{t("landing.pricing.perMonth")}</span>}
                   </div>
                 </div>
                 <Link
@@ -577,14 +618,14 @@ export function Pricing({ startPath }: { startPath: string }) {
         </div>
 
         <div className="rv-card" style={{ padding: 32, marginTop: 24 }}>
-          <span style={{ fontFamily: "var(--font-body)", fontSize: 16, fontWeight: 600, color: "var(--rv-blue)" }}>Все тарифы включают:</span>
+          <span style={{ fontFamily: "var(--font-body)", fontSize: 16, fontWeight: 600, color: "var(--rv-blue)" }}>{t("pricing.allIncluded.title")}</span>
           <div className="rv-cols rv-cols-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 48, rowGap: 14, marginTop: 20 }}>
             {[
-              "Конструктор сметы и каталоги материалов",
-              "ИИ-помощник со знанием строительных норм и ГОСТов",
-              "Шаблоны типовых документов",
-              "Учёт инвентаря и материалов (склады)",
-              "Бесплатное внедрение и личная поддержка",
+              t("pricing.allIncluded.f1"),
+              t("pricing.allIncluded.f2"),
+              t("pricing.allIncluded.f3"),
+              t("pricing.allIncluded.f4"),
+              t("pricing.allIncluded.f5"),
             ].map((f) => (
               <div key={f} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
                 <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="var(--rv-blue)" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" style={{ marginTop: 3, flexShrink: 0 }}>
@@ -598,7 +639,7 @@ export function Pricing({ startPath }: { startPath: string }) {
 
         <div style={{ display: "flex", justifyContent: "center", marginTop: 24 }}>
           <Link to="/promo/redeem" style={{ fontFamily: "var(--font-body)", fontSize: 15, color: "var(--rv-blue)", textDecoration: "underline", textUnderlineOffset: 3, opacity: 0.8 }}>
-            У меня есть промокод
+            {t("pricing.promoLink")}
           </Link>
         </div>
       </div>
@@ -607,18 +648,19 @@ export function Pricing({ startPath }: { startPath: string }) {
 }
 
 export function FAQ() {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(0);
   const qs = [
-    { q: "Это чат-бот?", a: "Нет. Rovno — это рабочая среда стройки. ИИ собирает структуру, задачи, смету, фиксацию — не «отвечает», а делает." },
-    { q: "Подходит ли частному заказчику?", a: "Да. Для частных проектов тариф «Бесплатно» — без оплаты." },
-    { q: "Сколько времени нужно, чтобы начать?", a: "Смета собирается за минуты, отдельного обучения не требуется." },
-    { q: "А если ИИ ошибётся в смете или задачах?", a: "Вы всё видите и правите — ничего не уходит в работу без вашего подтверждения." },
-    { q: "Нужно ли бросать привычные таблицы и переносить всё вручную?", a: "Нет. Rovno собирает рабочую среду из ваших файлов, а не заставляет начинать с нуля." },
+    { q: t("landing.faq.q1"), a: t("landing.faq.a1") },
+    { q: t("landing.faq.q2"), a: t("landing.faq.a2") },
+    { q: t("landing.faq.q3"), a: t("landing.faq.a3") },
+    { q: t("landing.faq.q4"), a: t("landing.faq.a4") },
+    { q: t("landing.faq.q5"), a: t("landing.faq.a5") },
   ];
   return (
     <section id="faq" className="rv-section orange" style={{ padding: "96px 48px" }}>
       <div className="rv-faq-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 48 }}>
-        <h2 style={{ fontFamily: "var(--font-display)", fontSize: 48, lineHeight: 1, letterSpacing: "-0.03em" }}>Частые вопросы</h2>
+        <h2 style={{ fontFamily: "var(--font-display)", fontSize: 48, lineHeight: 1, letterSpacing: "-0.03em" }}>{t("landing.faq.title")}</h2>
         <div style={{ display: "flex", flexDirection: "column" }}>
           {qs.map((it, i) => (
             <div key={i} style={{ borderTop: "1px solid var(--line-cream)", padding: "20px 0" }}>
@@ -637,18 +679,19 @@ export function FAQ() {
 }
 
 export function FinalCTA({ startPath, onDemo }: LandingCtaProps) {
+  const { t } = useTranslation();
   return (
     <section className="rv-section" style={{ padding: "128px 48px", display: "flex", flexDirection: "column", alignItems: "center", gap: 32, textAlign: "center" }}>
-      <h2 style={{ fontFamily: "var(--font-display)", fontSize: 64, lineHeight: 1, letterSpacing: "-0.03em", color: "var(--rv-blue)", maxWidth: 800 }}>Стройка, которая идёт ровно</h2>
+      <h2 style={{ fontFamily: "var(--font-display)", fontSize: 64, lineHeight: 1, letterSpacing: "-0.03em", color: "var(--rv-blue)", maxWidth: 800 }}>{t("landing.finalCta.title")}</h2>
       <p style={{ fontFamily: "var(--font-body)", fontSize: 18, lineHeight: "26px", color: "var(--rv-blue)", opacity: 0.8, maxWidth: 520 }}>
-        Начните свой первый проект — ИИ-напарник возьмёт на себя план, задачи и контроль. Вам останется только стройка.
+        {t("landing.finalCta.subtitle")}
       </p>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "center" }}>
         <Link className="rv-btn rv-btn--primary" to={startPath}>
-          Начать проект
+          {t("landing.hero.ctaPrimary")}
         </Link>
         <button className="rv-btn rv-btn--secondary" onClick={onDemo}>
-          Посмотреть демо
+          {t("landing.hero.ctaSecondary")}
         </button>
       </div>
     </section>
@@ -661,6 +704,7 @@ const footerHeadStyle: CSSProperties = { fontFamily: "var(--font-mono-ui)", font
 const legalLinkStyle: CSSProperties = { fontFamily: "var(--font-body)", fontSize: 13, color: "var(--rv-cream)", textDecoration: "none", opacity: 0.72 };
 
 export function Footer({ onDemo }: { onDemo: () => void }) {
+  const { t } = useTranslation();
   const pays = [
     { src: "visa.svg", h: 17 },
     { src: "mastercard.svg", h: 26 },
@@ -670,41 +714,42 @@ export function Footer({ onDemo }: { onDemo: () => void }) {
     { src: "sberpay.svg", h: 23 },
     { src: "alfapay.svg", h: 23 },
   ];
-  const legal: { label: string; to: string }[] = [
-    { label: "Публичная оферта", to: "/offer" },
-    { label: "Политика конфиденциальности", to: "/privacy" },
-    { label: "Возврат средств", to: "/refund" },
-    { label: "Реквизиты", to: "/contacts" },
-    { label: "Контакты", to: "/contacts" },
+  const legal: { key: string; label: string; to: string }[] = [
+    { key: "offer", label: t("landing.footer.offer"), to: "/offer" },
+    { key: "privacy", label: t("landing.footer.privacy"), to: "/privacy" },
+    { key: "refund", label: t("landing.footer.refund"), to: "/refund" },
+    { key: "requisites", label: t("landing.footer.requisites"), to: "/contacts" },
+    { key: "contacts", label: t("landing.footer.contacts"), to: "/contacts" },
   ];
   return (
     <footer className="rv-section ink" style={{ padding: "48px", display: "flex", flexDirection: "column", gap: 40, borderTop: "1px solid rgba(237,235,215,0.12)" }}>
       <div className="rv-cols rv-cols-4" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 24 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <span style={{ fontFamily: "var(--font-display)", fontSize: 28, lineHeight: 1, letterSpacing: "-0.02em", color: "var(--rv-cream)" }}>ровно</span>
+          <span style={{ fontFamily: "var(--font-display)", fontSize: 28, lineHeight: 1, letterSpacing: "-0.02em", color: "var(--rv-cream)" }}>{t("landing.footer.brand")}</span>
           <span style={{ fontFamily: "var(--font-body)", fontSize: 13, opacity: 0.56, color: "var(--rv-cream)", maxWidth: 200, lineHeight: "18px" }}>
-            ИИ-супервайзер стройки. Планирование, контроль и фиксация на одном объекте.
+            {t("landing.footer.tagline")}
           </span>
+          <LanguageSwitcher tone="cream" />
         </div>
 
         <div style={footerColStyle}>
-          <span style={footerHeadStyle}>ПРОДУКТ</span>
-          <Link to={{ pathname: "/", hash: "#features" }} style={footerLinkStyle}>Возможности</Link>
-          <Link to={{ pathname: "/", hash: "#process" }} style={footerLinkStyle}>Процесс</Link>
-          <Link to={{ pathname: "/", hash: "#pricing" }} style={footerLinkStyle}>Тарифы</Link>
-          <Link to="/blog/" style={footerLinkStyle}>Блог</Link>
-          <button type="button" onClick={onDemo} style={{ background: "none", border: 0, padding: 0, margin: 0, cursor: "pointer", textAlign: "left", ...footerLinkStyle }}>Демо</button>
+          <span style={footerHeadStyle}>{t("landing.footer.productHeading")}</span>
+          <Link to={{ pathname: "/", hash: "#features" }} style={footerLinkStyle}>{t("landing.nav.features")}</Link>
+          <Link to={{ pathname: "/", hash: "#process" }} style={footerLinkStyle}>{t("landing.nav.process")}</Link>
+          <Link to={{ pathname: "/", hash: "#pricing" }} style={footerLinkStyle}>{t("landing.nav.pricing")}</Link>
+          <Link to="/blog/" style={footerLinkStyle}>{t("landing.nav.blog")}</Link>
+          <button type="button" onClick={onDemo} style={{ background: "none", border: 0, padding: 0, margin: 0, cursor: "pointer", textAlign: "left", ...footerLinkStyle }}>{t("landing.footer.demo")}</button>
         </div>
 
         <div style={footerColStyle}>
-          <span style={footerHeadStyle}>ДЛЯ КОГО</span>
-          <Link to={{ pathname: "/", hash: "#usecases" }} style={footerLinkStyle}>Заказчикам</Link>
-          <Link to={{ pathname: "/", hash: "#usecases" }} style={footerLinkStyle}>Подрядчикам</Link>
-          <Link to={{ pathname: "/", hash: "#usecases" }} style={footerLinkStyle}>Компаниям</Link>
+          <span style={footerHeadStyle}>{t("landing.footer.audienceHeading")}</span>
+          <Link to={{ pathname: "/", hash: "#usecases" }} style={footerLinkStyle}>{t("landing.footer.forClients")}</Link>
+          <Link to={{ pathname: "/", hash: "#usecases" }} style={footerLinkStyle}>{t("landing.footer.forContractors")}</Link>
+          <Link to={{ pathname: "/", hash: "#usecases" }} style={footerLinkStyle}>{t("landing.footer.forCompanies")}</Link>
         </div>
 
         <div style={footerColStyle}>
-          <span style={footerHeadStyle}>КОНТАКТЫ</span>
+          <span style={footerHeadStyle}>{t("landing.footer.contactsHeading")}</span>
           <a href="mailto:vlad@rovno.ai" style={footerLinkStyle}>vlad@rovno.ai</a>
           <a href="https://t.me/stroyrovno" target="_blank" rel="noreferrer noopener" style={footerLinkStyle}>Telegram</a>
         </div>
@@ -721,9 +766,9 @@ export function Footer({ onDemo }: { onDemo: () => void }) {
           ))}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontFamily: "var(--font-body)", fontSize: 13, opacity: 0.64, color: "var(--rv-cream)" }}>Платежи обрабатывает</span>
+          <span style={{ fontFamily: "var(--font-body)", fontSize: 13, opacity: 0.64, color: "var(--rv-cream)" }}>{t("landing.footer.paymentsBy")}</span>
           <span style={{ height: 40, minWidth: 56, padding: "0 12px", boxSizing: "border-box", background: "#fff", borderRadius: 8, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-            <img src="/payment-logos/tbank.svg" style={{ height: 20, width: "auto", display: "block" }} alt="Т-Банк" />
+            <img src="/payment-logos/tbank.svg" style={{ height: 20, width: "auto", display: "block" }} alt={t("landing.footer.tbankAlt")} />
           </span>
         </div>
       </div>
@@ -731,10 +776,10 @@ export function Footer({ onDemo }: { onDemo: () => void }) {
       <div style={{ height: 1, background: "rgba(237,235,215,0.12)" }} />
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, flexWrap: "wrap" }}>
-        <span style={{ fontFamily: "var(--font-mono-ui)", fontSize: 12, opacity: 0.56, color: "var(--rv-cream)" }}>© 2026 ровно · ИП Горлов В. А. · ИНН 575309671587</span>
+        <span style={{ fontFamily: "var(--font-mono-ui)", fontSize: 12, opacity: 0.56, color: "var(--rv-cream)" }}>{t("landing.footer.legalLine")}</span>
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
           {legal.map((x) => (
-            <Link key={x.label} to={x.to} style={legalLinkStyle}>
+            <Link key={x.key} to={x.to} style={legalLinkStyle}>
               {x.label}
             </Link>
           ))}
