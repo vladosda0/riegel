@@ -71,7 +71,13 @@ export function LanguageSwitcher({ tone = "blue" }: { tone?: keyof typeof TONES 
             lang={lang.code}
             onClick={() => applyLanguage(lang.code)}
             aria-pressed={isActive}
-            title={t("landing.language.switchTo", { language: t(`landing.language.name.${lang.code}`) })}
+            // No tooltip on the active button: its click early-returns, so
+            // promising a switch there describes something that cannot happen.
+            title={
+              isActive
+                ? undefined
+                : t("landing.language.switchTo", { language: t(`landing.language.name.${lang.code}`) })
+            }
             style={{
               all: "unset",
               cursor: isActive ? "default" : "pointer",

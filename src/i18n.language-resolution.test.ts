@@ -1,8 +1,13 @@
 // Language resolution: which language a visitor lands in, and why.
 //
-// The precedence chain (`?lang=` > stored choice > browser preference >
-// English) is the whole feature — get it wrong and either shared links open in
-// the wrong language, or a returning visitor's own choice is overridden.
+// The precedence chain is `?lang=` > stored choice > Russian. The browser's own
+// preference is deliberately NOT a rung: it only decides whether English is
+// OFFERED (see prefersNonRussian and LandingLanguagePrompt). Letting it decide
+// the language made one URL render differently per visitor, which made the
+// canonical a function of who was asking.
+//
+// Get this wrong and either shared links open in the wrong language, or a
+// returning visitor's own choice is overridden.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 

@@ -79,10 +79,16 @@ export function LandingLanguagePrompt() {
   return (
     <div
       role="region"
+      className="rv-lang-prompt"
       // The copy is English in BOTH locales on purpose: the only person who
-      // sees this cannot read the Russian page it is sitting on.
+      // sees this cannot read the Russian page it is sitting on. That includes
+      // the accessible name: labelling an English region with the Russian
+      // "Язык интерфейса" would hand a screen reader Cyrillic to voice with an
+      // English synthesiser, which is the failure DocumentLanguage exists to
+      // prevent. It also needs to differ from the switcher's own group label,
+      // or the page carries two identically named regions.
       lang="en"
-      aria-label={t("landing.language.switcherLabel")}
+      aria-label={t("landing.languagePrompt.regionLabel")}
       style={{
         position: "fixed",
         left: 16,

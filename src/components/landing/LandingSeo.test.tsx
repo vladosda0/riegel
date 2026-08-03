@@ -112,6 +112,30 @@ describe("LandingSeo", () => {
     expect(meta("property", "og:locale:alternate")?.content).toBe("ru_RU");
   });
 
+  /**
+   * Pins the deliberate split between the two tag groups, which nothing covered
+   * before. A returning reader with a stored English choice lands on bare `/`
+   * (every nav link drops the query) and reads English, while the URL-keyed
+   * tags must keep describing `/` as the Russian page — because the only things
+   * that read them fetch the URL fresh, with no stored choice, and must be told
+   * Russian.
+   */
+  it("keeps URL-keyed tags on the URL's language while the reader sees theirs", async () => {
+    await runInterfaceIn("en");
+    renderAt("/");
+
+    // What the reader sees.
+    expect(document.title).toBe(i18n.t("landing.meta.title"));
+    expect(meta("name", "description")?.content).toBe(i18n.t("landing.meta.description"));
+    // What a crawler or scraper is told about this URL.
+    expect(document.head.querySelector('link[rel="canonical"]')?.getAttribute("href")).toBe(
+      "https://rovno.ai/",
+    );
+    expect(meta("property", "og:url")?.content).toBe("https://rovno.ai/");
+    expect(meta("property", "og:locale")?.content).toBe("ru_RU");
+    expect(meta("property", "og:locale:alternate")?.content).toBe("en_US");
+  });
+
   it("gives one URL the same canonical regardless of the rendered language", async () => {
     await runInterfaceIn("ru");
     const { unmount } = renderAt("/");

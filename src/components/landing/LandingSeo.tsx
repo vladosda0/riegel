@@ -96,6 +96,25 @@ export function LandingSeo() {
     const title = t("landing.meta.title");
     const description = t("landing.meta.description");
 
+    // The head deliberately splits into two groups, and on bare `/` they can
+    // disagree: a returning visitor with a stored English choice reads an
+    // English page whose og:locale says ru_RU.
+    //
+    // That is intended, not an oversight. The URL-keyed tags (canonical,
+    // og:url, og:locale) exist only for consumers that fetch the URL fresh —
+    // crawlers and social scrapers — and those never carry localStorage, so
+    // they always see, and must always be told, Russian for `/`. The
+    // language-keyed tags (title, description) describe what the reader is
+    // actually looking at, and a reader who chose English should not get a
+    // Russian tab title.
+    //
+    // No consumer can observe both groups at once: the only context where they
+    // differ is a returning reader's own browser, where nothing consumes
+    // og:locale. Verified by loading `/` with empty storage on an en-US
+    // browser — every tag comes out Russian. The alternatives are worse: making
+    // titles follow the URL shows an English page under a Russian title, and
+    // making `/` re-assert Russian throws an English reader back to Russian the
+    // moment they click any nav link (they all drop the query).
     document.title = title;
     // Snapshot every tag on the way in. The same shell serves /offer, /privacy,
     // /refund and /contacts, none of which manage their own head, so anything

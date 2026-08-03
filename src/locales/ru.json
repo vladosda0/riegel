@@ -2794,6 +2794,7 @@
   "landing.language.name.ru": "русский",
   "landing.language.name.en": "английский",
   "landing.languagePrompt.text": "Rovno is also available in English.",
+  "landing.languagePrompt.regionLabel": "Language",
   "landing.languagePrompt.action": "Switch to English",
   "landing.languagePrompt.dismiss": "Dismiss",
   "landing.hero.eyebrow": "УМНОЕ ПРОСТРАНСТВО ДЛЯ СТРОИТЕЛЬСТВА",

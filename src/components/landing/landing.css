@@ -301,7 +301,12 @@
   min-height: 24px !important;
   box-sizing: border-box !important;
 }
-.rv-landing .rv-lang-switch button:focus-visible {
+/* Same treatment for the language prompt's two buttons, which use the same
+   inline `all: unset` and so shed the UA focus ring the same way. Kept as a
+   separate selector rather than folded into one rule because the prompt is not
+   inside .rv-lang-switch. */
+.rv-landing .rv-lang-switch button:focus-visible,
+.rv-landing .rv-lang-prompt button:focus-visible {
   outline: 2px solid currentColor !important;
   outline-offset: 2px !important;
 }

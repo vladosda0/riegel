@@ -119,6 +119,15 @@ describe("LandingLanguagePrompt", () => {
     expect(offer()).toBeNull();
   });
 
+  it("labels itself in English, since only a non-Russian reader ever sees it", () => {
+    setBrowserLanguages(["en-US"]);
+    renderPrompt();
+
+    // A Russian aria-label on a lang="en" region hands a screen reader Cyrillic
+    // to voice with an English synthesiser.
+    expect(screen.getByRole("region", { name: "Language" })).not.toBeNull();
+  });
+
   it("survives localStorage throwing instead of taking the landing down", () => {
     setBrowserLanguages(["en-US"]);
     const spy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
