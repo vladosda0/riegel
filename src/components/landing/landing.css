@@ -318,6 +318,15 @@
   outline-offset: 2px !important;
 }
 
+/* The nav's tools container is overflow:hidden (it animates to zero width when
+   the bar condenses), which clips a ring drawn 2px out. Below 1120px the
+   container hugs the switcher, so the outer edge fell outside it and lost 1px
+   on every side. Tucking the ring in by 1px keeps the whole 2px stroke inside
+   the clip; nothing else about the control moves. */
+.rv-landing .rv-nav-tools .rv-lang-switch button:focus-visible {
+  outline-offset: 1px !important;
+}
+
 /* Tablet — 4-up card grids drop to 2 columns. */
 @media (max-width: 1024px) {
   .rv-landing .rv-cols-4 { grid-template-columns: repeat(2, 1fr) !important; }

@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 import { PLANS, type PlanCode } from "@/data/plans";
 import { formatRubFromKopecks } from "@/lib/billing";
 import type { RuntimeAuthStatus } from "@/hooks/use-runtime-auth";
+import { getActiveLanguage } from "@/i18n";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 
 const E = "cubic-bezier(0.4,0,0.2,1)";
@@ -75,6 +76,13 @@ export function Nav({ startPath, homeLink = false, authStatus = "guest" }: { sta
       >
         <nav
           className="rv-nav"
+          // The chrome is translated even where the PAGE is not. On /blog/ and
+          // the legal routes DocumentLanguage pins <html lang="ru"> for the
+          // Russian prose, which is right for the article and wrong for this
+          // bar: an English reader's "Features / Log in / Start a project"
+          // would be voiced by a Russian synthesiser. Declaring the interface
+          // language on the subtree is what <html lang> + nested lang is for.
+          lang={getActiveLanguage()}
           style={{
             pointerEvents: "auto",
             boxSizing: "border-box",
@@ -131,7 +139,16 @@ export function Nav({ startPath, homeLink = false, authStatus = "guest" }: { sta
                 maxWidth: c ? 0 : 700,
                 opacity: c ? 0 : 1,
                 marginRight: c ? 0 : 32,
-                transition: `max-width .42s ${E}, opacity .3s ${E}, margin-right .42s ${E}`,
+                // Collapsing to zero width with opacity 0 hides these controls
+                // visually but leaves every one of them — the anchors, the blog
+                // link, the language switcher and «Войти» — in the tab order, so
+                // a keyboard user who has scrolled tabs into things that are
+                // painted nowhere. visibility:hidden takes the whole subtree out
+                // of the tab order; it is delayed by the collapse duration so
+                // the fade-out still plays, and applied instantly on the way
+                // back so the fade-in does. Layout is untouched either way.
+                visibility: c ? "hidden" : "visible",
+                transition: `max-width .42s ${E}, opacity .3s ${E}, margin-right .42s ${E}, visibility 0s linear ${c ? ".42s" : "0s"}`,
               }}
             >
               <div className="rv-nav-anchors" style={{ display: "flex", gap: 32, alignItems: "center" }}>
@@ -722,7 +739,8 @@ export function Footer({ onDemo }: { onDemo: () => void }) {
     { key: "contacts", label: t("landing.footer.contacts"), to: "/contacts" },
   ];
   return (
-    <footer className="rv-section ink" style={{ padding: "48px", display: "flex", flexDirection: "column", gap: 40, borderTop: "1px solid rgba(237,235,215,0.12)" }}>
+    // Translated chrome, same reasoning as the nav above.
+    <footer lang={getActiveLanguage()} className="rv-section ink" style={{ padding: "48px", display: "flex", flexDirection: "column", gap: 40, borderTop: "1px solid rgba(237,235,215,0.12)" }}>
       <div className="rv-cols rv-cols-4" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 24 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <span style={{ fontFamily: "var(--font-display)", fontSize: 28, lineHeight: 1, letterSpacing: "-0.02em", color: "var(--rv-cream)" }}>{t("landing.footer.brand")}</span>

@@ -128,6 +128,20 @@ describe("LandingLanguagePrompt", () => {
     expect(screen.getByRole("region", { name: "Language" })).not.toBeNull();
   });
 
+  it("declares a ring colour that contrasts with its own blue strip", () => {
+    // currentColor here was blue-on-blue: a 1.00:1 ring on the only action the
+    // prompt has. The CSS falls back to currentColor, so losing the property
+    // silently restores that.
+    setBrowserLanguages(["en-US"]);
+    renderPrompt();
+
+    // Only the custom property is asserted: jsdom does not serialise a
+    // `background` shorthand holding a var(), so reading the strip's own colour
+    // back would test jsdom rather than this component.
+    const region = screen.getByRole("region", { name: "Language" });
+    expect(region.style.getPropertyValue("--rv-focus-ring")).toBe("var(--rv-cream)");
+  });
+
   it("survives localStorage throwing instead of taking the landing down", () => {
     setBrowserLanguages(["en-US"]);
     const spy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {

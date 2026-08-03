@@ -24,6 +24,16 @@ function renderSwitcher(initialEntry = "/") {
   );
 }
 
+function renderToned(tone: "blue" | "cream") {
+  return render(
+    <MemoryRouter>
+      <LanguageSwitcher tone={tone} />
+    </MemoryRouter>,
+  );
+}
+
+const group = () => screen.getByRole("group");
+
 // Every changeLanguage re-renders whatever is mounted, so each one is wrapped —
 // including the fixtures, which otherwise trip the act() warning on teardown.
 async function switchLanguage(lang: string) {
@@ -95,6 +105,55 @@ describe("LanguageSwitcher", () => {
     });
 
     expect(screen.getByTestId("location")).toHaveTextContent("/?lang=en#pricing");
+  });
+
+  /**
+   * The focus ring has regressed three times: absent, then absent again in a
+   * new component, then present but painted 1.00:1 against its own background.
+   * jsdom cannot evaluate :focus-visible or the cascade, so this is the cheap
+   * tripwire instead: the ring colour must be declared, and must differ from
+   * the colour the ACTIVE button paints itself in — which is exactly what
+   * `currentColor` resolved to when the ring was invisible. A refactor that
+   * drops the custom property silently restores that bug, because the CSS
+   * fallback is `currentColor`.
+   */
+  it.each([
+    ["blue", "var(--rv-blue)", "var(--rv-cream)"],
+    ["cream", "var(--rv-cream)", "var(--rv-blue)"],
+  ] as const)("declares a %s-tone ring that contrasts with the active button", (tone, ring, activeInk) => {
+    renderToned(tone);
+
+    expect(group().style.getPropertyValue("--rv-focus-ring")).toBe(ring);
+    // The active pill inverts fg/bg, so the colour it paints ITSELF in is the
+    // wrong ring colour — that inversion is what made currentColor invisible.
+    // (Asserted against the tone constant rather than the rendered style: the
+    // buttons set `all: unset`, after which jsdom stops serialising `color`.)
+    expect(ring).not.toBe(activeInk);
+  });
+
+  it("gives the nav and footer switchers distinct accessible names", () => {
+    const { unmount } = renderToned("blue");
+    const nav = group().getAttribute("aria-label");
+    unmount();
+
+    renderToned("cream");
+    expect(group().getAttribute("aria-label")).not.toBe(nav);
+  });
+
+  /**
+   * The label carries the TARGET language, the title is in the READER's. Both
+   * on the button meant the title inherited the target language, so a screen
+   * reader announced it with the wrong synthesiser.
+   */
+  it("scopes lang to the label, not the button that holds the title", () => {
+    renderSwitcher();
+
+    // The inactive button is the one that still has a tooltip; the active one
+    // deliberately has none, since its click is a no-op.
+    const inactive = screen.getByRole("button", { pressed: false });
+    expect(inactive.hasAttribute("lang")).toBe(false);
+    expect(inactive.querySelector("span[lang]")?.getAttribute("lang")).toBe("ru");
+    expect(inactive.getAttribute("title")).toBeTruthy();
   });
 
   it("keeps unrelated query params intact", async () => {
