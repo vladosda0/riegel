@@ -7,7 +7,7 @@ import {
   computeOrderedOpenQty,
   computeRemainingRequestedQty,
 } from "@/lib/procurement-fulfillment";
-import type { ProcurementItemV2 } from "@/types/entities";
+import type { InventoryLocation, OrderWithLines, ProcurementItemV2 } from "@/types/entities";
 
 export type ProcurementReadStatus = "requested" | "ordered" | "in_stock";
 
@@ -96,72 +96,98 @@ function statusTotal(
   return actualPrice * qty;
 }
 
+/**
+ * The per-project half of the read model, with every input supplied by the caller.
+ *
+ * Extracted from `getProcurementReadSnapshot` so a caller holding ONE project's data can build
+ * its summary without going through the cross-project snapshot, which sources everything from
+ * the browser stores and is therefore empty for any authenticated Supabase user (#215).
+ * `getProcurementReadSnapshot` still calls this, so both paths share one implementation and
+ * cannot drift.
+ *
+ * Returns null when the project has no live items, mirroring the `totalCount > 0` filter the
+ * snapshot applies, so "nothing here" reads the same in both paths.
+ */
+export function buildProcurementReadProjectSummary(
+  project: { id: string; title: string },
+  items: ProcurementItemV2[],
+  orders: OrderWithLines[],
+  locations: InventoryLocation[],
+): ProcurementReadProjectSummary | null {
+  const projectItems = items.filter((item) => item.projectId === project.id && !item.archived);
+  const inStockGroups = computeInStockByLocation(project.id, projectItems, orders, locations);
+  const inStockByItemId = new Map<string, number>();
+  inStockGroups.forEach((group) => {
+    group.items.forEach((entry) => {
+      inStockByItemId.set(
+        entry.procurementItemId,
+        (inStockByItemId.get(entry.procurementItemId) ?? 0) + entry.qty,
+      );
+    });
+  });
+
+  const rows = projectItems.map((item) => {
+    const remainingQty = computeRemainingRequestedQty(item, orders);
+    const orderedOpenQty = computeOrderedOpenQty(item.id, orders);
+    const inStockQty = inStockByItemId.get(item.id) ?? 0;
+    const status = classifyStatus(remainingQty, orderedOpenQty, inStockQty);
+    const qty = statusQty(status, remainingQty, orderedOpenQty, inStockQty);
+    const planned = plannedUnitPrice(item);
+    const actual = actualUnitPrice(item);
+    return {
+      id: item.id,
+      projectId: item.projectId,
+      name: item.name,
+      spec: item.spec,
+      unit: item.unit,
+      requiredQty: item.requiredQty,
+      remainingQty,
+      orderedOpenQty,
+      inStockQty,
+      status,
+      statusQty: qty,
+      statusTotal: statusTotal(status, qty, planned, actual),
+      plannedUnitPrice: planned,
+      actualUnitPrice: actual,
+      inStockPlannedTotal: planned * inStockQty,
+      inStockActualTotal: actual * inStockQty,
+    } satisfies ProcurementReadRow;
+  }).sort((a, b) => a.name.localeCompare(b.name));
+
+  if (rows.length === 0) return null;
+
+  const requestedRows = rows.filter((row) => row.status === "requested");
+  const orderedRows = rows.filter((row) => row.status === "ordered");
+  const inStockRows = rows.filter((row) => row.status === "in_stock");
+
+  return {
+    projectId: project.id,
+    projectTitle: project.title,
+    rows,
+    totalCount: rows.length,
+    requestedCount: requestedRows.length,
+    orderedCount: orderedRows.length,
+    inStockCount: inStockRows.length,
+    requestedTotal: requestedRows.reduce((sum, row) => sum + row.statusTotal, 0),
+    orderedTotal: orderedRows.reduce((sum, row) => sum + row.statusTotal, 0),
+    inStockTotal: inStockRows.reduce((sum, row) => sum + row.statusTotal, 0),
+    inStockPlannedTotal: rows.reduce((sum, row) => sum + row.inStockPlannedTotal, 0),
+    inStockActualTotal: rows.reduce((sum, row) => sum + row.inStockActualTotal, 0),
+  } satisfies ProcurementReadProjectSummary;
+}
+
 export function getProcurementReadSnapshot(): ProcurementReadSnapshot {
   const projects = getProjects();
   const allItems = getAllProcurementItemsV2();
 
-  const summaries: ProcurementReadProjectSummary[] = projects.map((project) => {
-    const projectItems = allItems.filter((item) => item.projectId === project.id && !item.archived);
-    const projectOrders = listOrdersByProject(project.id);
-    const locations = listLocations(project.id);
-    const inStockGroups = computeInStockByLocation(project.id, projectItems, projectOrders, locations);
-    const inStockByItemId = new Map<string, number>();
-    inStockGroups.forEach((group) => {
-      group.items.forEach((entry) => {
-        inStockByItemId.set(
-          entry.procurementItemId,
-          (inStockByItemId.get(entry.procurementItemId) ?? 0) + entry.qty,
-        );
-      });
-    });
-
-    const rows = projectItems.map((item) => {
-      const remainingQty = computeRemainingRequestedQty(item, projectOrders);
-      const orderedOpenQty = computeOrderedOpenQty(item.id, projectOrders);
-      const inStockQty = inStockByItemId.get(item.id) ?? 0;
-      const status = classifyStatus(remainingQty, orderedOpenQty, inStockQty);
-      const qty = statusQty(status, remainingQty, orderedOpenQty, inStockQty);
-      const planned = plannedUnitPrice(item);
-      const actual = actualUnitPrice(item);
-      return {
-        id: item.id,
-        projectId: item.projectId,
-        name: item.name,
-        spec: item.spec,
-        unit: item.unit,
-        requiredQty: item.requiredQty,
-        remainingQty,
-        orderedOpenQty,
-        inStockQty,
-        status,
-        statusQty: qty,
-        statusTotal: statusTotal(status, qty, planned, actual),
-        plannedUnitPrice: planned,
-        actualUnitPrice: actual,
-        inStockPlannedTotal: planned * inStockQty,
-        inStockActualTotal: actual * inStockQty,
-      } satisfies ProcurementReadRow;
-    }).sort((a, b) => a.name.localeCompare(b.name));
-
-    const requestedRows = rows.filter((row) => row.status === "requested");
-    const orderedRows = rows.filter((row) => row.status === "ordered");
-    const inStockRows = rows.filter((row) => row.status === "in_stock");
-
-    return {
-      projectId: project.id,
-      projectTitle: project.title,
-      rows,
-      totalCount: rows.length,
-      requestedCount: requestedRows.length,
-      orderedCount: orderedRows.length,
-      inStockCount: inStockRows.length,
-      requestedTotal: requestedRows.reduce((sum, row) => sum + row.statusTotal, 0),
-      orderedTotal: orderedRows.reduce((sum, row) => sum + row.statusTotal, 0),
-      inStockTotal: inStockRows.reduce((sum, row) => sum + row.statusTotal, 0),
-      inStockPlannedTotal: rows.reduce((sum, row) => sum + row.inStockPlannedTotal, 0),
-      inStockActualTotal: rows.reduce((sum, row) => sum + row.inStockActualTotal, 0),
-    } satisfies ProcurementReadProjectSummary;
-  }).filter((summary) => summary.totalCount > 0);
+  const summaries: ProcurementReadProjectSummary[] = projects
+    .map((project) => buildProcurementReadProjectSummary(
+      project,
+      allItems,
+      listOrdersByProject(project.id),
+      listLocations(project.id),
+    ))
+    .filter((summary): summary is ProcurementReadProjectSummary => summary !== null);
 
   const totals: ProcurementReadTotals = {
     totalCount: summaries.reduce((sum, summary) => sum + summary.totalCount, 0),
