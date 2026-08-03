@@ -16,6 +16,7 @@ import { useRuntimeAuth } from "@/hooks/use-runtime-auth";
 import { trackEvent } from "@/lib/analytics";
 import { KeyFeatures } from "@/components/landing/LandingKeyFeatures";
 import { BlogTeaser } from "@/components/landing/LandingBlogTeaser";
+import { LandingSeo } from "@/components/landing/LandingSeo";
 import {
   Nav,
   Hero,
@@ -60,6 +61,7 @@ export default function Landing() {
 
   return (
     <div className="rv-landing">
+      <LandingSeo />
       <Nav startPath={startPath} authStatus={runtimeAuthStatus} />
       <Hero startPath={startPath} onDemo={handleDemo} />
       <KeyFeatures />

@@ -19,6 +19,16 @@
     <meta property="og:type" content="website" />
     <meta property="og:image" content="https://rovno.ai/rovno-logo.png" />
 
+    <!--
+      Russian is the default this shell is authored in, so og:locale starts at
+      ru_RU. Both tags are rewritten at runtime by src/i18n.ts when the active
+      language is English (`?lang=en`, a stored choice, or an English browser),
+      which is also what keeps <html lang> honest. The landing additionally
+      manages its own title/description/hreflang — see LandingSeo.
+    -->
+    <meta property="og:locale" content="ru_RU" />
+    <meta property="og:locale:alternate" content="en_US" />
+
     <meta name="twitter:card" content="summary" />
     <meta name="twitter:title" content="Ровно ИИ" />
 
