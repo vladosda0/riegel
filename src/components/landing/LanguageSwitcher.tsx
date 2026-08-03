@@ -7,6 +7,7 @@
 //
 // The nav and the footer sit on opposite backgrounds, hence `tone`.
 
+import { type CSSProperties } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { LANGUAGE_QUERY_PARAM, getActiveLanguage, setAppLanguage, type AppLanguage } from "@/i18n";
@@ -16,9 +17,15 @@ const LANGUAGES: { code: AppLanguage; label: string }[] = [
   { code: "en", label: "EN" },
 ];
 
+// `ring` is the focus-outline colour and is NOT the same thing as `ink`, even
+// where they coincide. The outline sits OUTSIDE the button (offset 2px), so it
+// has to contrast with whatever the switcher is sitting on, not with the button
+// it belongs to. Using currentColor here painted an invisible ring on the ACTIVE
+// button, whose fg/bg are inverted: cream text on a blue pill, on a cream nav,
+// gives a cream ring on cream.
 const TONES = {
-  blue: { ink: "var(--rv-blue)", activeInk: "var(--rv-cream)", activeBg: "var(--rv-blue)", line: "var(--line-blue-soft)" },
-  cream: { ink: "var(--rv-cream)", activeInk: "var(--rv-blue)", activeBg: "var(--rv-cream)", line: "rgba(237,235,215,0.32)" },
+  blue: { ink: "var(--rv-blue)", activeInk: "var(--rv-cream)", activeBg: "var(--rv-blue)", line: "var(--line-blue-soft)", ring: "var(--rv-blue)" },
+  cream: { ink: "var(--rv-cream)", activeInk: "var(--rv-blue)", activeBg: "var(--rv-cream)", line: "rgba(237,235,215,0.32)", ring: "var(--rv-cream)" },
 } as const;
 
 export function LanguageSwitcher({ tone = "blue" }: { tone?: keyof typeof TONES }) {
@@ -51,16 +58,22 @@ export function LanguageSwitcher({ tone = "blue" }: { tone?: keyof typeof TONES 
     <div
       role="group"
       className="rv-lang-switch"
-      aria-label={t("landing.language.switcherLabel")}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        padding: 2,
-        gap: 2,
-        borderRadius: 999,
-        border: `1px solid ${c.line}`,
-        flexShrink: 0,
-      }}
+      // The nav and the footer each render one of these, so they need distinct
+      // accessible names or the page carries two identically labelled groups.
+      aria-label={t(`landing.language.switcherLabel.${tone === "cream" ? "footer" : "nav"}`)}
+      style={
+        {
+          display: "inline-flex",
+          alignItems: "center",
+          padding: 2,
+          gap: 2,
+          borderRadius: 999,
+          border: `1px solid ${c.line}`,
+          flexShrink: 0,
+          // Read by the shared :focus-visible rule in landing.css.
+          "--rv-focus-ring": c.ring,
+        } as CSSProperties
+      }
     >
       {LANGUAGES.map((lang) => {
         const isActive = lang.code === active;
@@ -68,7 +81,6 @@ export function LanguageSwitcher({ tone = "blue" }: { tone?: keyof typeof TONES 
           <button
             key={lang.code}
             type="button"
-            lang={lang.code}
             onClick={() => applyLanguage(lang.code)}
             aria-pressed={isActive}
             // No tooltip on the active button: its click early-returns, so
@@ -95,7 +107,11 @@ export function LanguageSwitcher({ tone = "blue" }: { tone?: keyof typeof TONES 
               transition: "background .16s, color .16s, opacity .16s",
             }}
           >
-            {lang.label}
+            {/* `lang` sits on the LABEL, not the button. On the button it also
+                scoped the title attribute, which is written in the current
+                interface language — so a screen reader announced "Переключить
+                на английский" with an English synthesiser. */}
+            <span lang={lang.code}>{lang.label}</span>
           </button>
         );
       })}

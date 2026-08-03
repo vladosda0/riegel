@@ -20,7 +20,7 @@
 // Googlebot renders as en-US, so it would meet exactly that overlay on the page
 // we most want ranked. A dismissible strip is the pattern that policy exempts.
 
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { LANGUAGE_QUERY_PARAM, getActiveLanguage, getStoredLanguage, prefersNonRussian, setAppLanguage } from "@/i18n";
@@ -90,6 +90,10 @@ export function LandingLanguagePrompt() {
       lang="en"
       aria-label={t("landing.languagePrompt.regionLabel")}
       style={{
+        // The strip is blue, so the focus ring must be cream. currentColor here
+        // resolved to blue on the primary button and painted an invisible ring
+        // on the only action this prompt has.
+        "--rv-focus-ring": "var(--rv-cream)",
         position: "fixed",
         left: 16,
         right: 16,
@@ -110,7 +114,7 @@ export function LandingLanguagePrompt() {
         fontFamily: "var(--font-body)",
         fontSize: 14,
         lineHeight: "20px",
-      }}
+      } as CSSProperties}
     >
       <span style={{ flex: 1, minWidth: 180 }}>{t("landing.languagePrompt.text")}</span>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>

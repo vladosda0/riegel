@@ -301,13 +301,20 @@
   min-height: 24px !important;
   box-sizing: border-box !important;
 }
-/* Same treatment for the language prompt's two buttons, which use the same
-   inline `all: unset` and so shed the UA focus ring the same way. Kept as a
-   separate selector rather than folded into one rule because the prompt is not
-   inside .rv-lang-switch. */
+/* The ring colour comes from --rv-focus-ring, set by each container, NOT from
+   currentColor. The outline sits outside the button, so it must contrast with
+   what the control is sitting ON. currentColor got that wrong twice: cream on a
+   cream nav for the switcher's active pill, and blue on a blue strip for the
+   prompt's primary button — a 1.00:1 ring, i.e. none at all, on exactly the
+   controls the rule exists to protect. currentColor stays only as the fallback.
+
+   NOTE: other landing buttons using inline `all: unset` (the FAQ accordion
+   headers, the KeyFeatures arrows) still have NO focus indicator. They are
+   unchanged by this feature and out of its scope; adding them needs a class on
+   each, which is its own change. */
 .rv-landing .rv-lang-switch button:focus-visible,
 .rv-landing .rv-lang-prompt button:focus-visible {
-  outline: 2px solid currentColor !important;
+  outline: 2px solid var(--rv-focus-ring, currentColor) !important;
   outline-offset: 2px !important;
 }
 

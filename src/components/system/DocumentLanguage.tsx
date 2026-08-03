@@ -24,8 +24,22 @@ import { getActiveLanguage } from "@/i18n";
  */
 const RUSSIAN_ONLY_ROUTES = ["/blog", "/offer", "/privacy", "/refund", "/contacts"];
 
+/**
+ * Carved back OUT of /blog: the admin screens are app chrome, not articles, so
+ * they follow the interface language like the rest of the app.
+ */
+const TRANSLATED_EXCEPTIONS = ["/blog/admin"];
+
+function matchesRoute(pathname: string, route: string): boolean {
+  return pathname === route || pathname.startsWith(`${route}/`);
+}
+
 function isRussianOnly(pathname: string): boolean {
-  return RUSSIAN_ONLY_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
+  // React Router matches paths case-insensitively, so `/OFFER` reaches the
+  // Russian offer page and must be recognised here too.
+  const path = pathname.toLowerCase();
+  if (TRANSLATED_EXCEPTIONS.some((route) => matchesRoute(path, route))) return false;
+  return RUSSIAN_ONLY_ROUTES.some((route) => matchesRoute(path, route));
 }
 
 export function DocumentLanguage() {

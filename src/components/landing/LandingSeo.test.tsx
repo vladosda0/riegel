@@ -18,6 +18,10 @@ const SHELL_META: [string, string, string][] = [
   ["property", "og:title", "Ровно ИИ"],
   ["property", "og:description", "Управление строительными проектами"],
   ["name", "twitter:title", "Ровно ИИ"],
+  // index.html ships og:locale, and LandingSeo overwrites it — so it must be
+  // seeded here, or the restore test silently exercises the create-and-remove
+  // path instead of the snapshot-and-restore one it exists to guard.
+  ["property", "og:locale", "ru_RU"],
 ];
 
 function meta(attr: string, key: string): HTMLMetaElement | null {

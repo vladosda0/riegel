@@ -66,6 +66,21 @@ describe("DocumentLanguage", () => {
     expect(document.documentElement.lang).toBe("en");
   });
 
+  it("does not pin the blog admin screens, which are app chrome", async () => {
+    // They match the /blog prefix but are translated like the rest of the app.
+    await runInterfaceIn("en");
+    renderAt("/blog/admin");
+
+    expect(document.documentElement.lang).toBe("en");
+  });
+
+  it("pins a case-variant path, since the router matches case-insensitively", async () => {
+    await runInterfaceIn("en");
+    renderAt("/OFFER");
+
+    expect(document.documentElement.lang).toBe("ru");
+  });
+
   it("leaves Russian-only routes Russian when the interface is Russian too", async () => {
     await runInterfaceIn("ru");
     renderAt("/offer");
