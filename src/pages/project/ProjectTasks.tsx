@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useParams, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useProject, usePermission, useMedia, useWorkspaceMode } from "@/hooks/use-mock-data";
@@ -87,6 +87,13 @@ function getTaskAssigneeIds(task: Task, t: Translator): string[] {
   return getTaskAssigneeEntries(task, t)
     .map((entry) => entry.id)
     .filter((id): id is string => Boolean(id));
+}
+
+// Identifies a picked file across retries of the same Done prompt. Re-picking in the
+// file input mints fresh File objects, so identity is not enough; name, size and
+// modification time together are.
+function doneFileKey(file: File): string {
+  return `${file.name}:${file.size}:${file.lastModified}`;
 }
 
 const EMPTY_SYNC_STATE = {
@@ -205,6 +212,11 @@ export default function ProjectTasks() {
   const [donePrompt, setDonePrompt] = useState<{ taskId: string; expectedStatus: TaskStatus } | null>(null);
   const [doneFiles, setDoneFiles] = useState<File[]>([]);
   const [doneUploading, setDoneUploading] = useState(false);
+  // Files already finalized in the CURRENT prompt session. A Done confirm uploads
+  // before it changes the status, and a status failure leaves the prompt open with
+  // the same selection, so the retry would attach a second copy of every photo:
+  // nothing rolls back an is_final row and nothing dedupes one server-side.
+  const doneUploadedKeysRef = useRef<Set<string>>(new Set());
   const [doneComment, setDoneComment] = useState("");
 
   // --- Blocked prompt --- (same capture-at-open rule as the Done prompt above)
@@ -274,6 +286,7 @@ export default function ProjectTasks() {
       setSelectedTaskId(null);
       setDonePrompt({ taskId, expectedStatus: task.status });
       setDoneFiles([]);
+      doneUploadedKeysRef.current = new Set();
       setDoneComment("");
       return;
     }
@@ -342,6 +355,7 @@ export default function ProjectTasks() {
     if (!task || task.status !== donePrompt.expectedStatus) {
       setDonePrompt(null);
       setDoneFiles([]);
+      doneUploadedKeysRef.current = new Set();
       setDoneComment("");
       await convergeStalePrompt();
       return;
@@ -366,6 +380,7 @@ export default function ProjectTasks() {
     setDoneUploading(true);
     try {
       for (const file of doneFiles) {
+        if (doneUploadedKeysRef.current.has(doneFileKey(file))) continue;
         const intent = await prepareUpload({
           mediaType: "photo",
           clientFilename: file.name,
@@ -377,6 +392,7 @@ export default function ProjectTasks() {
         });
         await uploadBytes(intent.bucket, intent.objectPath, file);
         await finalizeUpload(intent.uploadIntentId, { taskId: donePrompt.taskId, isFinal: true });
+        doneUploadedKeysRef.current.add(doneFileKey(file));
       }
 
       const source = await getPlanningSource(
@@ -400,6 +416,7 @@ export default function ProjectTasks() {
 
       setDonePrompt(null);
       setDoneFiles([]);
+      doneUploadedKeysRef.current = new Set();
       setDoneComment("");
       toast({ title: t("tasks.toast.markedDone") });
     } catch (error) {

@@ -478,4 +478,90 @@ describe("ProjectTasks", () => {
     );
     expect(finalizeUpload).toHaveBeenCalled();
   });
+
+  it("does not re-upload acceptance photos when a failed Done confirm is retried", async () => {
+    const prepareUpload = vi.fn().mockResolvedValue({
+      bucket: "media",
+      objectPath: "project-1/photo.jpg",
+      uploadIntentId: "intent-1",
+    });
+    const uploadBytes = vi.fn().mockResolvedValue(undefined);
+    const finalizeUpload = vi.fn().mockResolvedValue(undefined);
+    mocks.useMediaUploadMutations.mockReturnValue({ prepareUpload, uploadBytes, finalizeUpload });
+    mocks.usePermission.mockReturnValue(buildPermission("contractor"));
+    mocks.useTasks.mockReturnValue([buildTask({ status: "in_progress" })]);
+    mocks.changeTaskStatus.mockRejectedValueOnce(new Error("network unreachable"));
+
+    const { container } = renderProjectTasks();
+
+    fireEvent.click(screen.getByText("Estimate task"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Done" }));
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(fileInput, {
+      target: { files: [new File(["photo"], "photo.jpg", { type: "image/jpeg" })] },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
+    await waitFor(() =>
+      expect(mocks.toast).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Unable to complete task" }),
+      ),
+    );
+
+    // The generic failure branch leaves the prompt open with the same selection,
+    // so clicking again is the user's natural next move. The photos from the
+    // first attempt are already finalized as is_final rows that nothing rolls
+    // back, and a second pass would attach a duplicate copy of every one.
+    fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
+    await waitFor(() => expect(mocks.changeTaskStatus).toHaveBeenCalledTimes(2));
+
+    expect(prepareUpload).toHaveBeenCalledTimes(1);
+    expect(uploadBytes).toHaveBeenCalledTimes(1);
+    expect(finalizeUpload).toHaveBeenCalledTimes(1);
+  });
+
+  it("uploads again for a fresh Done prompt even when the same file is picked", async () => {
+    const prepareUpload = vi.fn().mockResolvedValue({
+      bucket: "media",
+      objectPath: "project-1/photo.jpg",
+      uploadIntentId: "intent-1",
+    });
+    const uploadBytes = vi.fn().mockResolvedValue(undefined);
+    const finalizeUpload = vi.fn().mockResolvedValue(undefined);
+    mocks.useMediaUploadMutations.mockReturnValue({ prepareUpload, uploadBytes, finalizeUpload });
+    mocks.usePermission.mockReturnValue(buildPermission("contractor"));
+    mocks.useTasks.mockReturnValue([buildTask({ status: "in_progress" })]);
+    mocks.changeTaskStatus.mockRejectedValueOnce(new Error("network unreachable"));
+
+    const pickSamePhoto = (container: HTMLElement) => {
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+      fireEvent.change(fileInput, {
+        target: {
+          files: [new File(["photo"], "photo.jpg", { type: "image/jpeg", lastModified: 1 })],
+        },
+      });
+    };
+
+    const { container } = renderProjectTasks();
+
+    fireEvent.click(screen.getByText("Estimate task"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Done" }));
+    pickSamePhoto(container);
+    fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
+    await waitFor(() => expect(prepareUpload).toHaveBeenCalledTimes(1));
+
+    // Abandoning the prompt ends the session the skip-list belongs to. Carrying it
+    // into the next one would skip the upload and leave the task with no is_final
+    // row, which the server's Done guard requires, so Done could never succeed.
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByText("Estimate task"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Done" }));
+    pickSamePhoto(container);
+    fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
+
+    await waitFor(() => expect(mocks.changeTaskStatus).toHaveBeenCalledTimes(2));
+    expect(prepareUpload).toHaveBeenCalledTimes(2);
+    expect(finalizeUpload).toHaveBeenCalledTimes(2);
+  });
 });
