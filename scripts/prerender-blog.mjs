@@ -53,20 +53,20 @@ const BLOG_DESCRIPTION =
 
 const STATIC_ROUTES = ["/", "/blog/", "/offer", "/privacy", "/refund", "/contacts"];
 
-// The landing ships in Russian and English off the same URL, switched by
-// `?lang=`. Both variants go in the sitemap as a proper hreflang cluster: the
-// landing is client-rendered, so its on-page hreflang (LandingSeo) only exists
-// once JS has run, and the sitemap annotations are what a crawler can act on
-// without executing anything. Every URL in a cluster must list the WHOLE
-// cluster, itself included, or Google discards the pairing.
-const LANDING_ALTERNATES = [
-  { hreflang: "ru", href: `${SITE_ORIGIN}/` },
-  { hreflang: "en", href: `${SITE_ORIGIN}/?lang=en` },
-  // x-default matches the app's own fallback for a visitor whose browser asks
-  // for neither language (src/i18n.ts defaults to English).
-  { hreflang: "x-default", href: `${SITE_ORIGIN}/?lang=en` },
-];
-const LANDING_URLS = [`${SITE_ORIGIN}/`, `${SITE_ORIGIN}/?lang=en`];
+// The sitemap deliberately advertises ONLY the Russian landing.
+//
+// The English variant exists at `/?lang=en`, but that URL serves this same
+// static shell: byte-identical Russian HTML, `<html lang="ru">`, Russian title
+// and description. English only appears once JS has run. A sitemap is read
+// mostly by crawlers that do not run JS (GPTBot, ClaudeBot, PerplexityBot, and
+// Google's pre-render pass), so annotating the pair here would hand them two
+// identical Russian documents and assert they are a translation pair — a claim
+// the bytes contradict.
+//
+// The on-page hreflang in LandingSeo is a different case and stays: it only
+// exists after JS has run, and for a client that ran the JS the English
+// alternate is genuinely there. Restore the sitemap annotations when (and only
+// when) a real static English landing is prerendered.
 
 // ---------------------------------------------------------------------------
 // Small utilities
@@ -596,21 +596,8 @@ function blogIndexJsonLd(posts) {
 function sitemapXml(posts) {
   const today = new Date().toISOString().slice(0, 10);
   const urls = [];
-  const landingAlternates = LANDING_ALTERNATES.map(
-    (alt) => `<xhtml:link rel="alternate" hreflang="${alt.hreflang}" href="${escapeXml(alt.href)}"/>`,
-  ).join("");
   for (const route of STATIC_ROUTES) {
-    const loc = SITE_ORIGIN + route;
-    // "/" is the only static route with a translated twin; the rest are
-    // Russian-only legal pages, and annotating them would advertise an English
-    // version that does not exist.
-    const alternates = loc === `${SITE_ORIGIN}/` ? landingAlternates : "";
-    urls.push(`  <url><loc>${escapeXml(loc)}</loc><lastmod>${today}</lastmod>${alternates}</url>`);
-  }
-  // The English landing is a URL in its own right, and each member of an
-  // hreflang cluster has to be listed separately.
-  for (const url of LANDING_URLS.slice(1)) {
-    urls.push(`  <url><loc>${escapeXml(url)}</loc><lastmod>${today}</lastmod>${landingAlternates}</url>`);
+    urls.push(`  <url><loc>${escapeXml(SITE_ORIGIN + route)}</loc><lastmod>${today}</lastmod></url>`);
   }
   for (const post of posts) {
     const lastmod = (post.updated_at ?? post.published_at ?? "").slice(0, 10) || today;
@@ -629,7 +616,7 @@ function sitemapXml(posts) {
     urls.push(`  <url><loc>${escapeXml(`${SITE_ORIGIN}/blog/tag/${hub.slug}/`)}</loc><lastmod>${today}</lastmod></url>`);
   }
   return `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${urls.join("\n")}
 </urlset>
 `;

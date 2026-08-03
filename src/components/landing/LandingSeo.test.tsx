@@ -6,6 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { act, render } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 
 import { LandingSeo } from "@/components/landing/LandingSeo";
 import i18n from "@/i18n";
@@ -34,6 +35,15 @@ function seedShellHead(): void {
   }
 }
 
+/** LandingSeo derives the canonical from the URL, so tests must supply one. */
+function renderAt(url: string) {
+  return render(
+    <MemoryRouter initialEntries={[url]}>
+      <LandingSeo />
+    </MemoryRouter>,
+  );
+}
+
 async function runInterfaceIn(lang: "ru" | "en") {
   await act(async () => {
     await i18n.changeLanguage(lang);
@@ -50,18 +60,15 @@ afterEach(async () => {
 describe("LandingSeo", () => {
   it("localizes the head while mounted", async () => {
     await runInterfaceIn("en");
-    render(<LandingSeo />);
+    renderAt("/");
 
     expect(document.title).toBe(i18n.t("landing.meta.title"));
     expect(meta("name", "description")?.content).toBe(i18n.t("landing.meta.description"));
-    expect(document.head.querySelector('link[rel="canonical"]')?.getAttribute("href")).toBe(
-      "https://rovno.ai/?lang=en",
-    );
   });
 
-  it("publishes a reciprocal hreflang cluster", async () => {
+  it("publishes a reciprocal hreflang cluster with x-default on the Russian page", async () => {
     await runInterfaceIn("en");
-    render(<LandingSeo />);
+    renderAt("/");
 
     const alternates = [...document.head.querySelectorAll("link[rel=alternate][hreflang]")].map(
       (el) => `${el.getAttribute("hreflang")}=${el.getAttribute("href")}`,
@@ -69,17 +76,53 @@ describe("LandingSeo", () => {
     expect(alternates).toEqual([
       "ru=https://rovno.ai/",
       "en=https://rovno.ai/?lang=en",
-      "x-default=https://rovno.ai/?lang=en",
+      // `/` renders Russian for everyone now, so it is also the page to serve a
+      // visitor we have no better guess for.
+      "x-default=https://rovno.ai/",
     ]);
   });
 
-  it("points the canonical at the language actually rendering", async () => {
-    await runInterfaceIn("ru");
-    render(<LandingSeo />);
+  /**
+   * The regression guard for the blocking audit finding. The canonical is a
+   * property of the URL, never of the visitor. Deriving it from the rendered
+   * language meant bare `rovno.ai/` told an English-locale client its canonical
+   * was `/?lang=en` — and Googlebot renders as en-US, so the Russian landing
+   * declared itself a duplicate of the English one and lost its indexable URL.
+   */
+  it("keeps / self-canonical even while rendering English", async () => {
+    await runInterfaceIn("en");
+    renderAt("/");
 
     expect(document.head.querySelector('link[rel="canonical"]')?.getAttribute("href")).toBe(
       "https://rovno.ai/",
     );
+    expect(meta("property", "og:url")?.content).toBe("https://rovno.ai/");
+    expect(meta("property", "og:locale")?.content).toBe("ru_RU");
+  });
+
+  it("makes /?lang=en self-canonical", async () => {
+    await runInterfaceIn("en");
+    renderAt("/?lang=en");
+
+    expect(document.head.querySelector('link[rel="canonical"]')?.getAttribute("href")).toBe(
+      "https://rovno.ai/?lang=en",
+    );
+    expect(meta("property", "og:url")?.content).toBe("https://rovno.ai/?lang=en");
+    expect(meta("property", "og:locale")?.content).toBe("en_US");
+    expect(meta("property", "og:locale:alternate")?.content).toBe("ru_RU");
+  });
+
+  it("gives one URL the same canonical regardless of the rendered language", async () => {
+    await runInterfaceIn("ru");
+    const { unmount } = renderAt("/");
+    const asRussian = document.head.querySelector('link[rel="canonical"]')?.getAttribute("href");
+    unmount();
+
+    await runInterfaceIn("en");
+    renderAt("/");
+    const asEnglish = document.head.querySelector('link[rel="canonical"]')?.getAttribute("href");
+
+    expect(asEnglish).toBe(asRussian);
   });
 
   /**
@@ -88,7 +131,7 @@ describe("LandingSeo", () => {
    */
   it("restores every overwritten tag on unmount", async () => {
     await runInterfaceIn("en");
-    const { unmount } = render(<LandingSeo />);
+    const { unmount } = renderAt("/");
     unmount();
 
     expect(document.title).toBe(SHELL_TITLE);
@@ -99,7 +142,7 @@ describe("LandingSeo", () => {
 
   it("removes the tags it created rather than leaving them empty", async () => {
     await runInterfaceIn("en");
-    const { unmount } = render(<LandingSeo />);
+    const { unmount } = renderAt("/");
 
     // og:url is absent from the shell, so it is ours and must go entirely.
     expect(meta("property", "og:url")).not.toBeNull();
@@ -112,7 +155,7 @@ describe("LandingSeo", () => {
 
   it("does not leak the other language's tags across a switch", async () => {
     await runInterfaceIn("en");
-    const { unmount } = render(<LandingSeo />);
+    const { unmount } = renderAt("/");
     await runInterfaceIn("ru");
 
     expect(document.head.querySelectorAll('link[rel="canonical"]')).toHaveLength(1);

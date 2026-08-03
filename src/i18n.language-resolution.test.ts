@@ -6,12 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  detectBrowserLanguage,
-  getStoredLanguage,
-  getUrlLanguage,
-  resolveInitialLanguage,
-} from "@/i18n";
+import { getStoredLanguage, getUrlLanguage, prefersNonRussian, resolveInitialLanguage } from "@/i18n";
 
 const STORAGE_KEY = "app-language";
 
@@ -46,7 +41,7 @@ describe("getUrlLanguage", () => {
     expect(getUrlLanguage("?lang=RU")).toBe("ru");
   });
 
-  it("ignores a language we do not ship, so detection still gets a say", () => {
+  it("ignores a language we do not ship, so the stored choice still decides", () => {
     expect(getUrlLanguage("?lang=de")).toBeNull();
     expect(getUrlLanguage("?lang=")).toBeNull();
     expect(getUrlLanguage("?other=en")).toBeNull();
@@ -59,33 +54,34 @@ describe("getUrlLanguage", () => {
   });
 });
 
-describe("detectBrowserLanguage", () => {
-  it("returns Russian only when the browser ranks Russian first", () => {
+describe("prefersNonRussian", () => {
+  it("is false when the browser ranks Russian first", () => {
     setBrowserLanguages(["ru-RU", "en-US"]);
-    expect(detectBrowserLanguage()).toBe("ru");
+    expect(prefersNonRussian()).toBe(false);
   });
 
-  it("returns English for an English browser", () => {
+  it("is true for an English browser", () => {
     setBrowserLanguages(["en-US", "ru-RU"]);
-    expect(detectBrowserLanguage()).toBe("en");
+    expect(prefersNonRussian()).toBe(true);
   });
 
-  it("defaults to English when the browser asks for neither", () => {
+  it("is true when the browser asks for neither language we ship", () => {
+    // A German browser did not ask for Russian, so English is the useful offer.
+    // Guarding against the earlier bug where this folded into the Russian
+    // default and the prompt never appeared for them.
     setBrowserLanguages(["de-DE", "fr-FR"]);
-    expect(detectBrowserLanguage()).toBe("en");
+    expect(prefersNonRussian()).toBe(true);
   });
 
-  it("honours preference order rather than merely spotting 'ru' anywhere", () => {
-    // German first, Russian second, no English at all: Russian is genuinely the
-    // better of the two we ship, so preference order — not presence — decides.
+  it("answers on preference order, not on mere presence of 'ru'", () => {
     setBrowserLanguages(["de-DE", "ru-RU"]);
-    expect(detectBrowserLanguage()).toBe("ru");
+    expect(prefersNonRussian()).toBe(false);
   });
 
   it("falls back to navigator.language when navigator.languages is empty", () => {
     Object.defineProperty(navigator, "languages", { value: [], configurable: true });
     Object.defineProperty(navigator, "language", { value: "ru-RU", configurable: true });
-    expect(detectBrowserLanguage()).toBe("ru");
+    expect(prefersNonRussian()).toBe(false);
   });
 });
 
@@ -118,20 +114,26 @@ describe("resolveInitialLanguage", () => {
     expect(localStorage.getItem(STORAGE_KEY)).toBe("en");
   });
 
-  it("prefers the stored choice over the browser preference", () => {
-    setBrowserLanguages(["en-US"]);
-    localStorage.setItem(STORAGE_KEY, "ru");
+  it("honours a stored English choice", () => {
+    setBrowserLanguages(["ru-RU"]);
+    localStorage.setItem(STORAGE_KEY, "en");
+    expect(resolveInitialLanguage()).toBe("en");
+  });
+
+  /**
+   * The browser's preference is deliberately NOT a rung. If it were, one URL
+   * would render different languages to different visitors, and its canonical
+   * would depend on who was asking -- which cost the Russian landing its
+   * indexable URL when Googlebot (en-US) rendered `/` as English.
+   */
+  it("ignores the browser preference and stays Russian for a first-time visitor", () => {
+    setBrowserLanguages(["en-GB", "en-US"]);
     expect(resolveInitialLanguage()).toBe("ru");
   });
 
-  it("falls back to browser detection for a first-time visitor", () => {
+  it("stays Russian for a first-time visitor on a Russian browser", () => {
     setBrowserLanguages(["ru-RU"]);
     expect(resolveInitialLanguage()).toBe("ru");
-  });
-
-  it("gives a first-time English visitor English", () => {
-    setBrowserLanguages(["en-GB"]);
-    expect(resolveInitialLanguage()).toBe("en");
   });
 
   it("survives localStorage throwing (Safari private mode) instead of crashing boot", () => {
@@ -144,7 +146,7 @@ describe("resolveInitialLanguage", () => {
     setBrowserLanguages(["en-US"]);
 
     expect(() => resolveInitialLanguage()).not.toThrow();
-    expect(resolveInitialLanguage()).toBe("en");
+    expect(resolveInitialLanguage()).toBe("ru");
 
     getItem.mockRestore();
     setItem.mockRestore();

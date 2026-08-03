@@ -19,8 +19,9 @@
 // annotations (scripts/prerender-blog.mjs), which carry the same pairing.
 
 import { useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { getActiveLanguage, type AppLanguage } from "@/i18n";
+import { getActiveLanguage, getUrlLanguage, type AppLanguage } from "@/i18n";
 
 /** Matches SITE_ORIGIN in scripts/prerender-blog.mjs — one canonical host. */
 const SITE_ORIGIN = "https://rovno.ai";
@@ -30,6 +31,8 @@ const LANDING_URLS: Record<AppLanguage, string> = {
   ru: `${SITE_ORIGIN}/`,
   en: `${SITE_ORIGIN}/?lang=en`,
 };
+
+const OG_LOCALES: Record<AppLanguage, string> = { ru: "ru_RU", en: "en_US" };
 
 /**
  * What a meta tag looked like before this component touched it, so unmount can
@@ -80,6 +83,13 @@ export function LandingSeo() {
   // the active language are both read fresh on every such re-render.
   const { t } = useTranslation();
   const lang = getActiveLanguage();
+  // The canonical is a property of the URL, never of the visitor. Deriving it
+  // from getActiveLanguage() meant bare `rovno.ai/` told an English-locale
+  // browser its canonical was `/?lang=en` — and Googlebot renders as en-US, so
+  // the Russian landing declared itself a duplicate of the English one and lost
+  // its indexable URL. `useLocation` re-reads it on every client-side nav.
+  const { search } = useLocation();
+  const urlLang = getUrlLanguage(search) ?? "ru";
 
   useEffect(() => {
     const previousTitle = document.title;
@@ -96,30 +106,31 @@ export function LandingSeo() {
       upsertMeta("property", "og:title", title),
       upsertMeta("property", "og:description", description),
       upsertMeta("name", "twitter:title", title),
-      upsertMeta("property", "og:url", LANDING_URLS[lang]),
+      // og:url and og:locale describe THIS url, so both follow urlLang, not the
+      // rendered language. The landing is the only route with a second language
+      // version, which is why og:locale lives here and not in i18n.ts.
+      upsertMeta("property", "og:url", LANDING_URLS[urlLang]),
+      upsertMeta("property", "og:locale", OG_LOCALES[urlLang]),
+      upsertMeta("property", "og:locale:alternate", OG_LOCALES[urlLang === "ru" ? "en" : "ru"]),
     ];
 
-    // Rebuilt wholesale on every language change: a stale canonical pointing at
-    // the other language is worse than none at all.
+    // Rebuilt wholesale on every change: a stale canonical pointing at the
+    // other language is worse than none at all.
     removeOwnedLinks();
-    addLink("canonical", LANDING_URLS[lang]);
+    addLink("canonical", LANDING_URLS[urlLang]);
     addLink("alternate", LANDING_URLS.ru, "ru");
     addLink("alternate", LANDING_URLS.en, "en");
-    // x-default is what a crawler serves a visitor we have no better guess for.
-    // That is the same audience the app itself defaults to English for, so the
-    // two must agree — pointing it at the Russian page would contradict the
-    // runtime behaviour a crawler can observe.
-    addLink("alternate", LANDING_URLS.en, "x-default");
+    // x-default is what a crawler shows a visitor it has no better guess for.
+    // `/` is now that page for everyone — it renders Russian for every visitor
+    // and no longer auto-switches — so x-default and the ru entry agree.
+    addLink("alternate", LANDING_URLS.ru, "x-default");
 
-    // og:locale and og:locale:alternate are deliberately NOT restored here:
-    // they are language-level rather than route-level, i18n.ts owns them, and
-    // they stay correct on whatever route the visitor lands on next.
     return () => {
       removeOwnedLinks();
       metas.forEach(restoreMeta);
       document.title = previousTitle;
     };
-  }, [t, lang]);
+  }, [t, lang, urlLang]);
 
   return null;
 }

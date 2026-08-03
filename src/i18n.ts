@@ -11,12 +11,18 @@ export const LANGUAGE_QUERY_PARAM = "lang";
 export type AppLanguage = "ru" | "en";
 
 /**
- * What a visitor gets when nothing points at Russian. The product is Russian
- * first, but the landing is also its pitch to a non-Russian audience, and for
- * them a Cyrillic page is a bounce. So Russian has to be asked for — by the
- * browser, the URL, or the switcher — and English is what's left.
+ * The product is Russian first and stays Russian unless the visitor says
+ * otherwise, either with `?lang=` or with the switcher.
+ *
+ * An earlier revision defaulted to English whenever the browser did not rank
+ * Russian first. That broke two things at once: `/` emitted a different
+ * canonical per visitor (so Googlebot, which renders as en-US, saw the Russian
+ * landing declare itself a duplicate of `/?lang=en` and the Russian page lost
+ * its indexable URL), and every existing user on an English-locale OS would
+ * have found the WHOLE app in English on their next load. Non-Russian speakers
+ * are now offered English by LandingLanguagePrompt instead of being switched.
  */
-const DEFAULT_LANGUAGE: AppLanguage = "en";
+const DEFAULT_LANGUAGE: AppLanguage = "ru";
 
 /**
  * Map a BCP-47 tag onto a language we actually ship. Prefix-matched, so
@@ -68,27 +74,42 @@ export function getStoredLanguage(): AppLanguage | null {
 }
 
 /**
- * What the browser asks for, in preference order. The first entry that is one
- * of ours wins, so Russian is chosen only when the visitor actually ranks
- * Russian above English — everyone else, including "no opinion", gets English.
+ * Would this visitor rather not read Russian?
+ *
+ * This does NOT decide the interface language — see resolveInitialLanguage.
+ * It only decides whether LandingLanguagePrompt offers the switch. Keeping the
+ * browser's preference out of the boot path is the whole point: a guess that
+ * changes what a page IS breaks canonical stability, whereas a guess that
+ * changes what a page OFFERS is free to be wrong.
+ *
+ * Walks navigator.languages in preference order and answers on the first tag we
+ * ship. A browser that asks for neither (German only, say) resolves to true:
+ * they certainly did not ask for Russian, and English is the better offer.
+ * Note this cannot be expressed as `detectBrowserLanguage() !== "ru"` — that
+ * would fold a German browser into the Russian default and never offer at all.
  */
-export function detectBrowserLanguage(): AppLanguage {
-  if (typeof navigator === "undefined") return DEFAULT_LANGUAGE;
+export function prefersNonRussian(): boolean {
+  if (typeof navigator === "undefined") return false;
   const tags = navigator.languages?.length ? navigator.languages : [navigator.language];
   for (const tag of tags) {
     const match = matchLanguage(tag);
-    if (match) return match;
+    if (match) return match !== "ru";
   }
-  return DEFAULT_LANGUAGE;
+  return true;
 }
 
 /**
- * Boot language, most explicit signal first.
+ * Boot language, most explicit signal first: the URL, then the visitor's own
+ * stored choice, then Russian.
  *
  * `?lang=` outranks the stored choice on purpose: a shared link has to open in
  * the language it promises, even for someone who once picked the other one.
  * Opening such a link counts as choosing, so it is persisted — otherwise the
  * first in-app navigation (which drops the query) would silently switch back.
+ *
+ * The browser's own preference is deliberately NOT a rung here. Every URL must
+ * render the same language for every visitor, or its canonical is a function of
+ * who is asking, and a crawler and a reader disagree about what the page is.
  */
 export function resolveInitialLanguage(): AppLanguage {
   const fromUrl = getUrlLanguage();
@@ -96,7 +117,7 @@ export function resolveInitialLanguage(): AppLanguage {
     writeStorage(fromUrl);
     return fromUrl;
   }
-  return getStoredLanguage() ?? detectBrowserLanguage();
+  return getStoredLanguage() ?? DEFAULT_LANGUAGE;
 }
 
 /** The language the UI is actually rendering in right now. */
@@ -132,19 +153,17 @@ void i18n.use(initReactI18next).init({
 
 // Keep <html lang> in sync with the active UI language. The static index.html
 // can only hardcode one language; without this it never reflects the real one
-// (a11y / screen-reader correctness, and what a crawler reads). og:locale rides
-// along for the same reason — a shared `?lang=en` link should not preview as
-// Russian. Set on boot and on every change.
-const OG_LOCALES: Record<AppLanguage, string> = { ru: "ru_RU", en: "en_US" };
-
+// (a11y / screen-reader correctness, and what a crawler reads).
+//
+// og:locale is deliberately NOT touched here. It describes the PAGE, not the
+// chrome around it, and the landing is the only route that has a second
+// language version — so LandingSeo owns it, scoped to `/`. Writing it globally
+// made /blog/, /offer and the other Russian-only routes advertise an English
+// translation that does not exist, and contradicted the prerenderer's own
+// `inLanguage: "ru-RU"` on the very same pages.
 function syncDocumentLanguage(lng: string): void {
   if (typeof document === "undefined") return;
-  const lang = matchLanguage(lng) ?? DEFAULT_LANGUAGE;
-  document.documentElement.lang = lang;
-  document.querySelector('meta[property="og:locale"]')?.setAttribute("content", OG_LOCALES[lang]);
-  document
-    .querySelector('meta[property="og:locale:alternate"]')
-    ?.setAttribute("content", OG_LOCALES[lang === "ru" ? "en" : "ru"]);
+  document.documentElement.lang = matchLanguage(lng) ?? DEFAULT_LANGUAGE;
 }
 syncDocumentLanguage(i18n.language);
 i18n.on("languageChanged", syncDocumentLanguage);
