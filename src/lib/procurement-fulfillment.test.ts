@@ -74,7 +74,9 @@ describe("procurement fulfillment utils", () => {
     } as ProcurementItemV2)).toBe(false);
   });
 
-  it("computes remaining qty with split supplier + stock fulfillments", () => {
+  // Retitled and re-expected under the #216 decision: a same-project warehouse move is a
+  // relocation, not a fulfillment. The old title asserted the double count as intended.
+  it("counts the supplier order but not the same-project stock move toward the requirement", () => {
     const projectId = `test-project-${Date.now()}`;
     const item = buildTestRequestLine(projectId, `req-${Date.now()}`, 10);
 
@@ -147,9 +149,106 @@ describe("procurement fulfillment utils", () => {
       },
     ];
 
-    expect(computeRemainingRequestedQty(item, orders)).toBe(3);
+    // 10 required, 3 on a supplier order. The 4-unit stock move relocates units the supplier
+    // order already counted, so it must not subtract again. Ordered-open is unaffected: it
+    // filters to supplier orders already.
+    expect(computeRemainingRequestedQty(item, orders)).toBe(7);
     expect(computeOrderedOpenQty(item.id, orders)).toBe(2);
-    expect(computeFulfilledQty(item.id, orders)).toBe(7);
+    expect(computeFulfilledQty(item.id, orders)).toBe(3);
+  });
+
+  it("does not let an internal warehouse move fulfil a procurement requirement", () => {
+    // The exact scenario from #216: the same 60 units counted twice, once by the supplier
+    // order that bought them and once by the move that carried them across the site.
+    const projectId = `internal-move-${Date.now()}`;
+    const item = buildTestRequestLine(projectId, `req-move-${Date.now()}`, 100);
+    const orders: OrderWithLines[] = [
+      {
+        id: "o-supplier",
+        projectId,
+        status: "received",
+        kind: "supplier",
+        supplierName: "Supplier A",
+        deliverToLocationId: "loc-a",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lines: [
+          {
+            id: "l-supplier",
+            orderId: "o-supplier",
+            procurementItemId: item.id,
+            qty: 60,
+            receivedQty: 60,
+            unit: "pcs",
+            plannedUnitPrice: 100,
+            actualUnitPrice: 120,
+          },
+        ],
+      },
+      {
+        id: "o-move",
+        projectId,
+        status: "received",
+        kind: "stock",
+        transferDirection: null,
+        fromLocationId: "loc-a",
+        toLocationId: "loc-b",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lines: [
+          {
+            id: "l-move",
+            orderId: "o-move",
+            procurementItemId: item.id,
+            qty: 60,
+            receivedQty: 60,
+            unit: "pcs",
+            plannedUnitPrice: 100,
+            actualUnitPrice: 120,
+          },
+        ],
+      },
+    ];
+
+    expect(computeRemainingRequestedQty(item, orders)).toBe(40);
+    expect(computeFulfilledQty(item.id, orders)).toBe(60);
+  });
+
+  it("still counts the incoming side of a cross-project transfer as fulfillment", () => {
+    // Anti-regression guard for option B of #216: excluding every stock order would fix the
+    // double count by inventing an under-count, because a cross-project «in» transfer brings
+    // genuinely new material into this project. Passes BEFORE and AFTER the fix by design; it
+    // fails only if the predicate is widened to `kind === "supplier"`.
+    const projectId = `cross-in-${Date.now()}`;
+    const item = buildTestRequestLine(projectId, `req-cross-${Date.now()}`, 100);
+    const orders: OrderWithLines[] = [
+      {
+        id: "o-cross-in",
+        projectId,
+        status: "received",
+        kind: "stock",
+        transferDirection: "in",
+        fromLocationId: "loc-other-project",
+        toLocationId: "loc-site",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lines: [
+          {
+            id: "l-cross-in",
+            orderId: "o-cross-in",
+            procurementItemId: item.id,
+            qty: 60,
+            receivedQty: 60,
+            unit: "pcs",
+            plannedUnitPrice: 100,
+            actualUnitPrice: 120,
+          },
+        ],
+      },
+    ];
+
+    expect(computeRemainingRequestedQty(item, orders)).toBe(40);
+    expect(computeFulfilledQty(item.id, orders)).toBe(60);
   });
 
   it("clamps requested remaining to zero when ordered quantity exceeds requested", () => {

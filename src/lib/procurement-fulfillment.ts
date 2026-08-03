@@ -96,6 +96,28 @@ function isAppliedOrder(order: OrderWithLines): boolean {
   return isAppliedOrderStatus(order.status);
 }
 
+/**
+ * Which applied orders count as FULFILLING a procurement requirement, as opposed to merely
+ * moving units that were already counted.
+ *
+ * Supplier orders always count: they are how material enters the project. Stock orders are the
+ * subtle case. A cross-project transfer's «in» side brings genuinely new material into this
+ * project and must count. A same-project warehouse-to-warehouse move (`transferDirection`
+ * null/undefined) only relocates units a supplier order already counted, so counting it again
+ * subtracts the same quantity a second time and drives «Осталось заказать» down with ordinary
+ * warehouse activity. The «out» side of a cross-project transfer never matches a procurement
+ * item anyway — `20260630140000_cross_project_transfer_deferred_receipt.sql` writes that line
+ * with a NULL `procurement_item_id` — but it is excluded explicitly so this predicate states
+ * the whole rule instead of leaning on that.
+ *
+ * The sibling helpers in this file (`computeOrderedOpenQty`, `computeProcurementHeaderKpis`,
+ * `computePurchasePriceVariance`, `computeProjectLastReceivedAt`) filter to supplier orders
+ * only, which is right for what each of them measures. See #216.
+ */
+function countsTowardFulfillment(order: OrderWithLines): boolean {
+  return order.kind === "supplier" || order.transferDirection === "in";
+}
+
 function unitPriceForItem(item: ProcurementItemV2): number {
   return item.actualUnitPrice ?? item.plannedUnitPrice ?? 0;
 }
@@ -121,7 +143,7 @@ export function computeRemainingRequestedQty(
   if (!item) return 0;
 
   const fulfilledFromOrders = orders
-    .filter(isAppliedOrder)
+    .filter((order) => isAppliedOrder(order) && countsTowardFulfillment(order))
     .flatMap((order) => order.lines)
     .filter((line) => line.procurementItemId === item.id)
     .reduce((sum, line) => sum + line.qty, 0);
@@ -139,7 +161,7 @@ export function computeOrderedOpenQty(requestId: string, orders: OrderWithLines[
 
 export function computeFulfilledQty(requestId: string, orders: OrderWithLines[]): number {
   return orders
-    .filter(isAppliedOrder)
+    .filter((order) => isAppliedOrder(order) && countsTowardFulfillment(order))
     .flatMap((order) => order.lines)
     .filter((line) => line.procurementItemId === requestId)
     .reduce((sum, line) => sum + line.qty, 0);
