@@ -131,6 +131,21 @@ describe("LanguageSwitcher", () => {
     expect(ring).not.toBe(activeInk);
   });
 
+  /**
+   * Element opacity composites the focus OUTLINE too, so dimming the button
+   * painted its ring at 0.64 alpha — 2.69:1, under the 3:1 floor, and on the
+   * inactive button, which is the one users actually press. Three rounds of
+   * ring work asserted the colour token and none caught this, because the
+   * token was right and the pixel was not. The dimming belongs on the label.
+   */
+  it("dims the label, not the button, so the focus ring paints at full strength", () => {
+    renderSwitcher();
+
+    const inactive = screen.getByRole("button", { pressed: false });
+    expect(inactive.style.opacity).toBe("");
+    expect(inactive.querySelector<HTMLElement>("span[lang]")?.style.opacity).toBe("0.64");
+  });
+
   it("gives the nav and footer switchers distinct accessible names", () => {
     const { unmount } = renderToned("blue");
     const nav = group().getAttribute("aria-label");

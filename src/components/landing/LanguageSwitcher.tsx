@@ -103,15 +103,25 @@ export function LanguageSwitcher({ tone = "blue" }: { tone?: keyof typeof TONES 
               textAlign: "center",
               background: isActive ? c.activeBg : "transparent",
               color: isActive ? c.activeInk : c.ink,
-              opacity: isActive ? 1 : 0.64,
-              transition: "background .16s, color .16s, opacity .16s",
+              // The dimming lives on the LABEL, not here. Element opacity
+              // composites the focus outline too, so dimming the button painted
+              // its ring at 0.64 alpha: 2.69:1 against the nav, under the 3:1
+              // floor — and on the inactive button, which is the one a user
+              // actually presses. Three rounds of ring work all reasoned about
+              // the colour token and none about what the pixel composites to.
+              transition: "background .16s, color .16s",
             }}
           >
             {/* `lang` sits on the LABEL, not the button. On the button it also
                 scoped the title attribute, which is written in the current
                 interface language — so a screen reader announced "Переключить
                 на английский" with an English synthesiser. */}
-            <span lang={lang.code}>{lang.label}</span>
+            <span
+              lang={lang.code}
+              style={{ opacity: isActive ? 1 : 0.64, transition: "opacity .16s" }}
+            >
+              {lang.label}
+            </span>
           </button>
         );
       })}

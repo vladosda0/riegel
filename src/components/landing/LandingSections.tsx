@@ -147,6 +147,16 @@ export function Nav({ startPath, homeLink = false, authStatus = "guest" }: { sta
                 // of the tab order; it is delayed by the collapse duration so
                 // the fade-out still plays, and applied instantly on the way
                 // back so the fade-in does. Layout is untouched either way.
+                //
+                // Descendants must not write `visibility: visible` of their own
+                // or they opt back IN (see the «Войти» link below).
+                //
+                // Known trade-off: if a control in here held focus when the bar
+                // condensed, focus falls to <body>. Chrome keeps the sequential
+                // starting point, so the next Tab resumes at the following
+                // control rather than at the top of the document; the cost is
+                // one press with no visible focus. Leaving eight invisible
+                // controls tabbable is the worse of the two.
                 visibility: c ? "hidden" : "visible",
                 transition: `max-width .42s ${E}, opacity .3s ${E}, margin-right .42s ${E}, visibility 0s linear ${c ? ".42s" : "0s"}`,
               }}
@@ -172,7 +182,15 @@ export function Nav({ startPath, homeLink = false, authStatus = "guest" }: { sta
                   to="/auth/login"
                   aria-hidden={authStatus === "loading"}
                   tabIndex={authStatus === "loading" ? -1 : undefined}
-                  style={{ fontSize: 20, padding: "8px 14px", visibility: authStatus === "loading" ? "hidden" : "visible" }}
+                  // `undefined`, not "visible": an explicit `visibility: visible`
+                  // on a descendant OVERRIDES an ancestor's `hidden`, which is
+                  // defined behaviour for this property. Writing it kept this
+                  // link keyboard-focusable inside the condensed .rv-nav-tools,
+                  // so the container fix reached the other seven controls and
+                  // silently missed this one. Omitting it lets the link inherit:
+                  // visible while the bar is expanded, hidden once it condenses.
+                  // The loading placeholder still sets its own explicit hidden.
+                  style={{ fontSize: 20, padding: "8px 14px", visibility: authStatus === "loading" ? "hidden" : undefined }}
                 >
                   {t("landing.nav.login")}
                 </Link>

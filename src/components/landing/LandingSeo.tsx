@@ -15,8 +15,9 @@
 // the homepage. Everything here is therefore torn down on unmount, and the
 // prerendered /blog/* pages — which ship their own head — are never touched.
 //
-// Crawlers that do not execute JS still get the sitemap's xhtml:link
-// annotations (scripts/prerender-blog.mjs), which carry the same pairing.
+// Crawlers that do not execute JS get no hreflang pairing at all: the sitemap
+// deliberately advertises only the Russian landing, because `/?lang=en` serves
+// byte-identical Russian HTML without JS. See scripts/prerender-blog.mjs.
 
 import { useEffect } from "react";
 import { useLocation } from "react-router-dom";
