@@ -289,6 +289,23 @@
    below 900px (its own JS), so it isn't grid-overridden here.
    ============================================================ */
 
+/* The language buttons use inline `all: unset` to shed the UA button styling,
+   which also sheds the UA focus ring — and `all` outranks the UA :focus-visible
+   rule, so a keyboard user gets no visible focus at all on a control that
+   changes site-wide state (WCAG 2.4.7 AA). !important is needed to beat the
+   inline `all`. min-height keeps the target from falling under 24px once the
+   ≤640px block tightens the padding; it is deliberately vertical-only, because
+   widening these buttons eats the nav's measured width budget (see the 480px
+   and 640px blocks below). */
+.rv-landing .rv-lang-switch button {
+  min-height: 24px !important;
+  box-sizing: border-box !important;
+}
+.rv-landing .rv-lang-switch button:focus-visible {
+  outline: 2px solid currentColor !important;
+  outline-offset: 2px !important;
+}
+
 /* Tablet — 4-up card grids drop to 2 columns. */
 @media (max-width: 1024px) {
   .rv-landing .rv-cols-4 { grid-template-columns: repeat(2, 1fr) !important; }
