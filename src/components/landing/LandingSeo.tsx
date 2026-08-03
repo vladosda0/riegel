@@ -31,14 +31,32 @@ const LANDING_URLS: Record<AppLanguage, string> = {
   en: `${SITE_ORIGIN}/?lang=en`,
 };
 
-function upsertMeta(attr: "name" | "property", key: string, content: string): void {
+/**
+ * What a meta tag looked like before this component touched it, so unmount can
+ * put it back exactly. `existed` is tracked separately from `previous` because
+ * a tag can be present with no `content` attribute at all: collapsing the two
+ * would delete a tag that index.html actually ships.
+ */
+type MetaSnapshot = { attr: "name" | "property"; key: string; existed: boolean; previous: string | null };
+
+function upsertMeta(attr: "name" | "property", key: string, content: string): MetaSnapshot {
   let el = document.head.querySelector<HTMLMetaElement>(`meta[${attr}="${key}"]`);
+  const snapshot: MetaSnapshot = { attr, key, existed: el !== null, previous: el?.getAttribute("content") ?? null };
   if (!el) {
     el = document.createElement("meta");
     el.setAttribute(attr, key);
     document.head.appendChild(el);
   }
   el.setAttribute("content", content);
+  return snapshot;
+}
+
+function restoreMeta({ attr, key, existed, previous }: MetaSnapshot): void {
+  const el = document.head.querySelector<HTMLMetaElement>(`meta[${attr}="${key}"]`);
+  if (!el) return;
+  if (!existed) el.remove();
+  else if (previous === null) el.removeAttribute("content");
+  else el.setAttribute("content", previous);
 }
 
 /** Owned link tags carry a data attribute so teardown can't remove anyone else's. */
@@ -69,11 +87,17 @@ export function LandingSeo() {
     const description = t("landing.meta.description");
 
     document.title = title;
-    upsertMeta("name", "description", description);
-    upsertMeta("property", "og:title", title);
-    upsertMeta("property", "og:description", description);
-    upsertMeta("name", "twitter:title", title);
-    upsertMeta("property", "og:url", LANDING_URLS[lang]);
+    // Snapshot every tag on the way in. The same shell serves /offer, /privacy,
+    // /refund and /contacts, none of which manage their own head, so anything
+    // left behind here follows the visitor onto those pages — an English
+    // description and an og:url of `/?lang=en` on the Russian public offer.
+    const metas = [
+      upsertMeta("name", "description", description),
+      upsertMeta("property", "og:title", title),
+      upsertMeta("property", "og:description", description),
+      upsertMeta("name", "twitter:title", title),
+      upsertMeta("property", "og:url", LANDING_URLS[lang]),
+    ];
 
     // Rebuilt wholesale on every language change: a stale canonical pointing at
     // the other language is worse than none at all.
@@ -87,8 +111,12 @@ export function LandingSeo() {
     // runtime behaviour a crawler can observe.
     addLink("alternate", LANDING_URLS.en, "x-default");
 
+    // og:locale and og:locale:alternate are deliberately NOT restored here:
+    // they are language-level rather than route-level, i18n.ts owns them, and
+    // they stay correct on whatever route the visitor lands on next.
     return () => {
       removeOwnedLinks();
+      metas.forEach(restoreMeta);
       document.title = previousTitle;
     };
   }, [t, lang]);
