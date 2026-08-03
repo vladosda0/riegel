@@ -159,6 +159,46 @@ describe("generateProposalQueue — action filtering by role", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Russian intent matching — the UI is Russian by default and the sidebar's own
+// chips are Russian, so a chip that reaches no branch is a dead headline feature
+// ---------------------------------------------------------------------------
+
+describe("generateProposalQueue — Russian prompts", () => {
+  // Verbatim ai.sidebar.suggestion.* values from src/locales/ru.json, paired
+  // with the type the chip's own label promises.
+  const CHIPS: Array<[string, string]> = [
+    ["Добавить задачи", "add_task"],
+    ["Обновить смету", "update_estimate"],
+    ["Купить материалы", "add_procurement"],
+    ["Сгенерировать договор", "generate_document"],
+    ["Составь отчёт за неделю", "generate_document"],
+  ];
+
+  for (const [chip, expectedType] of CHIPS) {
+    it(`matches the «${chip}» chip to ${expectedType}`, () => {
+      expect(proposalTypes(chip, seamForRole("owner", "detail"))).toContain(expectedType);
+    });
+  }
+
+  it("matches ordinary Russian phrasing, not just the chip wording", () => {
+    const seam = seamForRole("owner", "detail");
+    expect(proposalTypes("Нужно купить материалы: плитка и цемент", seam)).toContain("add_procurement");
+    expect(proposalTypes("Добавь задачу на монтаж", seam)).toContain("add_task");
+    expect(proposalTypes("Пересчитай стоимость работ", seam)).toContain("update_estimate");
+    expect(proposalTypes("Подготовь документ по этапу", seam)).toContain("generate_document");
+  });
+
+  it("accepts отчет written without ё", () => {
+    expect(proposalTypes("Составь отчет за неделю", seamForRole("owner", "detail")))
+      .toContain("generate_document");
+  });
+
+  it("still reaches no branch for a prompt naming none of the four intents", () => {
+    expect(proposalTypes("Предложи график работ", seamForRole("owner", "detail"))).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Contract path: ai_enforcement.can_reveal_hidden_fields = false
 // ---------------------------------------------------------------------------
 

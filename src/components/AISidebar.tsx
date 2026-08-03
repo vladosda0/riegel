@@ -103,7 +103,7 @@ import {
   trimMessagesForArchive,
   type AiChatArchiveEntryV1,
 } from "@/lib/ai-chat-transcript-storage";
-import { generateProposalQueue, getTextResponse, reviseProposalWithEdits } from "@/lib/ai-engine";
+import { generateProposalQueue, getTextResponseKey, reviseProposalWithEdits } from "@/lib/ai-engine";
 import {
   commitPhotoConsultActions,
   commitProposal,
@@ -1477,7 +1477,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
           : [];
         const assistantContent = proposals.length > 0
           ? t("ai.sidebar.message.proposalsReady", { count: proposals.length })
-          : getTextResponse();
+          : t(getTextResponseKey());
 
         const assistantMsg: AIMessage = {
           id: `msg-${Date.now() + 1}`,
