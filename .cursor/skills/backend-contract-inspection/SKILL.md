@@ -23,9 +23,9 @@ Determine whether requested behavior already exists in backend truth, requires f
    - frontend adapters/mappers
    - frontend UI only
 2. Inspect sources in this order:
-   - migrations in `rovno-db` (if available)
-   - generated types
-   - `backend-truth/` schema/slices/contracts
+   - migrations in `rovno-db` (if available) — the only complete picture
+   - `backend-truth/generated/supabase-types.ts` (the only generated artifact;
+     the schema/slices/contracts families were removed in rovno-db#106)
    - frontend adapters/mappers
    - UI usage points
 3. Decide one outcome:

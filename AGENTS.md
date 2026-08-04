@@ -115,14 +115,17 @@ Never treat UI or mock types as DB truth. If the contract is missing a field or 
   in timestamp order — so before concluding anything about a table, policy, trigger or function,
   search for LATER migrations touching that same name.
 
-> **Do NOT treat `backend-truth/schema/`, `slices/` or `contracts/` as truth.** They are a partial
-> view and they do not say so. Generation runs over a curated allowlist: as of 2026-07-28, **65 of
-> 201 migrations are excluded**, and the exclusions include RLS ones. `workspace_documents` has real
-> RLS policies in `rovno-db` and does not appear in `rls-summary.json` at all. Nothing in `src/`
-> imports these files; they are read only by whoever trusts this list. A map that is silently
-> two-thirds complete is worse than no map for exactly the RLS and permission reasoning where being
-> wrong costs the most. They are useful as a fast orientation on a table you will then verify against
-> the migrations — never as the thing you verify against. Removal is tracked in rovno-db #106.
+> **`backend-truth/` is `generated/supabase-types.ts` plus its README and MANIFEST, and nothing
+> else.** The `schema/`, `slices/`, `contracts/` and `sql/` families, and `generated/
+> db-public-schema.ts`, were removed in rovno-db#106 (2026-08-04): nothing imported or cited them,
+> and they were silently partial in a way they never admitted — 67 of 205 migrations excluded, RLS
+> among them, so `workspace_documents` had real RLS policies in `rovno-db` and appeared in
+> `rls-summary.json` not at all. If you find a stale copy in an old checkout, do not read it.
+>
+> The partiality applies to what survives, too: `supabase-types.ts` is generated from the same
+> curated allowlist, so an object living only in an excluded migration is typed nowhere. It is
+> load-bearing for drift detection, not a map of the schema. The migrations remain the only
+> complete picture.
 
 **App architecture**
 
@@ -264,7 +267,7 @@ If prod is broken / unsure → **immediately notify the user** describing what h
 
 | Area        | Location |
 |------------|----------|
-| Contract   | `backend-truth/README.md`, `schema/`, `slices/`, `contracts/`, `generated/` |
+| Contract   | `backend-truth/generated/supabase-types.ts` (+ `README.md`, `MANIFEST.json`); the full picture is `rovno-db/supabase/migrations/` |
 | Permissions| `src/lib/permissions.ts` |
 | Data entry | `src/data/store.ts`, `src/hooks/use-mock-data.ts` |
 | Supabase   | `src/integrations/supabase/` |
