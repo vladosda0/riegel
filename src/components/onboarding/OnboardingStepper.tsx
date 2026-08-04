@@ -15,7 +15,7 @@ import { useCreateOrganization, useSetActiveOrg } from "@/hooks/use-orgs";
 import { suggestOrgSlug } from "@/data/org-source";
 import { toast } from "@/hooks/use-toast";
 import { trackEvent } from "@/lib/analytics";
-import { type AppLanguage, getStoredLanguage, setAppLanguage } from "@/i18n";
+import { type AppLanguage, getActiveLanguage, setAppLanguage } from "@/i18n";
 
 const MAX_ONBOARDING_STAGES = 5;
 
@@ -38,7 +38,7 @@ export function OnboardingStepper({ onComplete, onProjectCreated }: OnboardingSt
   const showAutomationStep = MVP_SHOW_AI_AUTOMATION_MODE_UI;
   const [step, setStep] = useState(showAutomationStep ? 0 : 1);
   const [selectedLevel, setSelectedLevel] = useState("manual");
-  const [language, setLanguage] = useState<AppLanguage>(() => getStoredLanguage());
+  const [language, setLanguage] = useState<AppLanguage>(() => getActiveLanguage());
   const [units, setUnits] = useState("metric");
 
   // Apply + persist the interface language immediately when chosen. Previously the

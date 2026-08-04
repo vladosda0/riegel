@@ -4,11 +4,18 @@
 // That second half is the whole of the original bug. Профиль carried a duplicate
 // selector seeded from profiles.locale, so it rendered "English" over a Russian
 // UI; choosing the language already on screen is not a change, so Save never
-// enabled and English was unreachable in one pass. This control seeds from
-// getStoredLanguage(), the same source i18n boots from, so it cannot drift from
-// what the user sees.
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+// enabled and English was unreachable in one pass.
+//
+// The control now seeds from getActiveLanguage(), which reads the live i18n
+// language rather than a stored value with a hardcoded fallback. That makes the
+// drift structurally impossible instead of merely unlikely: there is no second
+// source left to disagree with the UI. (Seeding from getStoredLanguage() could
+// still drift, because it answered "ru" for an unset value even when i18n had
+// resolved English from the browser — the last test below is that case.)
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, render, screen } from "@testing-library/react";
+
+import i18n from "@/i18n";
 
 const preferencesMutate = vi.fn();
 
@@ -26,22 +33,44 @@ function languageTrigger(): HTMLElement {
   return screen.getAllByRole("combobox")[0];
 }
 
+/** changeLanguage re-renders anything mounted, so every call is wrapped. */
+async function runInterfaceIn(lang: "ru" | "en") {
+  await act(async () => {
+    await i18n.changeLanguage(lang);
+  });
+}
+
 describe("PreferencesPanel interface language", () => {
   beforeEach(() => {
     preferencesMutate.mockReset().mockResolvedValue({});
     localStorage.clear();
   });
 
-  it("seeds from the language the UI is actually running", () => {
-    localStorage.setItem("app-language", "en");
+  afterEach(async () => {
+    // setup.ts runs the suite in English; restore it so this file cannot leak a
+    // language into whatever runs next.
+    await runInterfaceIn("en");
+  });
+
+  it("shows English when the interface is running English", async () => {
+    await runInterfaceIn("en");
     render(<PreferencesPanel />);
 
     expect(languageTrigger()).toHaveTextContent("English");
   });
 
-  it("seeds Русский when nothing is stored, matching what i18n boots", () => {
-    // getStoredLanguage() returns "ru" for an unset or unrecognised value, so the
-    // control agrees with the UI on a fresh browser rather than guessing English.
+  it("shows Русский when the interface is running Russian", async () => {
+    await runInterfaceIn("ru");
+    render(<PreferencesPanel />);
+
+    expect(languageTrigger()).toHaveTextContent("Русский");
+  });
+
+  it("reports the running language even when a stored value disagrees", async () => {
+    // The #186 drift, reproduced directly: a stored "en" against a Russian UI.
+    // The control must follow the interface, not the storage.
+    await runInterfaceIn("ru");
+    localStorage.setItem("app-language", "en");
     render(<PreferencesPanel />);
 
     expect(languageTrigger()).toHaveTextContent("Русский");
