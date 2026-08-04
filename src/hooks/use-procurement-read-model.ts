@@ -91,8 +91,14 @@ export function useHomeProcurementReadSnapshot(): {
  * mode, so this hook returned null for every authenticated user and the AI sidebar carried no
  * procurement context at all, with no error to notice (#215).
  *
- * The three hooks below each resolve demo / local / Supabase internally, so this needs no mode
+ * The four hooks below each resolve demo / local / Supabase internally, so this needs no mode
  * branch of its own and demo mode keeps reading the same browser stores it always did.
+ *
+ * Known gap, tracked as #275: those hooks expose an `isLoading` that this one drops, so it
+ * returns null while the queries are in flight and `buildAIProjectContext` renders that as
+ * zeros. Strictly narrower than the defect it replaces (null unconditionally in Supabase mode),
+ * but a prompt sent before the queries settle still tells the assistant the project has no
+ * procurement, with no signal anything is missing.
  *
  * Scope note: the cross-project Home «Снабжение» tab still goes through the snapshot and is
  * still empty in Supabase mode. That half needs either a per-project fan-out or a portfolio RPC

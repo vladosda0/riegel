@@ -1762,7 +1762,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
         setMessages((prev) => [...prev, {
           id: `msg-${Date.now()}-project-selected`,
           role: "assistant",
-          content: `Using "${selectedProject.title}". Preparing proposals now.`,
+          content: t("ai.sidebar.message.usingProject", { title: selectedProject.title }),
           timestamp: new Date().toISOString(),
         }]);
       }

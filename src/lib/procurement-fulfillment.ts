@@ -110,6 +110,17 @@ function isAppliedOrder(order: OrderWithLines): boolean {
  * with a NULL `procurement_item_id` — but it is excluded explicitly so this predicate states
  * the whole rule instead of leaning on that.
  *
+ * NOT covered here, deliberately: this predicate says WHICH KINDS of order count, not WHEN.
+ * The caller's `isAppliedOrder` filter admits `placed`, so a cross-project «in» transfer counts
+ * from the moment it is placed, before the goods arrive. Per
+ * `20260630140000_cross_project_transfer_deferred_receipt.sql`, placing such a transfer moves
+ * NOTHING — it writes two `placed` orders and no `inventory_movements` row — so an in-transit
+ * transfer already zeroes the requirement while nothing has physically arrived, and it stays
+ * that way if the transfer is never received. That behaviour predates #216 and is unchanged by
+ * it (the filter used to be `isAppliedOrder` alone); tightening it to
+ * `transferDirection === "in" && status === "received"` would move `toBePaidPlannedCents` in
+ * `estimate-v2/rollups.ts` and is its own decision, not part of the double-count fix.
+ *
  * The sibling helpers in this file (`computeOrderedOpenQty`, `computeProcurementHeaderKpis`,
  * `computePurchasePriceVariance`, `computeProjectLastReceivedAt`) filter to supplier orders
  * only, which is right for what each of them measures. See #216.
@@ -159,6 +170,12 @@ export function computeOrderedOpenQty(requestId: string, orders: OrderWithLines[
     .reduce((sum, line) => sum + Math.max(line.qty - line.receivedQty, 0), 0);
 }
 
+/**
+ * Test-only today: no production caller. Kept in step with `computeRemainingRequestedQty`
+ * (it is the same body without the `requiredQty` subtraction) so that whoever does wire it up
+ * does not inherit the #216 double-count that this file just removed. Delete it rather than
+ * letting the two drift.
+ */
 export function computeFulfilledQty(requestId: string, orders: OrderWithLines[]): number {
   return orders
     .filter((order) => isAppliedOrder(order) && countsTowardFulfillment(order))

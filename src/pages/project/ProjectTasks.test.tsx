@@ -521,7 +521,7 @@ describe("ProjectTasks", () => {
     expect(finalizeUpload).toHaveBeenCalledTimes(1);
   });
 
-  it("uploads again for a fresh Done prompt even when the same file is picked", async () => {
+  it("does not re-upload when the abandoned prompt is reopened on the same task", async () => {
     const prepareUpload = vi.fn().mockResolvedValue({
       bucket: "media",
       objectPath: "project-1/photo.jpg",
@@ -551,9 +551,10 @@ describe("ProjectTasks", () => {
     fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
     await waitFor(() => expect(prepareUpload).toHaveBeenCalledTimes(1));
 
-    // Abandoning the prompt ends the session the skip-list belongs to. Carrying it
-    // into the next one would skip the upload and leave the task with no is_final
-    // row, which the server's Done guard requires, so Done could never succeed.
+    // Retrying in place is not the only way back here: the user can abandon the
+    // prompt and reopen it. The is_final row written above survives that, so the
+    // skip-list has to as well. Clearing it on open left the exact duplicate-upload
+    // defect this fix targets reachable through one extra click.
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     fireEvent.click(screen.getByText("Estimate task"));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Done" }));
@@ -561,7 +562,57 @@ describe("ProjectTasks", () => {
     fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
 
     await waitFor(() => expect(mocks.changeTaskStatus).toHaveBeenCalledTimes(2));
+    expect(prepareUpload).toHaveBeenCalledTimes(1);
+    expect(uploadBytes).toHaveBeenCalledTimes(1);
+    expect(finalizeUpload).toHaveBeenCalledTimes(1);
+  });
+
+  it("still uploads the same photo for a DIFFERENT task", async () => {
+    const prepareUpload = vi.fn().mockResolvedValue({
+      bucket: "media",
+      objectPath: "project-1/photo.jpg",
+      uploadIntentId: "intent-1",
+    });
+    const uploadBytes = vi.fn().mockResolvedValue(undefined);
+    const finalizeUpload = vi.fn().mockResolvedValue(undefined);
+    mocks.useMediaUploadMutations.mockReturnValue({ prepareUpload, uploadBytes, finalizeUpload });
+    mocks.usePermission.mockReturnValue(buildPermission("contractor"));
+    mocks.useTasks.mockReturnValue([
+      buildTask({ status: "in_progress" }),
+      buildTask({ id: "task-2", title: "Second task", status: "in_progress" }),
+    ]);
+    mocks.changeTaskStatus.mockRejectedValueOnce(new Error("network unreachable"));
+
+    const pickSamePhoto = (container: HTMLElement) => {
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+      fireEvent.change(fileInput, {
+        target: {
+          files: [new File(["photo"], "photo.jpg", { type: "image/jpeg", lastModified: 1 })],
+        },
+      });
+    };
+
+    const { container } = renderProjectTasks();
+
+    fireEvent.click(screen.getByText("Estimate task"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Done" }));
+    pickSamePhoto(container);
+    fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
+    await waitFor(() => expect(prepareUpload).toHaveBeenCalledTimes(1));
+
+    // The skip-list is long-lived, so it MUST be keyed by task. The same photo
+    // attached to a second task is a genuinely new is_final row: skipping it would
+    // leave task-2 unable to satisfy the server's Done guard, and in demo/local it
+    // would complete with no acceptance photo at all.
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByText("Second task"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Done" }));
+    pickSamePhoto(container);
+    fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
+
+    await waitFor(() => expect(mocks.changeTaskStatus).toHaveBeenCalledTimes(2));
     expect(prepareUpload).toHaveBeenCalledTimes(2);
     expect(finalizeUpload).toHaveBeenCalledTimes(2);
+    expect(finalizeUpload).toHaveBeenLastCalledWith("intent-1", { taskId: "task-2", isFinal: true });
   });
 });

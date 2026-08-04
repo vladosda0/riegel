@@ -253,10 +253,11 @@ export function applySensitiveDetailToProcurementReadSnapshot(
   return { projects, totals };
 }
 
-export function getProcurementReadProjectSummary(projectId: string): ProcurementReadProjectSummary | null {
-  const snapshot = getProcurementReadSnapshot();
-  return snapshot.projects.find((summary) => summary.projectId === projectId) ?? null;
-}
+// `getProcurementReadProjectSummary` was removed here. It had no caller, and it routed the
+// single-project lookup back through getProcurementReadSnapshot, i.e. it carried the whole #215
+// defect (browser stores only, null for every Supabase user). Leaving it exported invited someone
+// to pick it up as a working helper. The live path is the `useProcurementReadProjectSummary` hook,
+// which feeds `buildProcurementReadProjectSummary` from the per-project sources.
 
 export function getProcurementInStockValueFromInventory(projectId: string): number {
   const stockRows = listStockByProject(projectId).filter((row) => row.qty > 0);

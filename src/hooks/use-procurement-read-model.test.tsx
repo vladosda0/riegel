@@ -160,17 +160,29 @@ describe("useProcurementReadProjectSummary", () => {
     expect(result.current).toBeNull();
   });
 
-  it("still serves demo mode, where the same per-project hooks read the browser stores", () => {
-    // Guard against fixing Supabase mode by breaking the mode that already worked: the three
-    // per-project hooks each resolve demo/local internally, so this path needs no branch.
-    mocks.useWorkspaceMode.mockReturnValue({ kind: "demo" });
+  it("produces the same summary in every workspace mode, i.e. carries no mode branch", () => {
+    // The design claim being guarded is narrow and worth stating plainly: the four per-project
+    // hooks each resolve demo / local / Supabase internally, so THIS hook must not branch on
+    // mode at all. Feed identical source data under each mode and require identical output;
+    // adding a mode branch here breaks this test.
+    //
+    // What this does NOT prove: that demo mode reads the browser stores correctly. The source
+    // hooks are mocked, so that path is not exercised here at all -- it belongs to those hooks'
+    // own tests, not to this one.
     mocks.useProjectProcurementItemsState.mockReturnValue({
       items: [buildItem()],
       isLoading: false,
     });
 
-    const { result } = renderHook(() => useProcurementReadProjectSummary(PROJECT_ID));
+    const results = (["demo", "local", "supabase"] as const).map((kind) => {
+      mocks.useWorkspaceMode.mockReturnValue(
+        kind === "supabase" ? { kind, profileId: "profile-9" } : { kind },
+      );
+      return renderHook(() => useProcurementReadProjectSummary(PROJECT_ID)).result.current;
+    });
 
-    expect(result.current?.totalCount).toBe(1);
+    expect(results[0]?.totalCount).toBe(1);
+    expect(results[1]).toEqual(results[0]);
+    expect(results[2]).toEqual(results[0]);
   });
 });
