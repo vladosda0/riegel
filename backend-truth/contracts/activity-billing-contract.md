@@ -67,7 +67,6 @@ Indexes:
 | `updated_at` | `timestamptz` | no | `now()` | no |
 
 Constraints:
-- unnamed check (expression `provider in ('stripe')`)
 - unnamed unique (columns `provider`, `external_customer_id`)
 - unnamed unique (columns `profile_id`, `provider`)
 - `billing_customers_provider_check` check (expression `provider in ('stripe', 'tbank')`)
@@ -105,7 +104,6 @@ Triggers:
 | `grace_until` | `timestamptz` | yes |   | no |
 
 Constraints:
-- unnamed check (expression `provider in ('stripe')`)
 - unnamed check (expression `status in ('trialing', 'active', 'past_due', 'paused', 'canceled', 'incomplete', 'incomplete_expired')`)
 - unnamed check (expression `currency in ('RUB', 'USD', 'EUR', 'GBP')`)
 - unnamed check (expression `amount_cents is null or amount_cents >= 0`)

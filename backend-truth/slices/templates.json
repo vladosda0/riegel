@@ -664,7 +664,7 @@
         {
           "name": "scope_tag",
           "sqlType": "text",
-          "tsType": "string",
+          "tsType": "\"ИЖС\" | \"ремонт\" | \"ландшафт\" | \"баня\" | \"гараж\" | \"инженерка\" | \"коммерческое\" | \"general\"",
           "nullable": false,
           "defaultSql": "'general'",
           "primaryKey": false,
@@ -750,7 +750,9 @@
         {
           "type": "check",
           "name": "template_stages_scope_tag_enum",
-          "columns": [],
+          "columns": [
+            "scope_tag"
+          ],
           "expression": "scope_tag in ('ИЖС','ремонт','ландшафт','баня','гараж','инженерка','коммерческое','general')",
           "usingIndex": null,
           "sourceMigration": "supabase/migrations/20260512140000_template_check_constraints_and_apply_rpc_hardening.sql"

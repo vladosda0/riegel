@@ -7226,7 +7226,7 @@ export const tables = {
         {
           "name": "provider",
           "sqlType": "text",
-          "tsType": "\"stripe\"",
+          "tsType": "\"stripe\" | \"tbank\"",
           "nullable": false,
           "defaultSql": null,
           "primaryKey": false,
@@ -7286,16 +7286,6 @@ export const tables = {
       ],
       "constraints": [
         {
-          "type": "check",
-          "name": null,
-          "columns": [
-            "provider"
-          ],
-          "expression": "provider in ('stripe')",
-          "usingIndex": null,
-          "sourceMigration": "supabase/migrations/20260306165000_billing_launch_tables.sql"
-        },
-        {
           "type": "unique",
           "name": null,
           "columns": [
@@ -7322,7 +7312,9 @@ export const tables = {
         {
           "type": "check",
           "name": "billing_customers_provider_check",
-          "columns": [],
+          "columns": [
+            "provider"
+          ],
           "expression": "provider in ('stripe', 'tbank')",
           "usingIndex": null,
           "sourceMigration": "supabase/migrations/20260516120000_extend_billing_provider_to_tbank.sql"
@@ -7404,7 +7396,7 @@ export const tables = {
         {
           "name": "provider",
           "sqlType": "text",
-          "tsType": "\"stripe\"",
+          "tsType": "\"stripe\" | \"tbank\"",
           "nullable": false,
           "defaultSql": null,
           "primaryKey": false,
@@ -7587,16 +7579,6 @@ export const tables = {
           "type": "check",
           "name": null,
           "columns": [
-            "provider"
-          ],
-          "expression": "provider in ('stripe')",
-          "usingIndex": null,
-          "sourceMigration": "supabase/migrations/20260306165000_billing_launch_tables.sql"
-        },
-        {
-          "type": "check",
-          "name": null,
-          "columns": [
             "status"
           ],
           "expression": "status in ('trialing', 'active', 'past_due', 'paused', 'canceled', 'incomplete', 'incomplete_expired')",
@@ -7638,7 +7620,9 @@ export const tables = {
         {
           "type": "check",
           "name": "subscriptions_provider_check",
-          "columns": [],
+          "columns": [
+            "provider"
+          ],
           "expression": "provider in ('stripe', 'tbank')",
           "usingIndex": null,
           "sourceMigration": "supabase/migrations/20260516120000_extend_billing_provider_to_tbank.sql"
@@ -8195,7 +8179,7 @@ export const tables = {
         {
           "name": "key",
           "sqlType": "text",
-          "tsType": "string",
+          "tsType": "\"documents\" | \"media\"",
           "nullable": false,
           "defaultSql": null,
           "primaryKey": true,
@@ -8237,7 +8221,9 @@ export const tables = {
         {
           "type": "check",
           "name": "storage_bucket_config_key_check",
-          "columns": [],
+          "columns": [
+            "key"
+          ],
           "expression": "key in ('documents', 'media')",
           "usingIndex": null,
           "nullsNotDistinct": false,
@@ -9808,7 +9794,7 @@ export const tables = {
         {
           "name": "scope_tag",
           "sqlType": "text",
-          "tsType": "string",
+          "tsType": "\"ИЖС\" | \"ремонт\" | \"ландшафт\" | \"баня\" | \"гараж\" | \"инженерка\" | \"коммерческое\" | \"general\"",
           "nullable": false,
           "defaultSql": "'general'",
           "primaryKey": false,
@@ -9894,7 +9880,9 @@ export const tables = {
         {
           "type": "check",
           "name": "template_stages_scope_tag_enum",
-          "columns": [],
+          "columns": [
+            "scope_tag"
+          ],
           "expression": "scope_tag in ('ИЖС','ремонт','ландшафт','баня','гараж','инженерка','коммерческое','general')",
           "usingIndex": null,
           "sourceMigration": "supabase/migrations/20260512140000_template_check_constraints_and_apply_rpc_hardening.sql"
@@ -16060,18 +16048,6 @@ export const checks = {
       "schema": "public",
       "table": "billing_customers",
       "column": "provider",
-      "constraintName": null,
-      "kind": "enum_like",
-      "allowedValues": [
-        "stripe"
-      ],
-      "expression": "provider in ('stripe')",
-      "sourceMigration": "supabase/migrations/20260306165000_billing_launch_tables.sql"
-    },
-    {
-      "schema": "public",
-      "table": "billing_customers",
-      "column": "provider",
       "constraintName": "billing_customers_provider_check",
       "kind": "enum_like",
       "allowedValues": [
@@ -16080,18 +16056,6 @@ export const checks = {
       ],
       "expression": "provider in ('stripe', 'tbank')",
       "sourceMigration": "supabase/migrations/20260516120000_extend_billing_provider_to_tbank.sql"
-    },
-    {
-      "schema": "public",
-      "table": "subscriptions",
-      "column": "provider",
-      "constraintName": null,
-      "kind": "enum_like",
-      "allowedValues": [
-        "stripe"
-      ],
-      "expression": "provider in ('stripe')",
-      "sourceMigration": "supabase/migrations/20260306165000_billing_launch_tables.sql"
     },
     {
       "schema": "public",
