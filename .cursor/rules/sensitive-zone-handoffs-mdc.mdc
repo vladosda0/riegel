@@ -11,7 +11,6 @@ globs:
   - "supabase/**"
   - "scripts/generate-backend-truth*"
   - "scripts/test-backend-truth-generator*"
-  - "contracts/**"
 alwaysApply: false
 ---
 
