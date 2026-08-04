@@ -374,8 +374,9 @@ export function shapeDocumentsWithVersions(input: {
     // An archived document has no current version; the file it still points at
     // is the one its archive marker carries, so file_meta keeps resolving. Markers
     // written before the #243 fix carry a null storage link, so fall back to the
-    // newest version that actually has one - that is the file that was current at
-    // archive time, and it heals documents archived before the fix shipped.
+    // newest version that actually has one - the newest file the document actually
+    // materialized (the current version at archive time, unless its upload never
+    // finalized). It heals documents archived before the fix shipped.
     const fileVersionRow = versionRows.find((entry) => entry.is_current)
       ?? [...versionRows].reverse().find((entry) => entry.storage_object_id != null)
       ?? versionRows[versionRows.length - 1];
@@ -645,8 +646,9 @@ export async function archiveSupabaseProjectDocument(
   // without the link, preview, download and the filename all go dead for a
   // document the user only meant to tidy away. (The demo path carries the
   // previous version's content forward the same way.) Prefer the newest version
-  // that actually has a storage link, so re-archiving a document whose previous
-  // marker predates the #243 fix copies the real file, not the marker's null.
+  // that actually has a storage link (the newest file the document actually
+  // materialized), so re-archiving a document whose previous marker predates the
+  // #243 fix copies the real file, not the marker's null.
   const outgoingVersion = versionRows.find((entry) => entry.is_current)
     ?? [...versionRows].reverse().find((entry) => entry.storage_object_id != null)
     ?? versionRows[versionRows.length - 1];
