@@ -188,42 +188,23 @@ const AUTOMATION_MODE_TO_LEVEL: Record<AutomationMode, 1 | 2 | 3 | 4> = {
 const VALID_AUTOMATION_MODES: Set<AutomationMode> = new Set(["full", "assisted", "manual", "observer"]);
 const COMPOSER_MAX_HEIGHT = 220;
 const GENERAL_MODE_VALUE = "general";
-// Keep the stems in step with the four matchers in ai-engine.ts (createProjectProposals).
-// This gate decides whether a prompt sent from Home with no project selected is worth asking
-// "which project?" about and replaying; if it misses, the prompt falls through to the generic
-// text fallback and the Russian journey stays broken even though the engine itself matches.
-// NO \b around the Cyrillic alternatives, and the reason is stronger than "inflection":
-// JavaScript's \b is ASCII-only, so it NEVER asserts a boundary next to a Cyrillic letter.
-// /\b(задач)\b/ matches nothing at all — not «Добавить задачи», not even the bare stem «задач».
-// An anchored Cyrillic group would be dead code, not a stricter one. Do not "restore symmetry"
-// by adding \b back here; it would silently kill the whole group. (LEARN_USER_PROMPT_PATTERN on
-// the next line has exactly that bug today: its five Cyrillic alternatives can never fire. #277.)
+// Stems mirror the four matchers in ai-engine.ts (createProjectProposals), so a prompt this
+// gate lets through is one the engine will match.
 //
-// KNOWN RESIDUAL, pre-existing, enumerated over all 16 ai.sidebar.suggestion.* values in both
-// locales rather than sampled. Four English chips match the ENGINE but miss this GATE, and which
-// of them actually harms a user depends on WHICH suggestion set they live in — the two sets are
-// mutually exclusive with the gate, so reachability, not the regex, decides:
+// No \b around the Cyrillic group: JS \b is ASCII-only, so an anchored Cyrillic alternative
+// matches nothing a user would type («Добавить задачи», the bare «задач» — both false; a
+// boundary only exists where the run abuts an ASCII word character, as in "aзадачb"). Adding
+// \b back would silently kill the group. LEARN_USER_PROMPT_PATTERN below has that bug on
+// Russian text today: #277.
 //
-//   GLOBAL_SUGGESTION_KEYS — shown ONLY when no project is selected, i.e. only when this gate
-//   runs. These two are therefore non-functional in EVERY reachable state, in English, today:
-//     "Compare estimates"
-//     "Draft an invite for a contractor"
-//
-//   PROJECT_SUGGESTION_KEYS — shown ONLY when a project IS selected, i.e. only when this gate is
-//   skipped. These two miss the regex but never reach it as chips, and they do produce proposals:
-//     "Add tasks"                  (\btask\b and \badd task\b both fail on the plural "tasks")
-//     "Which tasks are at risk?"
-//
-// Three of the four Russian counterparts are fixed by this change, so English is the weaker side
-// of the same dead end — the #237 defect inverted, not closed. The fourth, «Напиши приглашение
-// подрядчику», matches neither the gate nor any engine matcher, so that chip dead-ends in both
-// languages (its English twin only reaches the engine because "contractor" contains "contract").
-//
-// Closing this means dropping \b from the Latin group so the gate mirrors the engine exactly.
-// Deliberately NOT done here, to keep this change scoped to the Russian defect it was opened for:
-// tracked as #276. The cost of a miss is a generic fallback instead of a project picker; the cost
-// of an over-match is one ignorable proposal card, since the queue is always created with
-// phase "review".
+// REACHABILITY, verified 2026-08-03: this gate currently never runs. AISidebar's only mount is
+// AppLayout, gated by AI_SIDEBAR_ROUTE_PREFIX = "/project/", so isProjectContext is always true
+// and the isHomeContext branch (incl. GLOBAL_SUGGESTION_KEYS and the "which project?" replay)
+// is dead code. The Cyrillic widening is kept because it is what the gate should say if that
+// mount ever returns, and it can change no behaviour while the branch is unreachable. The full
+// picture — four EN/RU chip asymmetries against the engine, and the delete-vs-restore decision
+// for the dead Home branch — lives in #276; do not act on the asymmetries without re-checking
+// reachability first.
 const ACTIONABLE_PROPOSAL_PATTERN = /\b(task|add task|create task|estimate|cost|budget|procurement|buy|purchase|material|document|contract|report|generate)\b|(задач|смет|бюджет|стоимост|закуп|купи|материал|документ|договор|отч[её]т)/i;
 const LEARN_USER_PROMPT_PATTERN = /^\s*(how|what|why|explain|как|что|почему|объясни|объясните)\b/i;
 const LEARN_LIST_PATTERN = /(?:^|\n)\s*(?:[-*•]|\d+\.)\s+/m;
