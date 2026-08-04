@@ -103,7 +103,7 @@ import {
   trimMessagesForArchive,
   type AiChatArchiveEntryV1,
 } from "@/lib/ai-chat-transcript-storage";
-import { generateProposalQueue, getTextResponse, reviseProposalWithEdits } from "@/lib/ai-engine";
+import { generateProposalQueue, getTextResponseKey, reviseProposalWithEdits } from "@/lib/ai-engine";
 import {
   commitPhotoConsultActions,
   commitProposal,
@@ -188,7 +188,24 @@ const AUTOMATION_MODE_TO_LEVEL: Record<AutomationMode, 1 | 2 | 3 | 4> = {
 const VALID_AUTOMATION_MODES: Set<AutomationMode> = new Set(["full", "assisted", "manual", "observer"]);
 const COMPOSER_MAX_HEIGHT = 220;
 const GENERAL_MODE_VALUE = "general";
-const ACTIONABLE_PROPOSAL_PATTERN = /\b(task|add task|create task|estimate|cost|budget|procurement|buy|purchase|material|document|contract|report|generate)\b/i;
+// Stems mirror the four matchers in ai-engine.ts (createProjectProposals), so a prompt this
+// gate lets through is one the engine will match.
+//
+// No \b around the Cyrillic group: JS \b is ASCII-only, so an anchored Cyrillic alternative
+// matches nothing a user would type («Добавить задачи», the bare «задач» — both false; a
+// boundary only exists where the run abuts an ASCII word character, as in "aзадачb"). Adding
+// \b back would silently kill the group. LEARN_USER_PROMPT_PATTERN below has that bug on
+// Russian text today: #277.
+//
+// REACHABILITY, verified 2026-08-03: this gate currently never runs. AISidebar's only mount is
+// AppLayout, gated by AI_SIDEBAR_ROUTE_PREFIX = "/project/", so isProjectContext is always true
+// and the isHomeContext branch (incl. GLOBAL_SUGGESTION_KEYS and the "which project?" replay)
+// is dead code. The Cyrillic widening is kept because it is what the gate should say if that
+// mount ever returns, and it can change no behaviour while the branch is unreachable. The full
+// picture — four EN/RU chip asymmetries against the engine, and the delete-vs-restore decision
+// for the dead Home branch — lives in #276; do not act on the asymmetries without re-checking
+// reachability first.
+const ACTIONABLE_PROPOSAL_PATTERN = /\b(task|add task|create task|estimate|cost|budget|procurement|buy|purchase|material|document|contract|report|generate)\b|(задач|смет|бюджет|стоимост|закуп|купи|материал|документ|договор|отч[её]т)/i;
 const LEARN_USER_PROMPT_PATTERN = /^\s*(how|what|why|explain|как|что|почему|объясни|объясните)\b/i;
 const LEARN_LIST_PATTERN = /(?:^|\n)\s*(?:[-*•]|\d+\.)\s+/m;
 
@@ -1477,7 +1494,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
           : [];
         const assistantContent = proposals.length > 0
           ? t("ai.sidebar.message.proposalsReady", { count: proposals.length })
-          : getTextResponse();
+          : t(getTextResponseKey());
 
         const assistantMsg: AIMessage = {
           id: `msg-${Date.now() + 1}`,
@@ -1762,7 +1779,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
         setMessages((prev) => [...prev, {
           id: `msg-${Date.now()}-project-selected`,
           role: "assistant",
-          content: `Using "${selectedProject.title}". Preparing proposals now.`,
+          content: t("ai.sidebar.message.usingProject", { title: selectedProject.title }),
           timestamp: new Date().toISOString(),
         }]);
       }

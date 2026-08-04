@@ -159,6 +159,64 @@ describe("generateProposalQueue — action filtering by role", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Russian intent matching — the UI is Russian by default and the sidebar's own
+// chips are Russian, so a chip that reaches no branch is a dead headline feature
+// ---------------------------------------------------------------------------
+
+describe("generateProposalQueue — Russian prompts", () => {
+  // Verbatim ai.sidebar.suggestion.* values from src/locales/ru.json, paired
+  // with the type the chip's own label promises.
+  const CHIPS: Array<[string, string]> = [
+    ["Добавить задачи", "add_task"],
+    ["Обновить смету", "update_estimate"],
+    ["Купить материалы", "add_procurement"],
+    ["Сгенерировать договор", "generate_document"],
+    ["Составь отчёт за неделю", "generate_document"],
+  ];
+
+  for (const [chip, expectedType] of CHIPS) {
+    it(`matches the «${chip}» chip to ${expectedType}`, () => {
+      expect(proposalTypes(chip, seamForRole("owner", "detail"))).toContain(expectedType);
+    });
+  }
+
+  it("matches ordinary Russian phrasing, not just the chip wording", () => {
+    const seam = seamForRole("owner", "detail");
+    expect(proposalTypes("Нужно купить материалы: плитка и цемент", seam)).toContain("add_procurement");
+    expect(proposalTypes("Добавь задачу на монтаж", seam)).toContain("add_task");
+    expect(proposalTypes("Пересчитай стоимость работ", seam)).toContain("update_estimate");
+    expect(proposalTypes("Подготовь документ по этапу", seam)).toContain("generate_document");
+  });
+
+  it("accepts отчет written without ё", () => {
+    expect(proposalTypes("Составь отчет за неделю", seamForRole("owner", "detail")))
+      .toContain("generate_document");
+  });
+
+  it("still reaches no branch for a prompt naming none of the four intents", () => {
+    expect(proposalTypes("Предложи график работ", seamForRole("owner", "detail"))).toEqual([]);
+  });
+
+  // The two QUESTION chips the sidebar offers contain intent stems, so widening the matchers to
+  // Russian makes them produce proposals where they used to fall through to the text fallback.
+  // That is accepted rather than special-cased, because it is PARITY, not a new behaviour class:
+  // the English originals already match the pre-existing Latin matchers today
+  // (/task/ matches "Which tasks are at risk?", /budget/ matches "Explain the budget variance"),
+  // so excluding the Russian forms would make the two languages behave differently, which is the
+  // defect #237 set out to remove. Nothing applies without an explicit per-item confirm: the
+  // queue is always created with phase "review" (AISidebar), so the cost of a wrong match is one
+  // ignored card. Pinned here so a future reader sees it was measured, not missed.
+  it("lets the Russian question chips reach a branch, matching what the English ones already do", () => {
+    const seam = seamForRole("owner", "detail");
+    expect(proposalTypes("Какие задачи в зоне риска?", seam)).toContain("add_task");
+    expect(proposalTypes("Объясни отклонение по бюджету", seam)).toContain("update_estimate");
+    // The English originals, for the parity claim above.
+    expect(proposalTypes("Which tasks are at risk?", seam)).toContain("add_task");
+    expect(proposalTypes("Explain the budget variance", seam)).toContain("update_estimate");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Contract path: ai_enforcement.can_reveal_hidden_fields = false
 // ---------------------------------------------------------------------------
 

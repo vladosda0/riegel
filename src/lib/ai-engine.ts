@@ -99,7 +99,7 @@ function createProjectProposals(input: string, projectId: string): AIProposal[] 
   if (!stageTitle) return [];
   const proposals: AIProposal[] = [];
 
-  if (/task|add task|create task/i.test(lower)) {
+  if (/task|add task|create task|задач/i.test(lower)) {
     const changes: ProposalChange[] = [
       { entity_type: "task", action: "create", label: `Install junction boxes — ${stageTitle}`, after: "not_started" },
       { entity_type: "task", action: "create", label: `Run conduit for ${stageTitle}`, after: "not_started" },
@@ -115,7 +115,7 @@ function createProjectProposals(input: string, projectId: string): AIProposal[] 
     });
   }
 
-  if (/estimate|cost|budget/i.test(lower)) {
+  if (/estimate|cost|budget|смет|бюджет|стоимост/i.test(lower)) {
     const changes: ProposalChange[] = [
       { entity_type: "estimate_item", action: "update", label: "Electrical rough-in", before: "48,000 ₽", after: "52,000 ₽" },
       { entity_type: "estimate_item", action: "create", label: "Additional outlet points ×6", after: "12,000 ₽" },
@@ -130,7 +130,7 @@ function createProjectProposals(input: string, projectId: string): AIProposal[] 
     });
   }
 
-  if (/procurement|buy|purchase|material/i.test(lower)) {
+  if (/procurement|buy|purchase|material|закуп|купи|материал/i.test(lower)) {
     const changes: ProposalChange[] = [
       { entity_type: "procurement_item", action: "create", label: "LED panel lights 60×60 ×12", after: "18,000 ₽" },
       { entity_type: "procurement_item", action: "create", label: "Cable tray 2m sections ×8", after: "6,400 ₽" },
@@ -145,7 +145,7 @@ function createProjectProposals(input: string, projectId: string): AIProposal[] 
     });
   }
 
-  if (/document|contract|generate|report/i.test(lower)) {
+  if (/document|contract|generate|report|документ|договор|отч[её]т/i.test(lower)) {
     const changes: ProposalChange[] = [
       { entity_type: "document", action: "create", label: `Subcontractor Agreement — ${stageTitle}`, after: "Draft v1" },
     ];
@@ -274,14 +274,14 @@ export function generateProjectProposal(input: string): AIProposal {
   };
 }
 
-const TEXT_RESPONSES = [
-  "I can help with tasks, estimates, procurement, and documents. Try asking me to add tasks or update the estimate!",
-  "That's an interesting question. For now I can generate proposals for tasks, estimates, materials, and documents. What would you like?",
-  "I'm your construction AI assistant. I can create tasks, adjust budgets, add procurement items, or draft documents. What do you need?",
+const TEXT_RESPONSE_KEYS = [
+  "ai.sidebar.message.fallbackCapabilities",
+  "ai.sidebar.message.fallbackUnmatched",
+  "ai.sidebar.message.fallbackIntro",
 ];
 
-export function getTextResponse(): string {
-  return TEXT_RESPONSES[Math.floor(Math.random() * TEXT_RESPONSES.length)];
+export function getTextResponseKey(): string {
+  return TEXT_RESPONSE_KEYS[Math.floor(Math.random() * TEXT_RESPONSE_KEYS.length)];
 }
 
 export { PROPOSAL_TYPE_TO_CONTRACT_ACTION, type ProposalActionMapping };
