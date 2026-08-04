@@ -941,18 +941,6 @@
       "schema": "public",
       "table": "billing_customers",
       "column": "provider",
-      "constraintName": null,
-      "kind": "enum_like",
-      "allowedValues": [
-        "stripe"
-      ],
-      "expression": "provider in ('stripe')",
-      "sourceMigration": "supabase/migrations/20260306165000_billing_launch_tables.sql"
-    },
-    {
-      "schema": "public",
-      "table": "billing_customers",
-      "column": "provider",
       "constraintName": "billing_customers_provider_check",
       "kind": "enum_like",
       "allowedValues": [
@@ -961,18 +949,6 @@
       ],
       "expression": "provider in ('stripe', 'tbank')",
       "sourceMigration": "supabase/migrations/20260516120000_extend_billing_provider_to_tbank.sql"
-    },
-    {
-      "schema": "public",
-      "table": "subscriptions",
-      "column": "provider",
-      "constraintName": null,
-      "kind": "enum_like",
-      "allowedValues": [
-        "stripe"
-      ],
-      "expression": "provider in ('stripe')",
-      "sourceMigration": "supabase/migrations/20260306165000_billing_launch_tables.sql"
     },
     {
       "schema": "public",

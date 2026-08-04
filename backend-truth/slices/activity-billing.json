@@ -349,7 +349,7 @@
         {
           "name": "provider",
           "sqlType": "text",
-          "tsType": "\"stripe\"",
+          "tsType": "\"stripe\" | \"tbank\"",
           "nullable": false,
           "defaultSql": null,
           "primaryKey": false,
@@ -409,16 +409,6 @@
       ],
       "constraints": [
         {
-          "type": "check",
-          "name": null,
-          "columns": [
-            "provider"
-          ],
-          "expression": "provider in ('stripe')",
-          "usingIndex": null,
-          "sourceMigration": "supabase/migrations/20260306165000_billing_launch_tables.sql"
-        },
-        {
           "type": "unique",
           "name": null,
           "columns": [
@@ -445,7 +435,9 @@
         {
           "type": "check",
           "name": "billing_customers_provider_check",
-          "columns": [],
+          "columns": [
+            "provider"
+          ],
           "expression": "provider in ('stripe', 'tbank')",
           "usingIndex": null,
           "sourceMigration": "supabase/migrations/20260516120000_extend_billing_provider_to_tbank.sql"
@@ -527,7 +519,7 @@
         {
           "name": "provider",
           "sqlType": "text",
-          "tsType": "\"stripe\"",
+          "tsType": "\"stripe\" | \"tbank\"",
           "nullable": false,
           "defaultSql": null,
           "primaryKey": false,
@@ -710,16 +702,6 @@
           "type": "check",
           "name": null,
           "columns": [
-            "provider"
-          ],
-          "expression": "provider in ('stripe')",
-          "usingIndex": null,
-          "sourceMigration": "supabase/migrations/20260306165000_billing_launch_tables.sql"
-        },
-        {
-          "type": "check",
-          "name": null,
-          "columns": [
             "status"
           ],
           "expression": "status in ('trialing', 'active', 'past_due', 'paused', 'canceled', 'incomplete', 'incomplete_expired')",
@@ -761,7 +743,9 @@
         {
           "type": "check",
           "name": "subscriptions_provider_check",
-          "columns": [],
+          "columns": [
+            "provider"
+          ],
           "expression": "provider in ('stripe', 'tbank')",
           "usingIndex": null,
           "sourceMigration": "supabase/migrations/20260516120000_extend_billing_provider_to_tbank.sql"
