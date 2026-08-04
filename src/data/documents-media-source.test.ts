@@ -346,6 +346,79 @@ describe("documents-media-source helpers", () => {
     }));
   });
 
+  it("carries the outgoing current version's storage link onto the archive marker", async () => {
+    const order = vi.fn().mockResolvedValue({
+      data: [
+        documentVersionRow({
+          id: "version-1",
+          document_id: "doc-1",
+          version_number: 1,
+          is_current: false,
+          storage_object_id: "so-old",
+        }),
+        documentVersionRow({
+          id: "version-2",
+          document_id: "doc-1",
+          version_number: 2,
+          is_current: true,
+          storage_object_id: "so-current",
+        }),
+      ],
+      error: null,
+    });
+    const selectEq = vi.fn(() => ({ order }));
+    const currentEq = vi.fn().mockResolvedValue({ error: null });
+    const documentEq = vi.fn(() => ({ eq: currentEq }));
+    const versionsTable = {
+      select: vi.fn(() => ({ eq: selectEq })),
+      update: vi.fn(() => ({ eq: documentEq })),
+      insert: vi.fn().mockResolvedValue({ error: null }),
+    };
+    const supabase = createSupabaseStub({ versionsTable });
+
+    await archiveSupabaseProjectDocument(supabase, "profile-1", {
+      projectId: "project-1",
+      documentId: "doc-1",
+    });
+
+    expect(versionsTable.insert).toHaveBeenCalledWith(expect.objectContaining({
+      storage_object_id: "so-current",
+    }));
+  });
+
+  it("leaves the archive marker's storage link null when no version had one", async () => {
+    const order = vi.fn().mockResolvedValue({
+      data: [
+        documentVersionRow({
+          id: "version-1",
+          document_id: "doc-1",
+          version_number: 1,
+          is_current: true,
+          storage_object_id: null,
+        }),
+      ],
+      error: null,
+    });
+    const selectEq = vi.fn(() => ({ order }));
+    const currentEq = vi.fn().mockResolvedValue({ error: null });
+    const documentEq = vi.fn(() => ({ eq: currentEq }));
+    const versionsTable = {
+      select: vi.fn(() => ({ eq: selectEq })),
+      update: vi.fn(() => ({ eq: documentEq })),
+      insert: vi.fn().mockResolvedValue({ error: null }),
+    };
+    const supabase = createSupabaseStub({ versionsTable });
+
+    await archiveSupabaseProjectDocument(supabase, "profile-1", {
+      projectId: "project-1",
+      documentId: "doc-1",
+    });
+
+    expect(versionsTable.insert).toHaveBeenCalledWith(expect.objectContaining({
+      storage_object_id: null,
+    }));
+  });
+
   it("deletes the document row in Supabase mode", async () => {
     const eq = vi.fn().mockResolvedValue({ error: null });
     const documentsTable = {
@@ -583,6 +656,50 @@ describe("documents-media-source helpers", () => {
       mimeType: "application/pdf",
       sizeBytes: 4096,
     });
+  });
+
+  it("keeps file_meta on an archived document, whose newest version is the archive marker", () => {
+    const soRow = storageObjectRow({
+      id: "so-current",
+      filename: "contract.pdf",
+      mime_type: "application/pdf",
+      size_bytes: 4096,
+    });
+    const storageObjectsById = new Map([[soRow.id, soRow]]);
+
+    const documents = shapeDocumentsWithVersions({
+      documentRows: [
+        documentRow({ id: "doc-1", title: "Archived" }),
+      ],
+      versionRows: [
+        documentVersionRow({
+          id: "v1",
+          document_id: "doc-1",
+          version_number: 1,
+          is_current: false,
+          storage_object_id: "so-current",
+        }),
+        documentVersionRow({
+          id: "v2-archive-marker",
+          document_id: "doc-1",
+          version_number: 2,
+          is_current: false,
+          storage_object_id: "so-current",
+        }),
+      ],
+      storageObjectsById,
+    });
+
+    expect(documents).toHaveLength(1);
+    const doc = documents[0];
+
+    expect(doc.versions[doc.versions.length - 1].status).toBe("archived");
+    expect(doc.file_meta).toEqual({
+      filename: "contract.pdf",
+      mime: "application/pdf",
+      size: 4096,
+    });
+    expect(doc.versions[doc.versions.length - 1].storage?.objectPath).toBe(soRow.object_path);
   });
 
   it("leaves storage undefined on document versions with null storage_object_id even when map is provided", () => {
