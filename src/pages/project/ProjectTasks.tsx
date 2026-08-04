@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useParams, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useProject, usePermission, useMedia, useWorkspaceMode } from "@/hooks/use-mock-data";
@@ -87,16 +87,6 @@ function getTaskAssigneeIds(task: Task, t: Translator): string[] {
   return getTaskAssigneeEntries(task, t)
     .map((entry) => entry.id)
     .filter((id): id is string => Boolean(id));
-}
-
-// Identifies a picked file across retries, scoped to the task it was attached to.
-// Re-picking in the file input mints fresh File objects, so identity is not enough;
-// name, size and modification time together are. The task id is part of the key
-// because the skip-list outlives a single prompt session: without it, a photo
-// finalized onto task A would suppress the upload of the same photo onto task B,
-// leaving B with no is_final row while the user believes one was attached.
-function doneFileKey(taskId: string, file: File): string {
-  return `${taskId}:${file.name}:${file.size}:${file.lastModified}`;
 }
 
 const EMPTY_SYNC_STATE = {
@@ -215,21 +205,6 @@ export default function ProjectTasks() {
   const [donePrompt, setDonePrompt] = useState<{ taskId: string; expectedStatus: TaskStatus } | null>(null);
   const [doneFiles, setDoneFiles] = useState<File[]>([]);
   const [doneUploading, setDoneUploading] = useState(false);
-  // Files already finalized, keyed by task (see doneFileKey). A Done confirm uploads
-  // before it changes the status, and a status failure leaves the prompt open with
-  // the same selection, so a retry would attach a second copy of every photo:
-  // nothing rolls back an is_final row and nothing dedupes one server-side.
-  //
-  // Deliberately NOT cleared when a prompt opens or closes. An is_final row survives
-  // the prompt that created it, so the skip-list has to survive it too: clearing on
-  // open left the duplicate-upload defect reachable by abandoning the prompt and
-  // reopening it on the same task. The task id in the key is what makes one long-lived
-  // set safe across tasks.
-  //
-  // Residual, accepted: if a finalized photo is later deleted server-side, re-picking
-  // the identical file in this same mount is skipped rather than re-uploaded. A remount
-  // clears the set.
-  const doneUploadedKeysRef = useRef<Set<string>>(new Set());
   const [doneComment, setDoneComment] = useState("");
 
   // --- Blocked prompt --- (same capture-at-open rule as the Done prompt above)
@@ -389,27 +364,19 @@ export default function ProjectTasks() {
     }
 
     setDoneUploading(true);
-    // Capture the target task and set ONCE, before the first await. The prompt can be
-    // closed mid-upload (the Back button and the backdrop are both live while the
-    // loop runs), so reading `donePrompt` or `.current` after an await could attribute
-    // this loop's results to whatever the user opened next.
-    const uploadTaskId = donePrompt.taskId;
-    const uploadedKeys = doneUploadedKeysRef.current;
     try {
       for (const file of doneFiles) {
-        if (uploadedKeys.has(doneFileKey(uploadTaskId, file))) continue;
         const intent = await prepareUpload({
           mediaType: "photo",
           clientFilename: file.name,
           mimeType: file.type || "image/jpeg",
           sizeBytes: file.size,
           caption: doneComment.trim() || undefined,
-          taskId: uploadTaskId,
+          taskId: donePrompt.taskId,
           isFinal: true,
         });
         await uploadBytes(intent.bucket, intent.objectPath, file);
-        await finalizeUpload(intent.uploadIntentId, { taskId: uploadTaskId, isFinal: true });
-        uploadedKeys.add(doneFileKey(uploadTaskId, file));
+        await finalizeUpload(intent.uploadIntentId, { taskId: donePrompt.taskId, isFinal: true });
       }
 
       const source = await getPlanningSource(

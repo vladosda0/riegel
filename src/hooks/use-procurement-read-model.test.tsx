@@ -160,29 +160,18 @@ describe("useProcurementReadProjectSummary", () => {
     expect(result.current).toBeNull();
   });
 
-  it("produces the same summary in every workspace mode, i.e. carries no mode branch", () => {
-    // The design claim being guarded is narrow and worth stating plainly: the four per-project
-    // hooks each resolve demo / local / Supabase internally, so THIS hook must not branch on
-    // mode at all. Feed identical source data under each mode and require identical output;
-    // adding a mode branch here breaks this test.
-    //
-    // What this does NOT prove: that demo mode reads the browser stores correctly. The source
-    // hooks are mocked, so that path is not exercised here at all -- it belongs to those hooks'
-    // own tests, not to this one.
-    mocks.useProjectProcurementItemsState.mockReturnValue({
-      items: [buildItem()],
-      isLoading: false,
-    });
-
-    const results = (["demo", "local", "supabase"] as const).map((kind) => {
-      mocks.useWorkspaceMode.mockReturnValue(
-        kind === "supabase" ? { kind, profileId: "profile-9" } : { kind },
-      );
-      return renderHook(() => useProcurementReadProjectSummary(PROJECT_ID)).result.current;
-    });
-
-    expect(results[0]?.totalCount).toBe(1);
-    expect(results[1]).toEqual(results[0]);
-    expect(results[2]).toEqual(results[0]);
-  });
+  // NOT tested here, on purpose, after two failed attempts at it:
+  //
+  // "demo mode keeps reading the same browser stores it always did" cannot be pinned from this
+  // file. The hook does not import useWorkspaceMode and nothing in its unmocked import graph
+  // does, so any test that varies the mode varies an input the code never reads -- three
+  // identical renders of a pure useMemo. The first version of that test asserted a totalCount
+  // under `kind: "demo"`; the second asserted equality across three modes. Both were vacuous for
+  // the same reason, and the second was mutation-checked: adding a mode branch to the hook kills
+  // every test in this file, not just that one, so it carried zero incremental signal.
+  //
+  // Pinning the demo claim honestly means not mocking use-procurement-source / use-order-data /
+  // use-inventory-data and driving the real browser stores, which belongs in those hooks' own
+  // tests. Until someone does that, the claim rests on reading the code, and saying so here is
+  // more useful than a green test that proves nothing.
 });

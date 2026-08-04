@@ -171,10 +171,14 @@ export function computeOrderedOpenQty(requestId: string, orders: OrderWithLines[
 }
 
 /**
- * Test-only today: no production caller. Kept in step with `computeRemainingRequestedQty`
- * (it is the same body without the `requiredQty` subtraction) so that whoever does wire it up
- * does not inherit the #216 double-count that this file just removed. Delete it rather than
- * letting the two drift.
+ * No production caller today; the tests are its only consumers, and that is deliberate rather
+ * than an oversight. It is `computeRemainingRequestedQty` without the `requiredQty` subtraction,
+ * so its four assertions pin `countsTowardFulfillment` from a second angle on the same fixtures.
+ *
+ * Contrast with `getProcurementReadProjectSummary`, which this same change DELETED: that one was
+ * dead AND wrong (it routed through a snapshot that is empty in Supabase mode), so leaving it
+ * exported invited a future caller to inherit a defect. This one is dead and correct. If it ever
+ * stops being exercised alongside its twin, delete it rather than letting the two drift.
  */
 export function computeFulfilledQty(requestId: string, orders: OrderWithLines[]): number {
   return orders

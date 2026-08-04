@@ -188,7 +188,22 @@ const AUTOMATION_MODE_TO_LEVEL: Record<AutomationMode, 1 | 2 | 3 | 4> = {
 const VALID_AUTOMATION_MODES: Set<AutomationMode> = new Set(["full", "assisted", "manual", "observer"]);
 const COMPOSER_MAX_HEIGHT = 220;
 const GENERAL_MODE_VALUE = "general";
-const ACTIONABLE_PROPOSAL_PATTERN = /\b(task|add task|create task|estimate|cost|budget|procurement|buy|purchase|material|document|contract|report|generate)\b/i;
+// Keep the stems in step with the four matchers in ai-engine.ts (createProjectProposals).
+// This gate decides whether a prompt sent from Home with no project selected is worth asking
+// "which project?" about and replaying; if it misses, the prompt falls through to the generic
+// text fallback and the Russian journey stays broken even though the engine itself matches.
+// No \b around the Cyrillic alternatives: \b is not stem-safe for Russian inflection
+// («задачи», «задачам»), and the Latin group keeps its own boundaries.
+//
+// KNOWN RESIDUAL, pre-existing and deliberately not widened here: the Latin group keeps its \b,
+// while ai-engine.ts has none, so the two disagree on inflected English. "What tasks are at
+// risk?" matches the ENGINE (/task/ hits "tasks") but not this GATE (\btask\b does not), which
+// is the same dead-end shape this change fixes for Russian, one language over. Closing it means
+// dropping \b from the Latin group too, which widens English matching ("multitasking") and is a
+// behaviour change beyond this fix. The cost of a miss is a generic fallback instead of a
+// project picker; the cost of an over-match is one ignorable proposal card, since the queue is
+// always created with phase "review".
+const ACTIONABLE_PROPOSAL_PATTERN = /\b(task|add task|create task|estimate|cost|budget|procurement|buy|purchase|material|document|contract|report|generate)\b|(задач|смет|бюджет|стоимост|закуп|купи|материал|документ|договор|отч[её]т)/i;
 const LEARN_USER_PROMPT_PATTERN = /^\s*(how|what|why|explain|как|что|почему|объясни|объясните)\b/i;
 const LEARN_LIST_PATTERN = /(?:^|\n)\s*(?:[-*•]|\d+\.)\s+/m;
 

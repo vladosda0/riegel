@@ -196,6 +196,24 @@ describe("generateProposalQueue — Russian prompts", () => {
   it("still reaches no branch for a prompt naming none of the four intents", () => {
     expect(proposalTypes("Предложи график работ", seamForRole("owner", "detail"))).toEqual([]);
   });
+
+  // The two QUESTION chips the sidebar offers contain intent stems, so widening the matchers to
+  // Russian makes them produce proposals where they used to fall through to the text fallback.
+  // That is accepted rather than special-cased, because it is PARITY, not a new behaviour class:
+  // the English originals already match the pre-existing Latin matchers today
+  // (/task/ matches "What tasks are at risk?", /budget/ matches "Explain the budget variance"),
+  // so excluding the Russian forms would make the two languages behave differently, which is the
+  // defect #237 set out to remove. Nothing applies without an explicit per-item confirm: the
+  // queue is always created with phase "review" (AISidebar), so the cost of a wrong match is one
+  // ignored card. Pinned here so a future reader sees it was measured, not missed.
+  it("lets the Russian question chips reach a branch, matching what the English ones already do", () => {
+    const seam = seamForRole("owner", "detail");
+    expect(proposalTypes("Какие задачи в зоне риска?", seam)).toContain("add_task");
+    expect(proposalTypes("Объясни отклонение по бюджету", seam)).toContain("update_estimate");
+    // The English originals, for the parity claim above.
+    expect(proposalTypes("What tasks are at risk?", seam)).toContain("add_task");
+    expect(proposalTypes("Explain the budget variance", seam)).toContain("update_estimate");
+  });
 });
 
 // ---------------------------------------------------------------------------
