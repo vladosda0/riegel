@@ -160,18 +160,39 @@ describe("useProcurementReadProjectSummary", () => {
     expect(result.current).toBeNull();
   });
 
-  // NOT tested here, on purpose, after two failed attempts at it:
+  // This test was deleted once, on the reasoning that it "varies an input the code never reads"
+  // and that a mode branch would be caught by the other three anyway. **That reasoning was wrong
+  // and the deletion was reverted.** Measured rather than argued this time: import
+  // useWorkspaceMode from @/hooks/use-workspace-source (the module this file actually mocks, NOT
+  // use-mock-data, whose mock exports only useProject and makes the mutation crash instead of
+  // fail) and add `if (mode.kind === "demo") return null;` to the useMemo. With this test present
+  // the mutation is killed by exactly one test -- this one. With it absent the other three all
+  // PASS, because each of them sets `kind: "supabase"` in its own body, so a demo-only branch is
+  // invisible to every one of them.
   //
-  // "demo mode keeps reading the same browser stores it always did" cannot be pinned from this
-  // file. The hook does not import useWorkspaceMode and nothing in its unmocked import graph
-  // does, so any test that varies the mode varies an input the code never reads -- three
-  // identical renders of a pure useMemo. The first version of that test asserted a totalCount
-  // under `kind: "demo"`; the second asserted equality across three modes. Both were vacuous for
-  // the same reason, and the second was mutation-checked: adding a mode branch to the hook kills
-  // every test in this file, not just that one, so it carried zero incremental signal.
+  // It is true that the hook reads no mode today, and that is precisely the invariant worth
+  // pinning: the doc comment on useProcurementReadProjectSummary states "this needs no mode
+  // branch of its own", and mode-dependent blindness IS the #215 defect class. The realistic
+  // regression is a future reader told "demo is broken" adding exactly that branch.
   //
-  // Pinning the demo claim honestly means not mocking use-procurement-source / use-order-data /
-  // use-inventory-data and driving the real browser stores, which belongs in those hooks' own
-  // tests. Until someone does that, the claim rests on reading the code, and saying so here is
-  // more useful than a green test that proves nothing.
+  // Still NOT proven by this test, and worth being honest about: that demo mode reads the browser
+  // stores correctly. The source hooks are mocked, so that path is not exercised here at all; it
+  // belongs to those hooks' own tests.
+  it("produces the same summary in every workspace mode, i.e. carries no mode branch", () => {
+    mocks.useProjectProcurementItemsState.mockReturnValue({
+      items: [buildItem()],
+      isLoading: false,
+    });
+
+    const results = (["demo", "local", "supabase"] as const).map((kind) => {
+      mocks.useWorkspaceMode.mockReturnValue(
+        kind === "supabase" ? { kind, profileId: "profile-9" } : { kind },
+      );
+      return renderHook(() => useProcurementReadProjectSummary(PROJECT_ID)).result.current;
+    });
+
+    expect(results[0]?.totalCount).toBe(1);
+    expect(results[1]).toEqual(results[0]);
+    expect(results[2]).toEqual(results[0]);
+  });
 });

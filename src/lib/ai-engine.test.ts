@@ -201,7 +201,7 @@ describe("generateProposalQueue — Russian prompts", () => {
   // Russian makes them produce proposals where they used to fall through to the text fallback.
   // That is accepted rather than special-cased, because it is PARITY, not a new behaviour class:
   // the English originals already match the pre-existing Latin matchers today
-  // (/task/ matches "What tasks are at risk?", /budget/ matches "Explain the budget variance"),
+  // (/task/ matches "Which tasks are at risk?", /budget/ matches "Explain the budget variance"),
   // so excluding the Russian forms would make the two languages behave differently, which is the
   // defect #237 set out to remove. Nothing applies without an explicit per-item confirm: the
   // queue is always created with phase "review" (AISidebar), so the cost of a wrong match is one
@@ -211,7 +211,7 @@ describe("generateProposalQueue — Russian prompts", () => {
     expect(proposalTypes("Какие задачи в зоне риска?", seam)).toContain("add_task");
     expect(proposalTypes("Объясни отклонение по бюджету", seam)).toContain("update_estimate");
     // The English originals, for the parity claim above.
-    expect(proposalTypes("What tasks are at risk?", seam)).toContain("add_task");
+    expect(proposalTypes("Which tasks are at risk?", seam)).toContain("add_task");
     expect(proposalTypes("Explain the budget variance", seam)).toContain("update_estimate");
   });
 });

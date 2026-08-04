@@ -195,14 +195,22 @@ const GENERAL_MODE_VALUE = "general";
 // No \b around the Cyrillic alternatives: \b is not stem-safe for Russian inflection
 // («задачи», «задачам»), and the Latin group keeps its own boundaries.
 //
-// KNOWN RESIDUAL, pre-existing and deliberately not widened here: the Latin group keeps its \b,
-// while ai-engine.ts has none, so the two disagree on inflected English. "What tasks are at
-// risk?" matches the ENGINE (/task/ hits "tasks") but not this GATE (\btask\b does not), which
-// is the same dead-end shape this change fixes for Russian, one language over. Closing it means
-// dropping \b from the Latin group too, which widens English matching ("multitasking") and is a
-// behaviour change beyond this fix. The cost of a miss is a generic fallback instead of a
-// project picker; the cost of an over-match is one ignorable proposal card, since the queue is
-// always created with phase "review".
+// KNOWN RESIDUAL, pre-existing, measured rather than estimated: the Latin group keeps its \b
+// while ai-engine.ts has none, so the two disagree on inflected English. Enumerating all 16
+// ai.sidebar.suggestion.* values against both regexes, FOUR English chips match the ENGINE but
+// miss this GATE, and therefore still dead-end in the generic fallback on Home with no project
+// selected:
+//   "Add tasks"                        (\btask\b and \badd task\b both fail on "tasks")
+//   "Compare estimates"
+//   "Which tasks are at risk?"
+//   "Draft an invite for a contractor"
+// Their Russian counterparts are fixed by this change, so English is now the weaker side of the
+// same dead end — the #237 defect inverted, not closed. Closing it means dropping \b from the
+// Latin group so this gate mirrors the engine exactly; that widens English matching, though note
+// the un-anchored Cyrillic group added here already accepts the equivalent («многозадачность»
+// matches via «задач»), so the asymmetry is in the anchoring, not in the principle.
+// The cost of a miss is a generic fallback instead of a project picker; the cost of an over-match
+// is one ignorable proposal card, since the queue is always created with phase "review".
 const ACTIONABLE_PROPOSAL_PATTERN = /\b(task|add task|create task|estimate|cost|budget|procurement|buy|purchase|material|document|contract|report|generate)\b|(задач|смет|бюджет|стоимост|закуп|купи|материал|документ|договор|отч[её]т)/i;
 const LEARN_USER_PROMPT_PATTERN = /^\s*(how|what|why|explain|как|что|почему|объясни|объясните)\b/i;
 const LEARN_LIST_PATTERN = /(?:^|\n)\s*(?:[-*•]|\d+\.)\s+/m;
