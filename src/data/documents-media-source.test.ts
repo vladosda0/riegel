@@ -702,6 +702,78 @@ describe("documents-media-source helpers", () => {
     expect(doc.versions[doc.versions.length - 1].storage?.objectPath).toBe(soRow.object_path);
   });
 
+  it("heals a document archived before the #243 fix: null-link marker, earlier linked version", () => {
+    const soRow = storageObjectRow({
+      id: "so-real",
+      filename: "act.pdf",
+      mime_type: "application/pdf",
+      size_bytes: 2048,
+    });
+    const storageObjectsById = new Map([[soRow.id, soRow]]);
+
+    const documents = shapeDocumentsWithVersions({
+      documentRows: [
+        documentRow({ id: "doc-1", title: "Archived pre-fix" }),
+      ],
+      versionRows: [
+        documentVersionRow({
+          id: "v1",
+          document_id: "doc-1",
+          version_number: 1,
+          is_current: false,
+          storage_object_id: "so-real",
+        }),
+        // A pre-#243 archive marker: newest row, no storage link.
+        documentVersionRow({
+          id: "v2-null-marker",
+          document_id: "doc-1",
+          version_number: 2,
+          is_current: false,
+          storage_object_id: null,
+        }),
+      ],
+      storageObjectsById,
+    });
+
+    expect(documents).toHaveLength(1);
+    const doc = documents[0];
+    expect(doc.versions[doc.versions.length - 1].status).toBe("archived");
+    // file_meta falls back past the null marker to the newest LINKED version.
+    expect(doc.file_meta).toEqual({
+      filename: "act.pdf",
+      mime: "application/pdf",
+      size: 2048,
+    });
+  });
+
+  it("still yields no file_meta when no version of an archived document has a storage link", () => {
+    const documents = shapeDocumentsWithVersions({
+      documentRows: [
+        documentRow({ id: "doc-1", title: "Never linked" }),
+      ],
+      versionRows: [
+        documentVersionRow({
+          id: "v1",
+          document_id: "doc-1",
+          version_number: 1,
+          is_current: false,
+          storage_object_id: null,
+        }),
+        documentVersionRow({
+          id: "v2-null-marker",
+          document_id: "doc-1",
+          version_number: 2,
+          is_current: false,
+          storage_object_id: null,
+        }),
+      ],
+      storageObjectsById: new Map(),
+    });
+
+    expect(documents).toHaveLength(1);
+    expect(documents[0].file_meta).toBeUndefined();
+  });
+
   it("leaves storage undefined on document versions with null storage_object_id even when map is provided", () => {
     const storageObjectsById = new Map<string, ReturnType<typeof storageObjectRow>>();
 
