@@ -45,7 +45,12 @@ export function OrgMediaView() {
 
   function handleDownload(doc: OrgDoc) {
     if (!doc.bucket || !doc.objectPath) return;
-    void downloadStorageUrl(doc.bucket, doc.objectPath, doc.title);
+    void downloadStorageUrl(doc.bucket, doc.objectPath, doc.title).then((ok) => {
+      // rovno #284 round 3: the helper reports every failure (signing, HTTP,
+      // network) through its return value - discarding it made a dead object a
+      // silent no-op in this view while ProjectDocuments showed a toast.
+      if (!ok) toast({ title: t("documents.preview.downloadFailed"), variant: "destructive" });
+    });
   }
   function handleViewInNewTab(doc: OrgDoc) {
     if (!doc.bucket || !doc.objectPath) return;

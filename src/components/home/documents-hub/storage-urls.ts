@@ -22,8 +22,28 @@ const SIGNED_URL_TTL_SECONDS = 3600;
 // eslint-disable-next-line no-control-regex
 const UNSAFE_FILENAME_CHARS = /[<>:"/\\|?*\u0000-\u001f\u007f]+/g;
 
-/** Longest basename we will ask a filesystem to store; APFS/ext4 cap names at 255 bytes. */
-const MAX_FILENAME_CHARS = 200;
+/**
+ * Longest name we will ask a filesystem to store. APFS/ext4 cap names at 255
+ * BYTES, not characters, and this app's names are mostly Cyrillic - two UTF-8
+ * bytes per letter - so a character cap of 200 would still overflow the real
+ * limit (round-3 finding: the stated invariant failed for exactly the Russian
+ * titles the examples in this file use). Measure in encoded bytes.
+ */
+const MAX_FILENAME_BYTES = 200;
+
+const utf8 = new TextEncoder();
+
+/** Trim to the byte budget on a character boundary, keeping the extension. */
+function capFilenameBytes(name: string): string {
+  if (utf8.encode(name).length <= MAX_FILENAME_BYTES) return name;
+  const extension = FILENAME_EXTENSION_RE.exec(name)?.[0] ?? "";
+  const budget = MAX_FILENAME_BYTES - utf8.encode(extension).length;
+  let base = name.slice(0, name.length - extension.length);
+  while (base.length > 0 && utf8.encode(base).length > budget) {
+    base = base.slice(0, -1);
+  }
+  return base.trimEnd() + extension;
+}
 
 const FILENAME_EXTENSION_RE = /\.[A-Za-z0-9]{1,8}$/;
 
@@ -43,11 +63,7 @@ export function sanitizeDownloadFilename(filename: string, fallback = "document"
     .trim();
   if (!cleaned) return fallback;
   if (cleaned.startsWith(".")) cleaned = `${fallback}${cleaned}`;
-  if (cleaned.length > MAX_FILENAME_CHARS) {
-    const extension = FILENAME_EXTENSION_RE.exec(cleaned)?.[0] ?? "";
-    cleaned = cleaned.slice(0, MAX_FILENAME_CHARS - extension.length).trimEnd() + extension;
-  }
-  return cleaned;
+  return capFilenameBytes(cleaned);
 }
 
 /**
@@ -69,10 +85,28 @@ export function ensureFilenameExtension(filename: string, objectPath: string): s
   return extension ? `${filename}${extension}` : filename;
 }
 
-/** Helper to fetch a signed URL imperatively (for view buttons on tiles). */
+/**
+ * Open a storage object in a new tab (the hub tiles' "view" action).
+ *
+ * The tab is opened SYNCHRONOUSLY, inside the user's click, and pointed at the
+ * signed URL only once signing resolves. `window.open` after an await is
+ * subject to transient-activation limits (the same popup-blocker exposure the
+ * download path was rebuilt to avoid), so a slow signing round trip would
+ * intermittently swallow the click. On failure the placeholder tab is closed
+ * again and the caller gets false.
+ */
 export async function openStorageUrlInNewTab(bucket: string, objectPath: string): Promise<boolean> {
+  const tab = window.open("about:blank", "_blank", "noopener,noreferrer");
   const { data, error } = await supabase.storage.from(bucket).createSignedUrl(objectPath, SIGNED_URL_TTL_SECONDS);
-  if (error || !data?.signedUrl) return false;
+  if (error || !data?.signedUrl) {
+    tab?.close();
+    return false;
+  }
+  if (tab) {
+    tab.location.href = data.signedUrl;
+    return true;
+  }
+  // The popup was blocked even synchronously; last resort, same-tab-safe fallback.
   window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   return true;
 }

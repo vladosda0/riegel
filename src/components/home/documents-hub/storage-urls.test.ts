@@ -11,6 +11,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 import {
   downloadStorageUrl,
   ensureFilenameExtension,
+  openStorageUrlInNewTab,
   sanitizeDownloadFilename,
 } from "./storage-urls";
 
@@ -47,11 +48,23 @@ describe("sanitizeDownloadFilename", () => {
     expect(sanitizeDownloadFilename(".pdf")).toBe("document.pdf");
   });
 
-  it("caps overlong names while keeping the extension", () => {
+  it("caps overlong names by ENCODED BYTES, not characters, keeping the extension", () => {
+    // APFS/ext4 limit filenames at 255 bytes and Cyrillic is 2 bytes per
+    // letter, so a char-based cap of 200 (an earlier revision) still violated
+    // the invariant for exactly this app's typical names.
     const long = `${"й".repeat(300)}.xlsx`;
     const result = sanitizeDownloadFilename(long);
-    expect(result.length).toBeLessThanOrEqual(200);
+    expect(new TextEncoder().encode(result).length).toBeLessThanOrEqual(200);
     expect(result.endsWith(".xlsx")).toBe(true);
+    // And a name comfortably under the byte budget is untouched.
+    const fits = `${"й".repeat(90)}.xlsx`;
+    expect(sanitizeDownloadFilename(fits)).toBe(fits);
+    // The discriminating case: 155 CHARS (a char-based cap would wave it
+    // through) but 305 BYTES. This is the exact shape a char-cap mutant
+    // survived on until this assertion existed.
+    const charOkBytesOver = `${"й".repeat(150)}.xlsx`;
+    expect(charOkBytesOver.length).toBeLessThanOrEqual(200);
+    expect(new TextEncoder().encode(sanitizeDownloadFilename(charOkBytesOver)).length).toBeLessThanOrEqual(200);
   });
 });
 
@@ -141,6 +154,22 @@ describe("downloadStorageUrl", () => {
     expect(clickSpy).not.toHaveBeenCalled();
   });
 
+  it("revokes the object URL only after Safari has had time to start the save", async () => {
+    // A mutant making the revoke immediate survived until this pin existed;
+    // an eagerly revoked URL breaks Safari saves and nothing else notices.
+    vi.useFakeTimers();
+    try {
+      signOk();
+      fetchMock.mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob(["x"])) });
+      await downloadStorageUrl("b", "p/x.pdf", "n.pdf");
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(10_000);
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock-object-url");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("never opens a window or navigates - the failure modes stay in this function", async () => {
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
     signOk();
@@ -149,6 +178,40 @@ describe("downloadStorageUrl", () => {
     await downloadStorageUrl("b", "p/x.pdf", "n.pdf");
 
     expect(openSpy).not.toHaveBeenCalled();
+    openSpy.mockRestore();
+  });
+});
+
+describe("openStorageUrlInNewTab", () => {
+  beforeEach(() => { mockCreateSignedUrl.mockReset(); });
+
+  it("opens the tab synchronously inside the click, then points it at the signed URL", async () => {
+    // window.open after an await is transient-activation territory (the same
+    // popup-blocker exposure the download path was rebuilt to avoid), so the
+    // placeholder tab must exist BEFORE signing resolves.
+    let openedBeforeSigning = false;
+    const fakeTab = { location: { href: "" }, close: vi.fn() };
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => fakeTab as unknown as Window);
+    mockCreateSignedUrl.mockImplementation(() => {
+      openedBeforeSigning = openSpy.mock.calls.length > 0;
+      return Promise.resolve({ data: { signedUrl: "https://signed.example/v" }, error: null });
+    });
+
+    expect(await openStorageUrlInNewTab("b", "p/x.pdf")).toBe(true);
+    expect(openedBeforeSigning).toBe(true);
+    expect(fakeTab.location.href).toBe("https://signed.example/v");
+    expect(fakeTab.close).not.toHaveBeenCalled();
+    openSpy.mockRestore();
+  });
+
+  it("closes the placeholder tab and returns false when signing fails", async () => {
+    const fakeTab = { location: { href: "" }, close: vi.fn() };
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => fakeTab as unknown as Window);
+    mockCreateSignedUrl.mockResolvedValue({ data: null, error: { message: "denied" } });
+
+    expect(await openStorageUrlInNewTab("b", "p/x.pdf")).toBe(false);
+    expect(fakeTab.close).toHaveBeenCalled();
+    expect(fakeTab.location.href).toBe("");
     openSpy.mockRestore();
   });
 });

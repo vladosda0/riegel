@@ -622,18 +622,11 @@ export default function ProjectDocuments() {
   /**
    * Download the document currently open in the preview dialog.
    *
-   * rovno #284 slice S2. This used to be `window.open(previewUrl)`, which is not
-   * a download at all: the preview signed URL carries no `Content-Disposition`,
-   * so the browser decided what to do with it. A PDF opened in a new tab instead
-   * of saving, the saved name was whatever the URL implied rather than the real
-   * filename, and the whole thing was one popup-blocker away from doing nothing.
-   *
-   * `downloadStorageUrl` mints a SEPARATE signed URL with `{ download: filename }`
-   * (Supabase then sends `Content-Disposition: attachment`) and clicks an
-   * `<a download>`. The query parameter is the load-bearing half: the `download`
-   * attribute alone is ignored on a cross-origin href, which is exactly what a
-   * storage URL is. That helper also sanitizes the filename and opens in a new
-   * context so a failed fetch cannot navigate the SPA away; see storage-urls.ts.
+   * rovno #284 slice S2. The original code was `window.open(previewUrl)`, which
+   * is not a download at all. The mechanism now lives in storage-urls.ts
+   * (fetch -> blob -> object URL - see its header for why that design and not
+   * the two that preceded it). This handler owns only the page concerns: mode
+   * dispatch, the in-flight guard, the filename choice, and the failure toast.
    */
   async function handleDownloadViewedDocument() {
     if (!viewDoc || !latestViewedVersion || downloadingViewedDocument) return;

@@ -418,6 +418,12 @@ describe("ProjectDocuments", () => {
 
       await vi.waitFor(() => { expect(mockToast).toHaveBeenCalled(); });
       expect(clickSpy).not.toHaveBeenCalled();
+      // The toast says «Попробуй ещё раз», so the button must actually allow a
+      // retry: pin the finally-reset of the in-flight flag. A round-3 mutant
+      // deleting that reset survived every test until this assertion existed.
+      await vi.waitFor(() => {
+        expect(screen.getByRole("button", { name: "Download" })).not.toBeDisabled();
+      });
     });
 
     it("does not start a second download while the first is in flight", async () => {
@@ -457,6 +463,8 @@ describe("ProjectDocuments", () => {
       // releasing ALL of them would surface 3 anchor clicks here.
       await vi.waitFor(() => { expect(clickSpy).toHaveBeenCalledTimes(1); });
       expect(fetchMock).toHaveBeenCalledTimes(1);
+      // And the flag must clear once the flight lands - see the failure test.
+      await vi.waitFor(() => { expect(button).not.toBeDisabled(); });
     });
 
     // Regression guard, and nothing more: it asserts the disabled gate still
