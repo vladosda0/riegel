@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FileInput } from "@/components/ui/file-input";
+import { DOCUMENT_UPLOAD_ACCEPT } from "@/lib/document-file-types";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -281,6 +282,7 @@ export function UploadDocumentDialog({
           <div className="space-y-1">
             <Label className="text-body-sm font-medium">{t("home.upload.fileLabel")}</Label>
             <FileInput
+              accept={DOCUMENT_UPLOAD_ACCEPT}
               disabled={submitting}
               onChange={(e) => {
                 const f = e.target.files?.[0] ?? null;

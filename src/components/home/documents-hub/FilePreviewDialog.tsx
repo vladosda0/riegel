@@ -315,25 +315,3 @@ export function FilePreviewDialog({ doc, open, onOpenChange }: FilePreviewDialog
     </Dialog>
   );
 }
-
-/** Helper to fetch a signed URL imperatively (for download/view buttons on tiles). */
-export async function openStorageUrlInNewTab(bucket: string, objectPath: string): Promise<boolean> {
-  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(objectPath, 3600);
-  if (error || !data?.signedUrl) return false;
-  window.open(data.signedUrl, "_blank", "noopener,noreferrer");
-  return true;
-}
-
-export async function downloadStorageUrl(bucket: string, objectPath: string, filename: string): Promise<boolean> {
-  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(objectPath, 3600, {
-    download: filename,
-  });
-  if (error || !data?.signedUrl) return false;
-  const link = document.createElement("a");
-  link.href = data.signedUrl;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  return true;
-}

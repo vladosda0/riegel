@@ -758,7 +758,7 @@
   "quickActions.document.defaultDescription": "Загрузи документ или создай его вручную.",
   "quickActions.document.modeUpload": "Загрузить",
   "quickActions.document.modeManual": "Вручную",
-  "quickActions.document.supabaseBanner": "В режиме Supabase сохраняется только запись документа. Файл, скачивание и шаринг появятся позже.",
+  "quickActions.document.supabaseBanner": "В режиме Supabase сохраняется только запись документа. Файл, скачивание и общий доступ появятся позже.",
   "quickActions.document.fileLabel": "Файл",
   "quickActions.document.supabaseFileHint": "Выбери имя файла, чтобы создать запись сейчас. Сам файл пока не будет загружен.",
   "quickActions.document.aiScan": "ИИ-сканирование",

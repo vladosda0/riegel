@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FileInput } from "@/components/ui/file-input";
 import { DOCUMENT_UPLOAD_ACCEPT } from "@/lib/document-file-types";
-import { downloadStorageUrl } from "@/components/home/documents-hub/FilePreviewDialog";
+import { downloadStorageUrl } from "@/components/home/documents-hub/storage-urls";
 import { Textarea } from "@/components/ui/textarea";
 import {
   AlertDialog,
@@ -87,7 +87,7 @@ import {
   addEvent,
   deleteDocument as deleteDocumentLocal,
 } from "@/data/store";
-import type { DocMediaVisibilityClass, Document as DocType } from "@/types/entities";
+import type { DocMediaVisibilityClass, Document as DocType, StorageObjectMeta } from "@/types/entities";
 import {
   canViewInternalDocuments,
   effectiveInternalDocsVisibilityForSeam,
@@ -170,6 +170,26 @@ function buildDocumentDownloadName(title: string) {
   return `${normalized || "document"}.txt`;
 }
 
+/**
+ * The name a STORED document should be saved under.
+ *
+ * rovno #284. The stored filename is preferred because it carries the real
+ * extension. `buildDocumentDownloadName` above is deliberately NOT the fallback:
+ * it appends `.txt`, which is right for the inline-text path it was written for
+ * and would label a .docx as text.
+ *
+ * But a bare document title is not an acceptable fallback either - it has no
+ * extension at all, so the OS cannot open the saved file, which is strictly
+ * worse than a wrong one. Recover the extension from the object path, which is
+ * server-generated and always carries it.
+ */
+function resolveDownloadFilename(storage: StorageObjectMeta, title: string): string {
+  const stored = storage.filename?.trim();
+  if (stored) return stored;
+  const extension = /\.[A-Za-z0-9]{1,8}$/.exec(storage.objectPath)?.[0] ?? "";
+  return `${title.trim() || "document"}${extension}`;
+}
+
 function formatDocumentDate(timestamp?: string) {
   if (!timestamp) return null;
   const date = new Date(timestamp);
@@ -202,6 +222,7 @@ export default function ProjectDocuments() {
   const canManageDocuments = resolveActionState(perm.role, "documents_media", "rename_or_archive") === "enabled";
   const canCommentOnDocuments = !isSupabaseMode && projectDomainAllowsContribute(commentsAccess);
 
+  const [downloadingViewedDocument, setDownloadingViewedDocument] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadVisibilityClass, setUploadVisibilityClass] = useState<DocMediaVisibilityClass>("shared_project");
@@ -631,10 +652,11 @@ export default function ProjectDocuments() {
    * (Supabase then sends `Content-Disposition: attachment`) and clicks an
    * `<a download>`. The query parameter is the load-bearing half: the `download`
    * attribute alone is ignored on a cross-origin href, which is exactly what a
-   * storage URL is.
+   * storage URL is. That helper also sanitizes the filename and opens in a new
+   * context so a failed fetch cannot navigate the SPA away; see storage-urls.ts.
    */
   async function handleDownloadViewedDocument() {
-    if (!viewDoc || !latestViewedVersion) return;
+    if (!viewDoc || !latestViewedVersion || downloadingViewedDocument) return;
 
     // Local/demo mode has no storage object; the body is inline text.
     if (!isSupabaseMode) {
@@ -642,16 +664,25 @@ export default function ProjectDocuments() {
       return;
     }
 
-    const storage = latestViewedVersion.storage;
-    if (!storage?.bucket || !storage?.objectPath) return;
+    if (!viewedStorage?.bucket || !viewedStorage?.objectPath) return;
 
-    // Prefer the stored filename: it carries the real extension. Falling back to
-    // `buildDocumentDownloadName` would be wrong here - it appends `.txt`, which
-    // is right for the inline-text path above and would mislabel a .docx.
-    const filename = storage.filename?.trim() || viewDoc.title;
-    const ok = await downloadStorageUrl(storage.bucket, storage.objectPath, filename);
-    if (!ok) {
-      toast({ title: t("documents.preview.downloadFailed"), variant: "destructive" });
+    // rovno #284. Signing is a network round trip, and this handler is async
+    // where the code it replaced was synchronous. Without an in-flight flag a
+    // second click during that round trip mints a second signed URL and saves a
+    // second copy - and the absence of any feedback while waiting is exactly
+    // what provokes the second click.
+    setDownloadingViewedDocument(true);
+    try {
+      const ok = await downloadStorageUrl(
+        viewedStorage.bucket,
+        viewedStorage.objectPath,
+        resolveDownloadFilename(viewedStorage, viewDoc.title),
+      );
+      if (!ok) {
+        toast({ title: t("documents.preview.downloadFailed"), variant: "destructive" });
+      }
+    } finally {
+      setDownloadingViewedDocument(false);
     }
   }
 
@@ -661,7 +692,20 @@ export default function ProjectDocuments() {
 
   const latestViewedVersion = viewDoc?.versions[viewDoc.versions.length - 1];
   const viewedDocumentIsArchived = latestViewedVersion?.status === "archived";
-  const viewedStorage = latestViewedVersion?.storage;
+  /**
+   * rovno #284, and the other half of #243.
+   *
+   * A document archived BEFORE the #243 fix shipped carries a marker version
+   * with `storage_object_id = null`. `shapeDocumentsWithVersions` already heals
+   * that - but only into `file_meta`, which is what the LIST row renders. The
+   * preview effect and the Download button read the VERSION's storage instead,
+   * so those documents showed their filename in the list and then had a dead
+   * preview and a permanently disabled Download button: the file looked present
+   * and was unreachable. Mirror the mapper's fallback here, so the newest
+   * version that actually materialized a file is the one we preview and hand back.
+   */
+  const viewedStorage = latestViewedVersion?.storage
+    ?? [...(viewDoc?.versions ?? [])].reverse().find((version) => version.storage)?.storage;
   const viewedMimeType = viewedStorage?.mimeType ?? viewDoc?.file_meta?.mime ?? null;
   const canDownloadViewedDocument = Boolean(
     viewDoc
@@ -1244,7 +1288,7 @@ export default function ProjectDocuments() {
                     size="sm"
                     variant="outline"
                     onClick={() => { void handleDownloadViewedDocument(); }}
-                    disabled={!canDownloadViewedDocument}
+                    disabled={!canDownloadViewedDocument || downloadingViewedDocument}
                   >
                     <Download className="h-3.5 w-3.5 mr-1.5" /> {t("documents.preview.action.download")}
                   </Button>

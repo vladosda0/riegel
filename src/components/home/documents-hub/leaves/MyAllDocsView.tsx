@@ -6,12 +6,8 @@ import { useWorkspaceDocuments, type WorkspaceDoc } from "@/hooks/use-workspace-
 import { SectionChrome } from "@/components/home/documents-hub/SectionChrome";
 import { TileGrid, FileTile } from "@/components/home/documents-hub/tiles";
 import { EmptyState } from "@/components/home/documents-hub/EmptyState";
-import {
-  FilePreviewDialog,
-  downloadStorageUrl,
-  openStorageUrlInNewTab,
-  type PreviewableDocument,
-} from "@/components/home/documents-hub/FilePreviewDialog";
+import { FilePreviewDialog, type PreviewableDocument } from "@/components/home/documents-hub/FilePreviewDialog";
+import { downloadStorageUrl, openStorageUrlInNewTab } from "@/components/home/documents-hub/storage-urls";
 import { toast } from "@/hooks/use-toast";
 import { useSectionFilters } from "@/hooks/use-section-filters";
 

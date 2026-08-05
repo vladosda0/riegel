@@ -1,28 +1,55 @@
 /**
- * The file types the document uploader offers in the OS file picker.
+ * The file types the document uploaders offer in the OS file picker.
  *
- * Scope note (rovno #284, slice S6): this is a UX hint, NOT a validation gate.
- * `accept` narrows the picker's default filter and a user can still override it,
- * so nothing here is a security or integrity control - the backend and RLS remain
- * the only real gates.
+ * Scope note (rovno #284, slice S6). `accept` is a picker filter, never a
+ * validation gate: the backend and RLS remain the only real gates, and
+ * `prepare_document_upload` accepts an arbitrary mime string regardless.
  *
- * The list covers what the product can handle END TO END, meaning store and hand
- * back. That is deliberately WIDER than what it can preview inline: today only
- * `image/*` and `application/pdf` render in the preview dialog (slice S4 tracks
- * the rest), but an .xlsx or .docx contract still uploads, downloads and versions
- * correctly, so refusing it at the picker would remove a working capability to
- * paper over a missing one.
+ * But do NOT read that as "harmless, so keep it tight". On DESKTOP the user can
+ * escape it via the picker's "All Files" option; on iOS and Android the Files
+ * picker ENFORCES it with no such escape, so anything missing here is a format
+ * a phone user simply cannot attach. An earlier revision of this comment claimed
+ * the list was merely a hint and was wrong on exactly that point.
+ *
+ * So the list is deliberately GENEROUS, and covers what the product handles end
+ * to end (store, version, hand back) rather than what it can preview inline.
+ * Only `image/*` and `application/pdf` render in the preview dialog today - slice
+ * S4 tracks the rest - but a .pptx or .dwg uploads and downloads correctly, and
+ * refusing it at the picker would remove a working capability to paper over a
+ * missing one. When in doubt, add the extension: the cost of a wrong inclusion
+ * is a file nobody previews, and the cost of a wrong exclusion is a user on a
+ * phone who cannot attach their document at all.
+ *
+ * HEIC/HEIF are spelled out explicitly because `image/*` alone does not match
+ * them in some Android browsers. `ProjectGallery.tsx` already does the same.
  */
 export const DOCUMENT_UPLOAD_ACCEPT = [
   "image/*",
+  ".heic",
+  ".heif",
+  // documents
   ".pdf",
   ".doc",
   ".docx",
+  ".odt",
+  ".rtf",
+  ".txt",
+  ".pages",
+  // spreadsheets
   ".xls",
   ".xlsx",
-  ".csv",
-  ".txt",
-  ".rtf",
-  ".odt",
   ".ods",
+  ".csv",
+  ".numbers",
+  // presentations
+  ".ppt",
+  ".pptx",
+  ".odp",
+  ".key",
+  // drawings and archives (delivered as-is; no preview, but they round-trip)
+  ".dwg",
+  ".dxf",
+  ".zip",
+  ".rar",
+  ".7z",
 ].join(",");

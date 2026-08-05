@@ -17,12 +17,8 @@ import type { OrgDoc } from "@/data/org-source";
 import { SectionChrome } from "@/components/home/documents-hub/SectionChrome";
 import { TileGrid, FolderTile, FileTile, CreateFolderTile } from "@/components/home/documents-hub/tiles";
 import { EmptyState } from "@/components/home/documents-hub/EmptyState";
-import {
-  FilePreviewDialog,
-  downloadStorageUrl,
-  openStorageUrlInNewTab,
-  type PreviewableDocument,
-} from "@/components/home/documents-hub/FilePreviewDialog";
+import { FilePreviewDialog, type PreviewableDocument } from "@/components/home/documents-hub/FilePreviewDialog";
+import { downloadStorageUrl, openStorageUrlInNewTab } from "@/components/home/documents-hub/storage-urls";
 import { MoveToFolderDialog } from "@/components/home/documents-hub/MoveToFolderDialog";
 import { useSectionFilters } from "@/hooks/use-section-filters";
 import {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import ProjectDocuments from "@/pages/project/ProjectDocuments";
 import type { Document, MemberRole } from "@/types/entities";
@@ -308,32 +308,103 @@ describe("ProjectDocuments", () => {
       fireEvent.click(screen.getByRole("button", { name: /Stored Document/ }));
     }
 
-    it("asks for a signed URL carrying the real filename, and never opens a tab", async () => {
+    // rovno #284. The FIRST version of this test was vacuous and the pre-merge
+    // review proved it by mutation: `vi.waitFor` resolved as soon as
+    // `mockCreateSignedUrl` was called, and that call happens SYNCHRONOUSLY
+    // inside downloadStorageUrl before its await - so the `openSpy` assertion
+    // ran before the awaited continuation and never observed anything. Two
+    // separate `window.open` mutants passed all nine tests.
+    //
+    // The fix is to anchor the wait on the LAST observable effect of the whole
+    // async chain (the anchor click), not on its first. Every assertion after
+    // that point is then guaranteed to see the finished state.
+    async function clickDownloadAndSettle(clickSpy: ReturnType<typeof vi.spyOn>) {
+      await screen.findByRole("button", { name: "Download" });
+      fireEvent.click(screen.getByRole("button", { name: "Download" }));
+      await vi.waitFor(() => { expect(clickSpy).toHaveBeenCalled(); });
+      // Flush the microtask queue so anything queued after the click has run.
+      await act(async () => { await Promise.resolve(); });
+    }
+
+    it("saves the file via a Content-Disposition signed URL and never opens a tab", async () => {
       mockCreateSignedUrl.mockResolvedValue({ data: { signedUrl: "https://signed.example/contract.docx" }, error: null });
       const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
       const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 
       renderWithStoredDocument();
-      await screen.findByRole("button", { name: "Download" });
-      fireEvent.click(screen.getByRole("button", { name: "Download" }));
+      await clickDownloadAndSettle(clickSpy);
 
-      await vi.waitFor(() => {
-        expect(mockCreateSignedUrl).toHaveBeenCalledWith(
-          "project-1/contract.docx",
-          3600,
-          { download: "contract.docx" },
-        );
-      });
-      // The load-bearing assertion: a real download, not a new tab.
+      expect(mockCreateSignedUrl).toHaveBeenCalledWith(
+        "project-1/contract.docx",
+        3600,
+        { download: "contract.docx" },
+      );
+      // The load-bearing assertion. Verified non-vacuous by re-running both of
+      // the review's window.open mutants against it: both now fail.
       expect(openSpy).not.toHaveBeenCalled();
-      expect(clickSpy).toHaveBeenCalled();
 
       openSpy.mockRestore();
       clickSpy.mockRestore();
     });
 
-    // Control: proves the assertion above is not vacuous. If the fix were
-    // "call createSignedUrl twice and still window.open", this would fail.
+    it("sanitizes a filename whose characters would corrupt the download query parameter", async () => {
+      mockCreateSignedUrl.mockResolvedValue({ data: { signedUrl: "https://signed.example/x" }, error: null });
+      const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+      mockUseWorkspaceMode.mockReturnValue({ kind: "supabase", profileId: "user-1" });
+      mockUseProjectDocumentsState.mockReturnValue({
+        documents: [createDocument({
+          title: "Hash Document",
+          versions: [{ ...storedVersion, storage: { ...storedVersion.storage, filename: "Акт #3 & копия.pdf" } }],
+        })],
+        isLoading: false,
+      });
+      renderProjectDocuments();
+      fireEvent.click(screen.getByRole("button", { name: /Hash Document/ }));
+      await clickDownloadAndSettle(clickSpy);
+
+      // `encodeURI` (which storage-js applies to the whole URL) does not escape
+      // # & + = ?, so any of them here would truncate or corrupt the parameter.
+      const passedName = mockCreateSignedUrl.mock.calls.at(-1)?.[2]?.download as string;
+      expect(passedName).toBe("Акт 3 копия.pdf");
+      expect(passedName).not.toMatch(/[#&+=?]/);
+
+      clickSpy.mockRestore();
+    });
+
+    it("does not start a second download while the first is in flight", async () => {
+      // Only the DOWNLOAD signing is held open. The preview effect signs the
+      // same object without a `download` option and must be allowed to resolve,
+      // or previewUrl stays null and the button never enables in the first place.
+      let releaseSigning: () => void = () => {};
+      mockCreateSignedUrl.mockImplementation((_path: string, _ttl: number, options?: { download?: string }) => {
+        if (!options?.download) {
+          return Promise.resolve({ data: { signedUrl: "https://signed.example/preview" }, error: null });
+        }
+        return new Promise((resolve) => {
+          releaseSigning = () => resolve({ data: { signedUrl: "https://signed.example/contract.docx" }, error: null });
+        });
+      });
+      const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+      renderWithStoredDocument();
+      const button = await screen.findByRole("button", { name: "Download" });
+      await vi.waitFor(() => { expect(button).not.toBeDisabled(); });
+
+      fireEvent.click(button);
+      fireEvent.click(button);
+      fireEvent.click(button);
+      await act(async () => { releaseSigning(); await Promise.resolve(); });
+
+      // Three clicks, one saved file. The preview effect signs once as well, so
+      // assert on the anchor click, which only the download path performs.
+      await vi.waitFor(() => { expect(clickSpy).toHaveBeenCalledTimes(1); });
+
+      clickSpy.mockRestore();
+    });
+
+    // Regression guard, and nothing more: it asserts the disabled gate still
+    // keys on previewUrl, i.e. that the fix did not loosen it. It passes on the
+    // pre-fix code too, by design - it is not evidence that the fix works.
     it("keeps the download enabled once the preview URL resolves", async () => {
       mockCreateSignedUrl.mockResolvedValue({ data: { signedUrl: "https://signed.example/contract.docx" }, error: null });
       renderWithStoredDocument();
