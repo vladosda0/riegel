@@ -4,6 +4,14 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import ProjectDocuments from "@/pages/project/ProjectDocuments";
 import type { Document, MemberRole } from "@/types/entities";
 
+const { mockCreateSignedUrl } = vi.hoisted(() => ({ mockCreateSignedUrl: vi.fn() }));
+
+vi.mock("@/integrations/supabase/client", () => ({
+  supabase: {
+    storage: { from: () => ({ createSignedUrl: mockCreateSignedUrl }) },
+  },
+}));
+
 const {
   mockUseCurrentUser,
   mockUseProject,
@@ -268,6 +276,71 @@ describe("ProjectDocuments", () => {
     expect(screen.getByText("Download and sharing are coming soon.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Comment/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Confirm acknowledgement/i })).not.toBeInTheDocument();
+  });
+
+  // rovno #284 slice S2. The download button used to be window.open(signedUrl),
+  // which is not a download: no Content-Disposition, no filename, and the popup
+  // blocker can eat it. A PDF opened a tab instead of saving.
+  describe("downloading a stored document (#284 S2)", () => {
+    const storedVersion = {
+      id: "version-1",
+      document_id: "doc-1",
+      number: 1,
+      status: "draft" as const,
+      content: "",
+      storage: {
+        bucket: "project-documents",
+        objectPath: "project-1/contract.docx",
+        filename: "contract.docx",
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        id: "storage-1",
+        sizeBytes: 20480,
+      },
+    };
+
+    function renderWithStoredDocument() {
+      mockUseWorkspaceMode.mockReturnValue({ kind: "supabase", profileId: "user-1" });
+      mockUseProjectDocumentsState.mockReturnValue({
+        documents: [createDocument({ title: "Stored Document", versions: [storedVersion] })],
+        isLoading: false,
+      });
+      renderProjectDocuments();
+      fireEvent.click(screen.getByRole("button", { name: /Stored Document/ }));
+    }
+
+    it("asks for a signed URL carrying the real filename, and never opens a tab", async () => {
+      mockCreateSignedUrl.mockResolvedValue({ data: { signedUrl: "https://signed.example/contract.docx" }, error: null });
+      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+      const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+      renderWithStoredDocument();
+      await screen.findByRole("button", { name: "Download" });
+      fireEvent.click(screen.getByRole("button", { name: "Download" }));
+
+      await vi.waitFor(() => {
+        expect(mockCreateSignedUrl).toHaveBeenCalledWith(
+          "project-1/contract.docx",
+          3600,
+          { download: "contract.docx" },
+        );
+      });
+      // The load-bearing assertion: a real download, not a new tab.
+      expect(openSpy).not.toHaveBeenCalled();
+      expect(clickSpy).toHaveBeenCalled();
+
+      openSpy.mockRestore();
+      clickSpy.mockRestore();
+    });
+
+    // Control: proves the assertion above is not vacuous. If the fix were
+    // "call createSignedUrl twice and still window.open", this would fail.
+    it("keeps the download enabled once the preview URL resolves", async () => {
+      mockCreateSignedUrl.mockResolvedValue({ data: { signedUrl: "https://signed.example/contract.docx" }, error: null });
+      renderWithStoredDocument();
+      await vi.waitFor(() => {
+        expect(screen.getByRole("button", { name: "Download" })).not.toBeDisabled();
+      });
+    });
   });
 
   it("hides upload actions for viewers", () => {

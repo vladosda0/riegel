@@ -20,6 +20,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FileInput } from "@/components/ui/file-input";
+import { DOCUMENT_UPLOAD_ACCEPT } from "@/lib/document-file-types";
+import { downloadStorageUrl } from "@/components/home/documents-hub/FilePreviewDialog";
 import { Textarea } from "@/components/ui/textarea";
 import {
   AlertDialog,
@@ -616,6 +618,43 @@ export default function ProjectDocuments() {
     URL.revokeObjectURL(url);
   }
 
+  /**
+   * Download the document currently open in the preview dialog.
+   *
+   * rovno #284 slice S2. This used to be `window.open(previewUrl)`, which is not
+   * a download at all: the preview signed URL carries no `Content-Disposition`,
+   * so the browser decided what to do with it. A PDF opened in a new tab instead
+   * of saving, the saved name was whatever the URL implied rather than the real
+   * filename, and the whole thing was one popup-blocker away from doing nothing.
+   *
+   * `downloadStorageUrl` mints a SEPARATE signed URL with `{ download: filename }`
+   * (Supabase then sends `Content-Disposition: attachment`) and clicks an
+   * `<a download>`. The query parameter is the load-bearing half: the `download`
+   * attribute alone is ignored on a cross-origin href, which is exactly what a
+   * storage URL is.
+   */
+  async function handleDownloadViewedDocument() {
+    if (!viewDoc || !latestViewedVersion) return;
+
+    // Local/demo mode has no storage object; the body is inline text.
+    if (!isSupabaseMode) {
+      handleDownloadDocument(viewDoc, latestViewedVersion.content);
+      return;
+    }
+
+    const storage = latestViewedVersion.storage;
+    if (!storage?.bucket || !storage?.objectPath) return;
+
+    // Prefer the stored filename: it carries the real extension. Falling back to
+    // `buildDocumentDownloadName` would be wrong here - it appends `.txt`, which
+    // is right for the inline-text path above and would mislabel a .docx.
+    const filename = storage.filename?.trim() || viewDoc.title;
+    const ok = await downloadStorageUrl(storage.bucket, storage.objectPath, filename);
+    if (!ok) {
+      toast({ title: t("documents.preview.downloadFailed"), variant: "destructive" });
+    }
+  }
+
   const generatePreviewChanges: ProposalChange[] = [
     { entity_type: "document", action: "create", label: generateTitle || t("documents.generate.previewChangeFallback"), after: t("documents.generate.previewChangeAfter") },
   ];
@@ -919,6 +958,7 @@ export default function ProjectDocuments() {
                 <div className="space-y-1">
                   <label className="text-body-sm font-medium text-foreground">{t("documents.upload.fileLabel")}</label>
                   <FileInput
+                    accept={DOCUMENT_UPLOAD_ACCEPT}
                     disabled={uploading}
                     onChange={(event) => {
                       const file = event.target.files?.[0] ?? null;
@@ -1203,13 +1243,7 @@ export default function ProjectDocuments() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => {
-                      if (isSupabaseMode && previewUrl) {
-                        window.open(previewUrl, "_blank", "noopener,noreferrer");
-                        return;
-                      }
-                      handleDownloadDocument(viewDoc, latestViewedVersion.content);
-                    }}
+                    onClick={() => { void handleDownloadViewedDocument(); }}
                     disabled={!canDownloadViewedDocument}
                   >
                     <Download className="h-3.5 w-3.5 mr-1.5" /> {t("documents.preview.action.download")}

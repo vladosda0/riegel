@@ -2456,6 +2456,7 @@
   "documents.preview.archivedLabel": "Archived document",
   "documents.preview.previewLabel": "Document preview",
   "documents.preview.supabaseNote": "Document file is stored. Download and inline preview are coming soon.",
+  "documents.preview.downloadFailed": "Could not download the file. Try again.",
   "documents.preview.inlineUnsupported": "Inline preview is not available for this file type. Use Download to open it.",
   "documents.preview.noContent": "No content available.",
   "documents.preview.action.print": "Print",
