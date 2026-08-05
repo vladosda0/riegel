@@ -3,43 +3,73 @@ import { supabase } from "@/integrations/supabase/client";
 const SIGNED_URL_TTL_SECONDS = 3600;
 
 /**
- * Characters that must never reach Supabase Storage's `download` query parameter.
+ * Characters that must never reach the saved filename.
  *
- * rovno #284. storage-js builds the URL by string interpolation and then runs
- * `encodeURI` over the WHOLE thing (`&download=${options.download}` in
- * @supabase/storage-js). `encodeURI` deliberately does not escape the URL
- * delimiters `# & + = ?`, so any of them inside a filename corrupts the query:
+ * rovno #284, round 3. Earlier revisions of this file sanitized for the
+ * `?download=` query parameter of a signed URL, because storage-js interpolates
+ * that value into the URL and `encodeURI` leaves `# & + = ?` unescaped. That
+ * whole class of problem is GONE: `downloadStorageUrl` no longer asks the
+ * server to set Content-Disposition at all. It fetches the object and saves it
+ * through a same-origin blob object URL, where the anchor's `download`
+ * attribute is honored and the filename never touches a URL or an HTTP header.
+ * So `# & + = %` are all fine now, and «Акт #3.pdf» keeps its name.
  *
- *   "Акт #3.pdf"            -> everything from `#` is treated as a fragment,
- *                              the file saves with no extension at all
- *   "Смета & договор.pdf"   -> truncates at `&` and injects a stray parameter
- *
- * Pre-encoding with `encodeURIComponent` does NOT fix it: storage-js then
- * encodes our `%` signs again and the name arrives double-escaped. So the only
- * safe move at this layer is to remove the delimiters before handing the name
- * over. Russian filenames routinely contain `#` and `&`, so this is an everyday
- * input, not an edge case.
- *
- * Note this is the FILENAME only, never the object path.
+ * What remains is FILESYSTEM safety for the name the browser will write:
+ * - `/` and `\` are path separators;
+ * - `< > : " | ? *` are forbidden on Windows;
+ * - control characters (CR/LF included) are never valid in a filename.
  */
-const UNSAFE_DOWNLOAD_NAME_CHARS = /[#&+=?%\\/]+/g;
+// eslint-disable-next-line no-control-regex
+const UNSAFE_FILENAME_CHARS = /[<>:"/\\|?*\u0000-\u001f\u007f]+/g;
 
-/** Collapse the delimiters above into a single safe separator, keeping the extension intact. */
+/** Longest basename we will ask a filesystem to store; APFS/ext4 cap names at 255 bytes. */
+const MAX_FILENAME_CHARS = 200;
+
+const FILENAME_EXTENSION_RE = /\.[A-Za-z0-9]{1,8}$/;
+
+/**
+ * Make a filename safe to save, preserving as much of the original as possible.
+ *
+ * - strips filesystem-unsafe and control characters, collapsing runs to a space;
+ * - caps the length at MAX_FILENAME_CHARS, keeping the extension;
+ * - a name that collapses to nothing, or to a bare extension («&&&.pdf» → «.pdf»,
+ *   which would save as a hidden dot-file with no basename), gets the fallback
+ *   basename in front.
+ */
 export function sanitizeDownloadFilename(filename: string, fallback = "document"): string {
-  const cleaned = filename
-    .replace(UNSAFE_DOWNLOAD_NAME_CHARS, " ")
-    // Control characters (CR/LF included) would break the Content-Disposition
-    // header itself. Written as an explicit ESCAPED range rather than a literal
-    // character class, so ordinary punctuation such as `-` is left untouched -
-    // a literal `[ -]` here would silently strip every hyphen from the name.
-    // eslint-disable-next-line no-control-regex
-    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+  let cleaned = filename
+    .replace(UNSAFE_FILENAME_CHARS, " ")
     .replace(/\s+/g, " ")
     .trim();
-  return cleaned || fallback;
+  if (!cleaned) return fallback;
+  if (cleaned.startsWith(".")) cleaned = `${fallback}${cleaned}`;
+  if (cleaned.length > MAX_FILENAME_CHARS) {
+    const extension = FILENAME_EXTENSION_RE.exec(cleaned)?.[0] ?? "";
+    cleaned = cleaned.slice(0, MAX_FILENAME_CHARS - extension.length).trimEnd() + extension;
+  }
+  return cleaned;
 }
 
-/** Helper to fetch a signed URL imperatively (for download/view buttons on tiles). */
+/**
+ * A downloaded file must carry an extension, or the OS cannot open it.
+ *
+ * Callers do not reliably have one: the documents-hub views only carry the
+ * user-entered document TITLE («Договор №5»), and a stored filename can in
+ * principle be blank. The storage object path is server-generated from the
+ * upload and usually ends in the real extension, so recover it from there.
+ * If neither side has an extension, return the name unchanged rather than
+ * invent one: a wrong extension is worse than none.
+ *
+ * Multi-part extensions («x.tar.gz») are recovered as their last segment
+ * («.gz») - imperfect, deliberate, and better than nothing.
+ */
+export function ensureFilenameExtension(filename: string, objectPath: string): string {
+  if (FILENAME_EXTENSION_RE.test(filename)) return filename;
+  const extension = FILENAME_EXTENSION_RE.exec(objectPath)?.[0];
+  return extension ? `${filename}${extension}` : filename;
+}
+
+/** Helper to fetch a signed URL imperatively (for view buttons on tiles). */
 export async function openStorageUrlInNewTab(bucket: string, objectPath: string): Promise<boolean> {
   const { data, error } = await supabase.storage.from(bucket).createSignedUrl(objectPath, SIGNED_URL_TTL_SECONDS);
   if (error || !data?.signedUrl) return false;
@@ -47,31 +77,51 @@ export async function openStorageUrlInNewTab(bucket: string, objectPath: string)
   return true;
 }
 
+/**
+ * Download a storage object under a caller-supplied filename.
+ *
+ * rovno #284. Three designs were tried here, and this one is kept because its
+ * failure modes are the only honest ones:
+ *
+ * 1. `window.open(signedUrl)` - not a download at all: no Content-Disposition,
+ *    so a PDF opened a tab, and the saved name was whatever the URL implied.
+ * 2. `<a download href=signedUrl target=_blank>` with `?download=` on the URL -
+ *    a real download, but the filename rode a URL parameter into a server-built
+ *    HTTP header (injection surface + `encodeURI` corruption of `# & + =`),
+ *    HTTP failures were undetectable (the helper had already returned true),
+ *    and the post-await programmatic click of a window-opening anchor sat in
+ *    popup-blocker territory.
+ * 3. THIS: fetch the object, save it through a blob object URL. The blob is
+ *    same-origin, so the `download` attribute is honored and the filename never
+ *    leaves the client; no window opens, so there is nothing to popup-block;
+ *    and every failure - signing, HTTP status, network - is observable here,
+ *    so `false` reliably means "tell the user".
+ *
+ * Cost: the object passes through memory. Project documents are photos, PDFs
+ * and spreadsheets, tens of megabytes at the worst, which is acceptable.
+ */
 export async function downloadStorageUrl(bucket: string, objectPath: string, filename: string): Promise<boolean> {
-  const safeName = sanitizeDownloadFilename(filename);
-  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(objectPath, SIGNED_URL_TTL_SECONDS, {
-    download: safeName,
-  });
-  if (error || !data?.signedUrl) return false;
+  try {
+    const { data, error } = await supabase.storage.from(bucket).createSignedUrl(objectPath, SIGNED_URL_TTL_SECONDS);
+    if (error || !data?.signedUrl) return false;
 
-  const link = document.createElement("a");
-  link.href = data.signedUrl;
-  link.download = safeName;
-  // rovno #284. `target="_blank"` is NOT cosmetic here, it is damage control.
-  // A storage URL is cross-origin, so the `download` ATTRIBUTE is ignored and
-  // the `?download=` parameter (which sets Content-Disposition: attachment) is
-  // what actually saves the file. When that response is NOT an attachment -
-  // the object was deleted between listing and click, storage returns 4xx/5xx,
-  // or the signature expired - a same-tab anchor NAVIGATES THE WHOLE SPA to a
-  // Supabase error page, and the user loses the dialog and their place in the
-  // app. Opening in a new context confines any such failure to a throwaway tab,
-  // which is the one good property the `window.open` call this replaced had.
-  // On the success path the tab never materializes: an attachment response does
-  // not create a document to display.
-  link.target = "_blank";
-  link.rel = "noopener noreferrer";
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  return true;
+    const response = await fetch(data.signedUrl);
+    if (!response.ok) return false;
+    const blob = await response.blob();
+
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = sanitizeDownloadFilename(ensureFilenameExtension(filename.trim(), objectPath));
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    // Not immediate: Safari needs the object URL alive until the save begins.
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
+    return true;
+  } catch {
+    // Signing rejection or a network-level fetch failure. Either way the caller
+    // gets a false and can surface it; nothing has navigated anywhere.
+    return false;
+  }
 }

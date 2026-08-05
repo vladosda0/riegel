@@ -87,7 +87,7 @@ import {
   addEvent,
   deleteDocument as deleteDocumentLocal,
 } from "@/data/store";
-import type { DocMediaVisibilityClass, Document as DocType, StorageObjectMeta } from "@/types/entities";
+import type { DocMediaVisibilityClass, Document as DocType } from "@/types/entities";
 import {
   canViewInternalDocuments,
   effectiveInternalDocsVisibilityForSeam,
@@ -168,26 +168,6 @@ function ProjectDocumentsSkeleton() {
 function buildDocumentDownloadName(title: string) {
   const normalized = title.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   return `${normalized || "document"}.txt`;
-}
-
-/**
- * The name a STORED document should be saved under.
- *
- * rovno #284. The stored filename is preferred because it carries the real
- * extension. `buildDocumentDownloadName` above is deliberately NOT the fallback:
- * it appends `.txt`, which is right for the inline-text path it was written for
- * and would label a .docx as text.
- *
- * But a bare document title is not an acceptable fallback either - it has no
- * extension at all, so the OS cannot open the saved file, which is strictly
- * worse than a wrong one. Recover the extension from the object path, which is
- * server-generated and always carries it.
- */
-function resolveDownloadFilename(storage: StorageObjectMeta, title: string): string {
-  const stored = storage.filename?.trim();
-  if (stored) return stored;
-  const extension = /\.[A-Za-z0-9]{1,8}$/.exec(storage.objectPath)?.[0] ?? "";
-  return `${title.trim() || "document"}${extension}`;
 }
 
 function formatDocumentDate(timestamp?: string) {
@@ -673,10 +653,14 @@ export default function ProjectDocuments() {
     // what provokes the second click.
     setDownloadingViewedDocument(true);
     try {
+      // The stored filename carries the real extension; the title is the
+      // fallback and the helper recovers its extension from the object path.
+      // `buildDocumentDownloadName` is deliberately NOT used here: it appends
+      // `.txt`, which is right for the inline-text path and wrong for a .docx.
       const ok = await downloadStorageUrl(
         viewedStorage.bucket,
         viewedStorage.objectPath,
-        resolveDownloadFilename(viewedStorage, viewDoc.title),
+        viewedStorage.filename?.trim() || viewDoc.title,
       );
       if (!ok) {
         toast({ title: t("documents.preview.downloadFailed"), variant: "destructive" });
@@ -701,11 +685,20 @@ export default function ProjectDocuments() {
    * preview effect and the Download button read the VERSION's storage instead,
    * so those documents showed their filename in the list and then had a dead
    * preview and a permanently disabled Download button: the file looked present
-   * and was unreachable. Mirror the mapper's fallback here, so the newest
-   * version that actually materialized a file is the one we preview and hand back.
+   * and was unreachable.
+   *
+   * The fallback is gated on ARCHIVED, and that gate is what makes this mirror
+   * the mapper rather than diverge from it: `shapeDocumentsWithVersions` falls
+   * back to "newest version with storage" only when NO version is current,
+   * which is exactly the archived case. An un-gated fallback (round 2 of this
+   * branch shipped one) would also fire for an active document whose current
+   * version has no storage yet, and would present a SUPERSEDED version's file
+   * under the current title - the mapper deliberately shows no file there.
    */
   const viewedStorage = latestViewedVersion?.storage
-    ?? [...(viewDoc?.versions ?? [])].reverse().find((version) => version.storage)?.storage;
+    ?? (viewedDocumentIsArchived
+      ? [...(viewDoc?.versions ?? [])].reverse().find((version) => version.storage)?.storage
+      : undefined);
   const viewedMimeType = viewedStorage?.mimeType ?? viewDoc?.file_meta?.mime ?? null;
   const canDownloadViewedDocument = Boolean(
     viewDoc

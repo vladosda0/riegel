@@ -1,10 +1,17 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import ProjectDocuments from "@/pages/project/ProjectDocuments";
 import type { Document, MemberRole } from "@/types/entities";
 
 const { mockCreateSignedUrl } = vi.hoisted(() => ({ mockCreateSignedUrl: vi.fn() }));
+
+const { mockToast } = vi.hoisted(() => ({ mockToast: vi.fn() }));
+
+vi.mock("@/hooks/use-toast", () => ({
+  toast: mockToast,
+  useToast: () => ({ toast: mockToast, dismiss: vi.fn(), toasts: [] }),
+}));
 
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
@@ -280,7 +287,16 @@ describe("ProjectDocuments", () => {
 
   // rovno #284 slice S2. The download button used to be window.open(signedUrl),
   // which is not a download: no Content-Disposition, no filename, and the popup
-  // blocker can eat it. A PDF opened a tab instead of saving.
+  // blocker can eat it. A PDF opened a tab instead of saving. The current
+  // design fetches the object and saves it through a blob object URL - see
+  // storage-urls.ts for why (and storage-urls.test.ts for the helper's own
+  // unit tests; the tests here cover the PAGE's wiring of it).
+  //
+  // History that shapes these tests: TWO earlier versions of this block were
+  // vacuous and both were caught by mutation, not by reading. The rules that
+  // follow from that: every await anchors on the LAST observable effect of the
+  // chain (the anchor click), never the first; and any mock that gates
+  // concurrency must hold ALL pending promises, not a single reassigned one.
   describe("downloading a stored document (#284 S2)", () => {
     const storedVersion = {
       id: "version-1",
@@ -298,6 +314,35 @@ describe("ProjectDocuments", () => {
       },
     };
 
+    let clickSpy: ReturnType<typeof vi.spyOn>;
+    let clickedDownloadNames: string[];
+    let fetchMock: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      // Reset removes leaked mockImplementations from previous tests (a prior
+      // round left a never-resolving implementation behind, making the suite
+      // order-dependent).
+      mockCreateSignedUrl.mockReset();
+      clickedDownloadNames = [];
+      clickSpy = vi
+        .spyOn(HTMLAnchorElement.prototype, "click")
+        .mockImplementation(function (this: HTMLAnchorElement) {
+          clickedDownloadNames.push(this.download);
+        });
+      fetchMock = vi.fn().mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob(["x"])) });
+      vi.stubGlobal("fetch", fetchMock);
+      // jsdom has no createObjectURL/revokeObjectURL.
+      vi.stubGlobal("URL", Object.assign(Object.create(URL), {
+        createObjectURL: vi.fn(() => "blob:mock-object-url"),
+        revokeObjectURL: vi.fn(),
+      }));
+    });
+
+    afterEach(() => {
+      clickSpy.mockRestore();
+      vi.unstubAllGlobals();
+    });
+
     function renderWithStoredDocument() {
       mockUseWorkspaceMode.mockReturnValue({ kind: "supabase", profileId: "user-1" });
       mockUseProjectDocumentsState.mockReturnValue({
@@ -308,48 +353,42 @@ describe("ProjectDocuments", () => {
       fireEvent.click(screen.getByRole("button", { name: /Stored Document/ }));
     }
 
-    // rovno #284. The FIRST version of this test was vacuous and the pre-merge
-    // review proved it by mutation: `vi.waitFor` resolved as soon as
-    // `mockCreateSignedUrl` was called, and that call happens SYNCHRONOUSLY
-    // inside downloadStorageUrl before its await - so the `openSpy` assertion
-    // ran before the awaited continuation and never observed anything. Two
-    // separate `window.open` mutants passed all nine tests.
-    //
-    // The fix is to anchor the wait on the LAST observable effect of the whole
-    // async chain (the anchor click), not on its first. Every assertion after
-    // that point is then guaranteed to see the finished state.
-    async function clickDownloadAndSettle(clickSpy: ReturnType<typeof vi.spyOn>) {
+    async function clickDownloadAndSettle() {
       await screen.findByRole("button", { name: "Download" });
+      await vi.waitFor(() => {
+        expect(screen.getByRole("button", { name: "Download" })).not.toBeDisabled();
+      });
       fireEvent.click(screen.getByRole("button", { name: "Download" }));
+      // Anchor on the LAST effect of the async chain, then flush microtasks so
+      // everything queued after it has run before any assertion below.
       await vi.waitFor(() => { expect(clickSpy).toHaveBeenCalled(); });
-      // Flush the microtask queue so anything queued after the click has run.
       await act(async () => { await Promise.resolve(); });
     }
 
-    it("saves the file via a Content-Disposition signed URL and never opens a tab", async () => {
+    it("saves the blob under the stored filename and never opens a tab", async () => {
       mockCreateSignedUrl.mockResolvedValue({ data: { signedUrl: "https://signed.example/contract.docx" }, error: null });
       const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
-      const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 
       renderWithStoredDocument();
-      await clickDownloadAndSettle(clickSpy);
+      await clickDownloadAndSettle();
 
-      expect(mockCreateSignedUrl).toHaveBeenCalledWith(
-        "project-1/contract.docx",
-        3600,
-        { download: "contract.docx" },
-      );
-      // The load-bearing assertion. Verified non-vacuous by re-running both of
-      // the review's window.open mutants against it: both now fail.
+      // The page passes the stored filename through; the helper sanitizes it.
+      expect(clickedDownloadNames).toEqual(["contract.docx"]);
+      // Two signings happen (preview + download), both WITHOUT a download
+      // option: the filename must never ride the URL (round-2 finding: the
+      // ?download= parameter was both corruptible and an injection surface).
+      for (const call of mockCreateSignedUrl.mock.calls) {
+        expect(call[2]).toBeUndefined();
+      }
+      // The object is fetched and saved locally; nothing opens a window.
+      expect(fetchMock).toHaveBeenCalledWith("https://signed.example/contract.docx");
       expect(openSpy).not.toHaveBeenCalled();
 
       openSpy.mockRestore();
-      clickSpy.mockRestore();
     });
 
-    it("sanitizes a filename whose characters would corrupt the download query parameter", async () => {
+    it("keeps a filename with URL delimiters intact - nothing strips # or & any more", async () => {
       mockCreateSignedUrl.mockResolvedValue({ data: { signedUrl: "https://signed.example/x" }, error: null });
-      const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
       mockUseWorkspaceMode.mockReturnValue({ kind: "supabase", profileId: "user-1" });
       mockUseProjectDocumentsState.mockReturnValue({
         documents: [createDocument({
@@ -360,31 +399,37 @@ describe("ProjectDocuments", () => {
       });
       renderProjectDocuments();
       fireEvent.click(screen.getByRole("button", { name: /Hash Document/ }));
-      await clickDownloadAndSettle(clickSpy);
+      await clickDownloadAndSettle();
 
-      // `encodeURI` (which storage-js applies to the whole URL) does not escape
-      // # & + = ?, so any of them here would truncate or corrupt the parameter.
-      const passedName = mockCreateSignedUrl.mock.calls.at(-1)?.[2]?.download as string;
-      expect(passedName).toBe("Акт 3 копия.pdf");
-      expect(passedName).not.toMatch(/[#&+=?]/);
+      expect(clickedDownloadNames).toEqual(["Акт #3 & копия.pdf"]);
+    });
 
-      clickSpy.mockRestore();
+    it("shows the failure toast instead of doing nothing when the object fetch fails", async () => {
+      mockCreateSignedUrl.mockResolvedValue({ data: { signedUrl: "https://signed.example/x" }, error: null });
+      // Preview effect must still succeed (it only signs); the object GET 404s.
+      fetchMock.mockResolvedValue({ ok: false, status: 404, blob: () => Promise.resolve(new Blob(["{}"])) });
+
+      renderWithStoredDocument();
+      await screen.findByRole("button", { name: "Download" });
+      await vi.waitFor(() => {
+        expect(screen.getByRole("button", { name: "Download" })).not.toBeDisabled();
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Download" }));
+
+      await vi.waitFor(() => { expect(mockToast).toHaveBeenCalled(); });
+      expect(clickSpy).not.toHaveBeenCalled();
     });
 
     it("does not start a second download while the first is in flight", async () => {
-      // Only the DOWNLOAD signing is held open. The preview effect signs the
-      // same object without a `download` option and must be allowed to resolve,
-      // or previewUrl stays null and the button never enables in the first place.
-      let releaseSigning: () => void = () => {};
-      mockCreateSignedUrl.mockImplementation((_path: string, _ttl: number, options?: { download?: string }) => {
-        if (!options?.download) {
-          return Promise.resolve({ data: { signedUrl: "https://signed.example/preview" }, error: null });
-        }
-        return new Promise((resolve) => {
-          releaseSigning = () => resolve({ data: { signedUrl: "https://signed.example/contract.docx" }, error: null });
-        });
-      });
-      const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+      mockCreateSignedUrl.mockResolvedValue({ data: { signedUrl: "https://signed.example/x" }, error: null });
+      // Hold every object fetch open and collect EVERY resolver. A previous
+      // version of this test reassigned a single resolver per call, so only
+      // the last promise could ever resolve and the assertion could not fail
+      // regardless of the guard - proven by mutation in review round 2.
+      const releasers: Array<() => void> = [];
+      fetchMock.mockImplementation(() => new Promise((resolve) => {
+        releasers.push(() => resolve({ ok: true, blob: () => Promise.resolve(new Blob(["x"])) }));
+      }));
 
       renderWithStoredDocument();
       const button = await screen.findByRole("button", { name: "Download" });
@@ -393,13 +438,25 @@ describe("ProjectDocuments", () => {
       fireEvent.click(button);
       fireEvent.click(button);
       fireEvent.click(button);
-      await act(async () => { releaseSigning(); await Promise.resolve(); });
+      // The object fetch sits behind an awaited signing, so wait for it to
+      // REGISTER before releasing - releasing an empty list is the race this
+      // test itself shipped with on its first attempt. Then drain until no new
+      // fetches appear, so an unguarded mutant (3 signings -> 3 fetches) gets
+      // every one of its fetches released and all its clicks surface below.
+      await vi.waitFor(() => { expect(fetchMock).toHaveBeenCalled(); });
+      await act(async () => {
+        while (releasers.length > 0) {
+          releasers.splice(0).forEach((release) => release());
+          await Promise.resolve();
+          await Promise.resolve();
+        }
+      });
 
-      // Three clicks, one saved file. The preview effect signs once as well, so
-      // assert on the anchor click, which only the download path performs.
+      // Three clicks, at most one fetch and one saved file. Without the
+      // in-flight guard every click gets its own fetch and its own click:
+      // releasing ALL of them would surface 3 anchor clicks here.
       await vi.waitFor(() => { expect(clickSpy).toHaveBeenCalledTimes(1); });
-
-      clickSpy.mockRestore();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
     // Regression guard, and nothing more: it asserts the disabled gate still
@@ -410,6 +467,71 @@ describe("ProjectDocuments", () => {
       renderWithStoredDocument();
       await vi.waitFor(() => {
         expect(screen.getByRole("button", { name: "Download" })).not.toBeDisabled();
+      });
+    });
+
+    // rovno #284 / #243. Documents archived BEFORE the #243 fix carry a marker
+    // version with no storage link. The page must resolve the newest version
+    // that actually has storage - but ONLY for archived documents, mirroring
+    // the mapper: an ACTIVE document whose current version lacks storage shows
+    // no file, because presenting a superseded version's file under the current
+    // title would be wrong.
+    describe("legacy archived documents (#243 heal)", () => {
+      const versionWithFile = {
+        ...storedVersion,
+        id: "version-file",
+        number: 1,
+        status: "archived" as const,
+      };
+      const markerWithoutStorage = {
+        id: "version-marker",
+        document_id: "doc-1",
+        number: 2,
+        status: "archived" as const,
+        content: "",
+      };
+
+      it("falls back to the newest version with storage, so Download works", async () => {
+        mockCreateSignedUrl.mockResolvedValue({ data: { signedUrl: "https://signed.example/archived" }, error: null });
+        mockUseWorkspaceMode.mockReturnValue({ kind: "supabase", profileId: "user-1" });
+        mockUseProjectDocumentsState.mockReturnValue({
+          documents: [createDocument({ title: "Legacy Archived", versions: [versionWithFile, markerWithoutStorage] })],
+          isLoading: false,
+        });
+        renderProjectDocuments();
+        fireEvent.click(screen.getByRole("button", { name: /Legacy Archived/ }));
+
+        // The preview effect signs the HEALED object path, and Download enables.
+        await vi.waitFor(() => {
+          expect(mockCreateSignedUrl).toHaveBeenCalledWith("project-1/contract.docx", 3600);
+        });
+        await vi.waitFor(() => {
+          expect(screen.getByRole("button", { name: "Download" })).not.toBeDisabled();
+        });
+      });
+
+      it("does NOT heal an active document - no superseded file under a current title", async () => {
+        mockCreateSignedUrl.mockResolvedValue({ data: { signedUrl: "https://signed.example/x" }, error: null });
+        mockUseWorkspaceMode.mockReturnValue({ kind: "supabase", profileId: "user-1" });
+        const olderWithFile = { ...storedVersion, id: "version-old", number: 1, status: "archived" as const };
+        const currentWithoutStorage = {
+          id: "version-current",
+          document_id: "doc-1",
+          number: 2,
+          status: "draft" as const,
+          content: "",
+        };
+        mockUseProjectDocumentsState.mockReturnValue({
+          documents: [createDocument({ title: "Active No File", versions: [olderWithFile, currentWithoutStorage] })],
+          isLoading: false,
+        });
+        renderProjectDocuments();
+        fireEvent.click(screen.getByRole("button", { name: /Active No File/ }));
+
+        await screen.findByRole("button", { name: "Download" });
+        // No signing for the superseded file, and Download stays disabled.
+        expect(mockCreateSignedUrl).not.toHaveBeenCalled();
+        expect(screen.getByRole("button", { name: "Download" })).toBeDisabled();
       });
     });
   });
