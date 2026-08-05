@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Download, ExternalLink } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/hooks/use-toast";
+import { downloadStorageUrl } from "./storage-urls";
 import { sanitizeOfficeHtml } from "./sanitize-office-html";
 import type { DocPreviewKind, DocPreviewResponse } from "./docPreview.worker";
 
@@ -299,12 +301,22 @@ export function FilePreviewDialog({ doc, open, onOpenChange }: FilePreviewDialog
                   {t("home.documentsHub.preview.openInNewTab")}
                 </a>
               </Button>
-              <Button asChild>
-                <a href={signedUrl} download>
+              {doc?.bucket && doc?.objectPath && (
+                <Button
+                  onClick={() => {
+                    // rovno #284: an `<a href={signedUrl} download>` is the S2 defect
+                    // this branch repairs - the download attribute is ignored on a
+                    // cross-origin href, so this anchor NAVIGATED the SPA instead of
+                    // saving. Route through the same fetch-to-blob helper as the tiles.
+                    void downloadStorageUrl(doc.bucket!, doc.objectPath!, doc.title).then((ok) => {
+                      if (!ok) toast({ title: t("documents.preview.downloadFailed"), variant: "destructive" });
+                    });
+                  }}
+                >
                   <Download className="h-4 w-4 mr-1.5" />
                   {t("home.documentsHub.preview.download")}
-                </a>
-              </Button>
+                </Button>
+              )}
             </>
           )}
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
@@ -314,26 +326,4 @@ export function FilePreviewDialog({ doc, open, onOpenChange }: FilePreviewDialog
       </DialogContent>
     </Dialog>
   );
-}
-
-/** Helper to fetch a signed URL imperatively (for download/view buttons on tiles). */
-export async function openStorageUrlInNewTab(bucket: string, objectPath: string): Promise<boolean> {
-  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(objectPath, 3600);
-  if (error || !data?.signedUrl) return false;
-  window.open(data.signedUrl, "_blank", "noopener,noreferrer");
-  return true;
-}
-
-export async function downloadStorageUrl(bucket: string, objectPath: string, filename: string): Promise<boolean> {
-  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(objectPath, 3600, {
-    download: filename,
-  });
-  if (error || !data?.signedUrl) return false;
-  const link = document.createElement("a");
-  link.href = data.signedUrl;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  return true;
 }

@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { FileInput } from "@/components/ui/file-input";
+import { DOCUMENT_UPLOAD_ACCEPT } from "@/lib/document-file-types";
 import { toast } from "@/hooks/use-toast";
 import { useScopedDocumentUpload } from "@/components/upload/use-scoped-document-upload";
 import type { UploadResult, UploadScope } from "@/components/upload/types";
@@ -76,6 +77,7 @@ export function DocumentForm({ scope, projectId, onBack, onClose, onComplete }: 
         <div className="space-y-1">
           <Label className="text-body-sm font-medium">{t("upload.modal.step3.document.file")}</Label>
           <FileInput
+            accept={DOCUMENT_UPLOAD_ACCEPT}
             disabled={submitting}
             onChange={(event) => {
               const selected = event.target.files?.[0] ?? null;

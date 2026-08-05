@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { getOrdersSource } from "@/data/orders-source";
 import { trackEvent } from "@/lib/analytics";
+import { DOCUMENT_UPLOAD_ACCEPT } from "@/lib/document-file-types";
 import { useProcurementV2 } from "@/hooks/use-mock-data";
 import {
   useAllProjectsLocations,
@@ -812,6 +813,7 @@ export function OrderModal({
                 <input
                   id="order-invoice-input"
                   type="file"
+                  accept={DOCUMENT_UPLOAD_ACCEPT}
                   className="sr-only"
                   aria-label={t("procurement.orderModal.invoiceAria")}
                   onChange={(event) => {
