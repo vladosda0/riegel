@@ -68,6 +68,18 @@ describe("sanitizeDownloadFilename", () => {
   });
 });
 
+  it("caps by bytes without splitting a surrogate pair (emoji stay whole)", () => {
+    // A single-byte prefix offsets the budget so a naive slice(-1) cap would cut
+    // through a surrogate pair here (verified: it leaves a lone surrogate at 200
+    // bytes). The code-point loop must not.
+    const name = `a${"\u{1F600}".repeat(60)}.pdf`;
+    const result = sanitizeDownloadFilename(name);
+    expect(new TextEncoder().encode(result).length).toBeLessThanOrEqual(200);
+    // No lone surrogate survived the cut.
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(result)).toBe(false);
+    expect(result.endsWith(".pdf")).toBe(true);
+  });
+
 describe("ensureFilenameExtension", () => {
   it("leaves a name that already has an extension alone", () => {
     expect(ensureFilenameExtension("contract.docx", "p/x.pdf")).toBe("contract.docx");
@@ -185,13 +197,17 @@ describe("downloadStorageUrl", () => {
 describe("openStorageUrlInNewTab", () => {
   beforeEach(() => { mockCreateSignedUrl.mockReset(); });
 
-  it("opens the tab synchronously inside the click, then points it at the signed URL", async () => {
-    // window.open after an await is transient-activation territory (the same
-    // popup-blocker exposure the download path was rebuilt to avoid), so the
-    // placeholder tab must exist BEFORE signing resolves.
+  it("opens the tab synchronously WITHOUT noopener, so the handle stays usable", async () => {
+    // The bug this pins: `window.open(url, "_blank", "noopener,...")` returns
+    // NULL, so a handle-keeping implementation that passes noopener can never
+    // point its tab and falls back to a SECOND window.open after the await -
+    // the exact transient-activation exposure this function exists to avoid. A
+    // realistic mock therefore returns null whenever noopener is requested.
     let openedBeforeSigning = false;
-    const fakeTab = { location: { href: "" }, close: vi.fn() };
-    const openSpy = vi.spyOn(window, "open").mockImplementation(() => fakeTab as unknown as Window);
+    const fakeTab = { location: { href: "" }, close: vi.fn(), opener: {} as unknown };
+    const openSpy = vi.spyOn(window, "open").mockImplementation((_url, _target, features) =>
+      (typeof features === "string" && features.includes("noopener")) ? null : (fakeTab as unknown as Window),
+    );
     mockCreateSignedUrl.mockImplementation(() => {
       openedBeforeSigning = openSpy.mock.calls.length > 0;
       return Promise.resolve({ data: { signedUrl: "https://signed.example/v" }, error: null });
@@ -199,13 +215,17 @@ describe("openStorageUrlInNewTab", () => {
 
     expect(await openStorageUrlInNewTab("b", "p/x.pdf")).toBe(true);
     expect(openedBeforeSigning).toBe(true);
+    // Exactly one window opened (a noopener-passing impl would open two), and it
+    // is the handle we kept, pointed at the URL, with opener blanked for safety.
+    expect(openSpy).toHaveBeenCalledTimes(1);
     expect(fakeTab.location.href).toBe("https://signed.example/v");
+    expect(fakeTab.opener).toBeNull();
     expect(fakeTab.close).not.toHaveBeenCalled();
     openSpy.mockRestore();
   });
 
   it("closes the placeholder tab and returns false when signing fails", async () => {
-    const fakeTab = { location: { href: "" }, close: vi.fn() };
+    const fakeTab = { location: { href: "" }, close: vi.fn(), opener: {} as unknown };
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => fakeTab as unknown as Window);
     mockCreateSignedUrl.mockResolvedValue({ data: null, error: { message: "denied" } });
 

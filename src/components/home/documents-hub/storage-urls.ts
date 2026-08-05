@@ -33,14 +33,21 @@ const MAX_FILENAME_BYTES = 200;
 
 const utf8 = new TextEncoder();
 
-/** Trim to the byte budget on a character boundary, keeping the extension. */
+/**
+ * Trim to the byte budget on a CODE-POINT boundary, keeping the extension.
+ *
+ * Iterating by code point (via the spread) rather than by `slice(-1)` is what
+ * keeps a surrogate pair - an emoji, any astral character - from being cut in
+ * half and leaving a lone surrogate in the filename.
+ */
 function capFilenameBytes(name: string): string {
   if (utf8.encode(name).length <= MAX_FILENAME_BYTES) return name;
   const extension = FILENAME_EXTENSION_RE.exec(name)?.[0] ?? "";
   const budget = MAX_FILENAME_BYTES - utf8.encode(extension).length;
-  let base = name.slice(0, name.length - extension.length);
-  while (base.length > 0 && utf8.encode(base).length > budget) {
-    base = base.slice(0, -1);
+  let base = "";
+  for (const codePoint of name.slice(0, name.length - extension.length)) {
+    if (utf8.encode(base + codePoint).length > budget) break;
+    base += codePoint;
   }
   return base.trimEnd() + extension;
 }
@@ -92,11 +99,21 @@ export function ensureFilenameExtension(filename: string, objectPath: string): s
  * signed URL only once signing resolves. `window.open` after an await is
  * subject to transient-activation limits (the same popup-blocker exposure the
  * download path was rebuilt to avoid), so a slow signing round trip would
- * intermittently swallow the click. On failure the placeholder tab is closed
- * again and the caller gets false.
+ * intermittently swallow the click.
+ *
+ * CRUCIAL: this must NOT pass "noopener", even though every other window.open
+ * here does. `noopener` makes the browser return `null` instead of a window
+ * handle, and we need the handle to point the placeholder tab at the signed URL
+ * after signing. The security concern `noopener` addresses - the opened page
+ * reaching back through `window.opener` - is instead handled by blanking
+ * `opener` on the handle we keep; the destination is our own signed storage
+ * URL, not third-party content, so the exposure is minimal regardless.
+ *
+ * On failure the placeholder tab is closed again and the caller gets false.
  */
 export async function openStorageUrlInNewTab(bucket: string, objectPath: string): Promise<boolean> {
-  const tab = window.open("about:blank", "_blank", "noopener,noreferrer");
+  const tab = window.open("about:blank", "_blank");
+  if (tab) tab.opener = null;
   const { data, error } = await supabase.storage.from(bucket).createSignedUrl(objectPath, SIGNED_URL_TTL_SECONDS);
   if (error || !data?.signedUrl) {
     tab?.close();
@@ -106,7 +123,7 @@ export async function openStorageUrlInNewTab(bucket: string, objectPath: string)
     tab.location.href = data.signedUrl;
     return true;
   }
-  // The popup was blocked even synchronously; last resort, same-tab-safe fallback.
+  // The synchronous open was blocked outright; last resort, still same-tab-safe.
   window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   return true;
 }
