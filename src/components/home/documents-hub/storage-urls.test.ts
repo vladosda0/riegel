@@ -66,7 +66,6 @@ describe("sanitizeDownloadFilename", () => {
     expect(charOkBytesOver.length).toBeLessThanOrEqual(200);
     expect(new TextEncoder().encode(sanitizeDownloadFilename(charOkBytesOver)).length).toBeLessThanOrEqual(200);
   });
-});
 
   it("caps by bytes without splitting a surrogate pair (emoji stay whole)", () => {
     // A single-byte prefix offsets the budget so a naive slice(-1) cap would cut
@@ -79,6 +78,7 @@ describe("sanitizeDownloadFilename", () => {
     expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(result)).toBe(false);
     expect(result.endsWith(".pdf")).toBe(true);
   });
+});
 
 describe("ensureFilenameExtension", () => {
   it("leaves a name that already has an extension alone", () => {
