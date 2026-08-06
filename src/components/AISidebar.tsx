@@ -1902,6 +1902,17 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
 
   function updateQueueDecision(decision: ProposalDecision) {
     let nextQueueSnapshot: ProposalQueueState | null = null;
+    // Captured inside the updater, emitted AFTER it returns. React may invoke an
+    // updater more than once (a replayed concurrent render, or a future
+    // StrictMode wrap), and an analytics call inside one would double-count.
+    // That matters more since rovno#227 made ai_proposal_confirmed the
+    // denominator of `confirmed - applied - unavailable`. Same shape the
+    // function already uses for nextQueueSnapshot.
+    type QueueDecisionEvent = {
+      name: "ai_proposal_confirmed" | "ai_proposal_rejected";
+      proposal: AIProposal;
+    };
+    let decisionEvent: QueueDecisionEvent | null = null;
     setProposalQueue((prev) => {
       if (!prev || prev.phase !== "review") return prev;
       const current = prev.items[prev.activeIndex];
@@ -1932,24 +1943,32 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       // a 100% apply rate for types that fail closed on every path. The real
       // `ai_proposal_applied` is now emitted by runQueueExecution on success.
       if (decision === "confirmed") {
-        trackEvent("ai_proposal_confirmed", {
-          project_id: current.proposal.project_id,
-          surface: "ai",
-          proposal_id: current.proposal.id,
-          proposal_type: current.proposal.type,
-        });
+        decisionEvent = { name: "ai_proposal_confirmed", proposal: current.proposal };
       } else if (decision === "declined") {
-        trackEvent("ai_proposal_rejected", {
-          project_id: current.proposal.project_id,
-          surface: "ai",
-          proposal_id: current.proposal.id,
-        });
+        decisionEvent = { name: "ai_proposal_rejected", proposal: current.proposal };
       }
       if (nextQueue.items.every((item) => item.decision !== "unresolved")) {
         nextQueueSnapshot = nextQueue;
       }
       return nextQueue;
     });
+    // Read through an explicitly typed local: TypeScript does not track the
+    // assignment above because it happens inside the updater callback, so a
+    // bare `if (decisionEvent)` narrows it to `never`. The sibling
+    // `nextQueueSnapshot` has the same narrowing and only compiles because
+    // `never` is assignable to its parameter; reading a property off it, as
+    // here, is what makes the narrowing visible.
+    const emittedDecision = decisionEvent as QueueDecisionEvent | null;
+    if (emittedDecision) {
+      const { name, proposal } = emittedDecision;
+      trackEvent(name, {
+        project_id: proposal.project_id,
+        surface: "ai",
+        proposal_id: proposal.id,
+        // Only the confirm event carries the type; the rejected event never did.
+        ...(name === "ai_proposal_confirmed" ? { proposal_type: proposal.type } : {}),
+      });
+    }
     if (nextQueueSnapshot) {
       beginQueueExecution(nextQueueSnapshot);
     }

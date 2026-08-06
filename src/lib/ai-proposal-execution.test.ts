@@ -169,7 +169,8 @@ describe("resolveProposalExecutionAnalytics", () => {
   // now lives here so it is pinned by tests rather than by a component loop
   // nothing touches — the same reason resolveProposalFastFail was extracted.
 
-  // The COMPLETE input domain: success x unavailableReason. All four cells.
+  // The COMPLETE input domain: success x unavailableReason in {null, "", token}.
+  // All SIX cells, including the two that success short-circuits.
   it("reports applied when the item succeeded", () => {
     expect(resolveProposalExecutionAnalytics({ success: true, unavailableReason: null, attempts: 1 }))
       .toEqual({ event: "ai_proposal_applied", attempts: 1 });
@@ -180,6 +181,14 @@ describe("resolveProposalExecutionAnalytics", () => {
     // attempt), but the function must be total rather than rely on the caller.
     expect(resolveProposalExecutionAnalytics({ success: true, unavailableReason: "x", attempts: 2 }))
       .toEqual({ event: "ai_proposal_applied", attempts: 2 });
+  });
+
+  it("reports applied for an empty reason too, since success is read first", () => {
+    // The sixth cell. No behavioural weight (success short-circuits before the
+    // reason is looked at), but the suite claims a complete enumeration and an
+    // untested cell makes that claim false.
+    expect(resolveProposalExecutionAnalytics({ success: true, unavailableReason: "", attempts: 1 }))
+      .toEqual({ event: "ai_proposal_applied", attempts: 1 });
   });
 
   it("reports unavailable, carrying the reason, when a fast-fail stopped it", () => {
