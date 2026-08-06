@@ -180,8 +180,15 @@ describe("AISidebar proposal queue execution analytics (rovno#227)", () => {
 
   it("locks the composer in every scope while a run is in flight, and unlocks it when the run ends", async () => {
     // rovno#227 audit, findings 1 and 2, resolved by prevention rather than by
-    // handling: only ONE proposal run exists at a time and the composer is
-    // locked everywhere while it runs, so a second queue cannot be created.
+    // handling: only ONE proposal run may execute at a time and the composer is
+    // locked while it runs.
+    //
+    // Scope of THIS test, stated because the third audit round found the lock
+    // incomplete: it covers the mounted project-to-project path only. It does
+    // NOT cover the sidebar being unmounted mid-run (AppLayout drops it on
+    // collapse and off /project/*, which discards the flag), a queue already in
+    // review in the destination scope, or handleRegenerateLearnMessage. Those
+    // holes are open.
     //
     // This replaced an attempt to QUEUE the second run, which was worse than the
     // bug it fixed: the card stayed in review with Confirm live, so each further

@@ -1471,20 +1471,27 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
     } finally {
       // Both: the ref is the synchronous guard, the state is what unlocks the
       // composer. A `finally` because the caller launches this with `void`, so
-      // an escaping rejection would otherwise lock the input for good.
+      // an escaping rejection would otherwise leave the lock set and no future
+      // run could ever start.
       executingQueueRef.current = false;
       setQueueRunInFlight(false);
     }
   }, [workspaceMode.kind, seamForProjectCommit, t, WORK_STEPS_COMMIT, writeRunProposalQueue, writeRunWorkLogs, writeRunProposalExecutionLinks]);
 
-  // rovno#227 audit. Only ONE proposal run exists at a time, and the composer is
-  // locked in EVERY scope while it is in flight (see queueRunInFlight), so a
-  // second queue cannot be created and this guard is unreachable in practice.
-  // It stays as a guard, not as a policy: an earlier attempt QUEUED the second
-  // run instead, and that was worse than the bug it fixed -- the card stayed in
-  // review with Confirm live, so each further click enqueued a duplicate run
-  // that then really executed, applying the same proposal 12 times with a
-  // deductCredit each. Preventing the second queue is what makes this simple.
+  // rovno#227 audit. Only ONE proposal run may execute at a time. Dropping the
+  // second one is deliberate: an earlier attempt QUEUED it instead, and that was
+  // worse than the bug it fixed -- the card stayed in review with Confirm live,
+  // so each further click enqueued a duplicate run that then really executed,
+  // applying the same proposal repeatedly with a deductCredit each.
+  //
+  // The composer lock (queueRunInFlight) is meant to make this branch
+  // unreachable, and it does NOT yet: the third audit round reached it three
+  // ways -- the sidebar unmounts on collapse and off /project/*, which discards
+  // the flag; a queue restored in another scope still renders a live Confirm;
+  // and handleRegenerateLearnMessage guards only on scoped state. Until those
+  // are closed this early return still fires, and every click that reaches it
+  // emits a phantom ai_proposal_confirmed with no terminal event -- the exact
+  // corruption rovno#227 exists to fix.
   const beginQueueExecution = useCallback((queueSnapshot: ProposalQueueState) => {
     if (executingQueueRef.current) return;
     executingQueueRef.current = true;
