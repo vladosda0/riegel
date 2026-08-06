@@ -821,6 +821,12 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
   const highlightTimersRef = useRef<Map<string, number>>(new Map());
   const dragRef = useRef<{ startX: number; startW: number } | null>(null);
   const executingQueueRef = useRef(false);
+  // rovno#227 audit: queues confirmed while a run is in flight, each with the
+  // scope it was confirmed under, drained by finishQueueRunRef when the run ends.
+  const pendingQueueRunsRef = useRef<Array<{ scopeKey: string; snapshot: ProposalQueueState }>>([]);
+  const finishQueueRunRef = useRef<(() => void) | null>(null);
+  // The scope currently on screen, readable from the async run without re-running it.
+  const activeScopeKeyRef = useRef<string>("home");
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
   const regenerateTimersRef = useRef<number[]>([]);
   const photoAnalysisTimerRef = useRef<number | null>(null);
@@ -974,6 +980,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       scopedSidebarStateByKey.set(previousScopeKey, latestScopedStateRef.current);
     }
     previousScopeKeyRef.current = scopeKey;
+    activeScopeKeyRef.current = scopeKey;
 
     clearRegenerateTimers();
     clearPhotoAnalysisTimer();
@@ -1205,15 +1212,52 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
     });
   }
 
-  const runQueueExecution = useCallback(async (queueSnapshot: ProposalQueueState) => {
+  // rovno#227 audit. The run is async and the user can navigate away mid-flight,
+  // which changes scopeKey. These route every write the loop makes to the scope
+  // the run STARTED under: live setState while that scope is still on screen,
+  // otherwise straight into the saved snapshot for it. Without this the tail
+  // writes (`setProposalQueue(null)`, `setWorkLogs`) landed in whatever scope
+  // was showing and wiped another project's queue mid-review.
+  const writeRunProposalQueue = useCallback((
+    runScopeKey: string,
+    next: ProposalQueueState | null | ((prev: ProposalQueueState | null) => ProposalQueueState | null),
+  ) => {
+    if (typeof process !== "undefined" && process.env.DIAG_QUEUE) {
+      // eslint-disable-next-line no-console
+      console.log("DIAGQ", JSON.stringify({ active: activeScopeKeyRef.current, run: runScopeKey, match: activeScopeKeyRef.current === runScopeKey }));
+    }
+    if (activeScopeKeyRef.current === runScopeKey) {
+      setProposalQueue(next as Parameters<typeof setProposalQueue>[0]);
+      return;
+    }
+    const saved = scopedSidebarStateByKey.get(runScopeKey) ?? createEmptyScopedSidebarState();
+    const resolved = typeof next === "function"
+      ? (next as (prev: ProposalQueueState | null) => ProposalQueueState | null)(saved.proposalQueue)
+      : next;
+    scopedSidebarStateByKey.set(runScopeKey, { ...saved, proposalQueue: resolved });
+  }, []);
+
+  const writeRunWorkLogs = useCallback((runScopeKey: string, next: Map<string, WorkLogEntry>) => {
+    if (activeScopeKeyRef.current === runScopeKey) {
+      setWorkLogs(next);
+      return;
+    }
+    const saved = scopedSidebarStateByKey.get(runScopeKey) ?? createEmptyScopedSidebarState();
+    scopedSidebarStateByKey.set(runScopeKey, { ...saved, workLogs: [...next.values()] });
+  }, []);
+
+  const runQueueExecution = useCallback(async (
+    queueSnapshot: ProposalQueueState,
+    runScopeKey: string,
+  ) => {
     const confirmedItems = queueSnapshot.items.filter((item) => item.decision === "confirmed");
     if (confirmedItems.length === 0) {
-      setProposalQueue(null);
-      executingQueueRef.current = false;
+      writeRunProposalQueue(runScopeKey, null);
+      finishQueueRunRef.current?.();
       return;
     }
 
-    setProposalQueue((prev) => (prev
+    writeRunProposalQueue(runScopeKey, (prev) => (prev
       ? {
           ...prev,
           phase: "executing",
@@ -1226,7 +1270,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
     for (let cursor = 0; cursor < confirmedItems.length; cursor++) {
       const queueItem = confirmedItems[cursor];
 
-      setProposalQueue((prev) => (prev
+      writeRunProposalQueue(runScopeKey, (prev) => (prev
         ? {
             ...prev,
             phase: "executing",
@@ -1253,7 +1297,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
         const fastFail = resolveProposalFastFail(queueItem.proposal.type, workspaceMode.kind);
         if (fastFail) {
           lastError = t(fastFail.descriptionKey);
-          setProposalQueue((prev) => (prev
+          writeRunProposalQueue(runScopeKey, (prev) => (prev
             ? {
                 ...prev,
                 // 0, not 1: nothing was attempted, matching the `attempts: 0` the
@@ -1278,7 +1322,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
 
         attempt += 1;
         const workLogId = `wl-execute-${queueItem.id}-${attempt}-${Date.now()}`;
-        setWorkLogs(new Map([
+        writeRunWorkLogs(runScopeKey, new Map([
           [workLogId, { id: workLogId, steps: WORK_STEPS_COMMIT, phase: "commit" }],
         ]));
 
@@ -1318,7 +1362,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
         }
 
         lastError = result.error ?? t("ai.sidebar.toast.executionFailed.title");
-        setProposalQueue((prev) => (prev
+        writeRunProposalQueue(runScopeKey, (prev) => (prev
           ? {
               ...prev,
               retryByItemId: { ...prev.retryByItemId, [queueItem.id]: attempt },
@@ -1334,7 +1378,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
         }
       }
 
-      setWorkLogs(new Map());
+      writeRunWorkLogs(runScopeKey, new Map());
 
       // rovno#227: ONE emission point for the whole item, so the three outcomes
       // cannot drift apart the way they did when the only event fired at confirm
@@ -1400,16 +1444,37 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       }
     }
 
-    setWorkLogs(new Map());
-    setProposalQueue(null);
-    executingQueueRef.current = false;
-  }, [workspaceMode.kind, seamForProjectCommit, t, WORK_STEPS_COMMIT]);
+    writeRunWorkLogs(runScopeKey, new Map());
+    writeRunProposalQueue(runScopeKey, null);
+    finishQueueRunRef.current?.();
+  }, [workspaceMode.kind, seamForProjectCommit, t, WORK_STEPS_COMMIT, writeRunProposalQueue, writeRunWorkLogs]);
 
+  // rovno#227 audit. A queue confirmed while another run is in flight used to be
+  // DROPPED: beginQueueExecution returned early and the card stayed in review,
+  // so the user could click Confirm again and again. Every click emitted
+  // ai_proposal_confirmed and no terminal event ever followed, which corrupts
+  // `confirmed - applied - unavailable`. Queue it instead, with the scope it was
+  // confirmed under, and drain when the current run ends.
   const beginQueueExecution = useCallback((queueSnapshot: ProposalQueueState) => {
-    if (executingQueueRef.current) return;
+    const runScopeKey = activeScopeKeyRef.current;
+    if (executingQueueRef.current) {
+      pendingQueueRunsRef.current.push({ scopeKey: runScopeKey, snapshot: queueSnapshot });
+      return;
+    }
     executingQueueRef.current = true;
-    void runQueueExecution(queueSnapshot);
+    void runQueueExecution(queueSnapshot, runScopeKey);
   }, [runQueueExecution]);
+
+  // Assigned through a ref so runQueueExecution can hand off to the next pending
+  // run without the two useCallbacks depending on each other.
+  finishQueueRunRef.current = () => {
+    const next = pendingQueueRunsRef.current.shift();
+    if (!next) {
+      executingQueueRef.current = false;
+      return;
+    }
+    void runQueueExecution(next.snapshot, next.scopeKey);
+  };
 
   /** Latest `runAssistantForContent` for `/home` pending-project flow after `flushSync` (avoids stale seam/context). */
   const runAssistantForContentRef = useRef<
