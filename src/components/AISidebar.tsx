@@ -821,12 +821,12 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
   const highlightTimersRef = useRef<Map<string, number>>(new Map());
   const dragRef = useRef<{ startX: number; startW: number } | null>(null);
   const executingQueueRef = useRef(false);
-  // rovno#227 audit: queues confirmed while a run is in flight, each with the
-  // scope it was confirmed under, drained by finishQueueRunRef when the run ends.
-  const pendingQueueRunsRef = useRef<Array<{ scopeKey: string; snapshot: ProposalQueueState }>>([]);
-  const finishQueueRunRef = useRef<(() => void) | null>(null);
   // The scope currently on screen, readable from the async run without re-running it.
   const activeScopeKeyRef = useRef<string>("home");
+  // NOT part of ScopedAISidebarState on purpose: a run belongs to the sidebar,
+  // not to a project, so this survives navigation and locks the composer in
+  // every scope while a proposal queue is executing.
+  const [queueRunInFlight, setQueueRunInFlight] = useState(false);
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
   const regenerateTimersRef = useRef<number[]>([]);
   const photoAnalysisTimerRef = useRef<number | null>(null);
@@ -1126,7 +1126,11 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
           ? "photo_consult"
           : "none";
   const showPhotoConsultCard = Boolean(photoConsult) && activeWindow !== "worklog" && activeWindow !== "proposal_queue";
-  const isInputLocked = activeWindow !== "none";
+  // queueRunInFlight covers the OTHER scopes: activeWindow is derived from
+  // workLogs/proposalQueue, which are scoped, so in a different project they are
+  // empty and the composer would otherwise be open while a run is still going.
+  const isInputLocked = activeWindow !== "none" || queueRunInFlight;
+  const isLockedByForeignRun = queueRunInFlight && activeWindow === "none";
   const showNearLimitIndicator = events.length >= 100;
   const automationLevel = AUTOMATION_MODE_TO_LEVEL[automationMode];
   const allowDirectEdit = automationLevel >= 3;
@@ -1264,7 +1268,8 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
     const confirmedItems = queueSnapshot.items.filter((item) => item.decision === "confirmed");
     if (confirmedItems.length === 0) {
       writeRunProposalQueue(runScopeKey, null);
-      finishQueueRunRef.current?.();
+      executingQueueRef.current = false;
+      setQueueRunInFlight(false);
       return;
     }
 
@@ -1464,36 +1469,28 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
     writeRunWorkLogs(runScopeKey, new Map());
     writeRunProposalQueue(runScopeKey, null);
     } finally {
-      finishQueueRunRef.current?.();
+      // Both: the ref is the synchronous guard, the state is what unlocks the
+      // composer. A `finally` because the caller launches this with `void`, so
+      // an escaping rejection would otherwise lock the input for good.
+      executingQueueRef.current = false;
+      setQueueRunInFlight(false);
     }
   }, [workspaceMode.kind, seamForProjectCommit, t, WORK_STEPS_COMMIT, writeRunProposalQueue, writeRunWorkLogs, writeRunProposalExecutionLinks]);
 
-  // rovno#227 audit. A queue confirmed while another run is in flight used to be
-  // DROPPED: beginQueueExecution returned early and the card stayed in review,
-  // so the user could click Confirm again and again. Every click emitted
-  // ai_proposal_confirmed and no terminal event ever followed, which corrupts
-  // `confirmed - applied - unavailable`. Queue it instead, with the scope it was
-  // confirmed under, and drain when the current run ends.
+  // rovno#227 audit. Only ONE proposal run exists at a time, and the composer is
+  // locked in EVERY scope while it is in flight (see queueRunInFlight), so a
+  // second queue cannot be created and this guard is unreachable in practice.
+  // It stays as a guard, not as a policy: an earlier attempt QUEUED the second
+  // run instead, and that was worse than the bug it fixed -- the card stayed in
+  // review with Confirm live, so each further click enqueued a duplicate run
+  // that then really executed, applying the same proposal 12 times with a
+  // deductCredit each. Preventing the second queue is what makes this simple.
   const beginQueueExecution = useCallback((queueSnapshot: ProposalQueueState) => {
-    const runScopeKey = activeScopeKeyRef.current;
-    if (executingQueueRef.current) {
-      pendingQueueRunsRef.current.push({ scopeKey: runScopeKey, snapshot: queueSnapshot });
-      return;
-    }
+    if (executingQueueRef.current) return;
     executingQueueRef.current = true;
-    void runQueueExecution(queueSnapshot, runScopeKey);
+    setQueueRunInFlight(true);
+    void runQueueExecution(queueSnapshot, activeScopeKeyRef.current);
   }, [runQueueExecution]);
-
-  // Assigned through a ref so runQueueExecution can hand off to the next pending
-  // run without the two useCallbacks depending on each other.
-  finishQueueRunRef.current = () => {
-    const next = pendingQueueRunsRef.current.shift();
-    if (!next) {
-      executingQueueRef.current = false;
-      return;
-    }
-    void runQueueExecution(next.snapshot, next.scopeKey);
-  };
 
   /** Latest `runAssistantForContent` for `/home` pending-project flow after `flushSync` (avoids stale seam/context). */
   const runAssistantForContentRef = useRef<
@@ -3834,6 +3831,25 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
                           />
                         </div>
                       )}
+                    </div>
+                  )}
+
+                  {/*
+                    rovno#227 audit. The composer is hidden in EVERY scope while a
+                    proposal run is in flight, with a note saying why. Without it
+                    the run's own scope shows the work-log window but any other
+                    project shows an open composer, and confirming a second queue
+                    there either dropped it (phantom analytics) or, in an earlier
+                    attempt, queued a duplicate that really executed.
+                  */}
+                  {isLockedByForeignRun && (
+                    <div className="rounded-lg border border-sidebar-border bg-sidebar-accent/40 px-3 py-2">
+                      <p className="text-xs font-medium text-sidebar-foreground">
+                        {t("ai.sidebar.queueRunInFlight.title")}
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {t("ai.sidebar.queueRunInFlight.description")}
+                      </p>
                     </div>
                   )}
 

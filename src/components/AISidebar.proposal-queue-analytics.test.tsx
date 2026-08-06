@@ -178,23 +178,19 @@ describe("AISidebar proposal queue execution analytics (rovno#227)", () => {
     expect([...terminalIds].sort()).toEqual([...confirmedIds].sort());
   });
 
-  it("carries an in-flight run across a scope change: the second queue still runs and the first does not wipe it", async () => {
-    // rovno#227 audit, findings 1 and 2 together, because they only co-occur.
-    // (1) beginQueueExecution used to early-return while a run was in flight,
-    //     DROPPING the second queue: each further Confirm emitted
-    //     ai_proposal_confirmed and no terminal event ever followed, which
-    //     breaks the subtraction this issue ships.
-    // (2) the in-flight run's tail writes were unscoped, so they landed in
-    //     whatever project was on screen and wiped ITS queue mid-review.
-    // The composer is replaced by the work-log window while a queue executes,
-    // so the only way to confirm a second queue mid-run is from another scope --
-    // which is exactly the reported scenario.
-    // Project A's item is forced to FAIL every attempt, so its run occupies the
-    // full 5-attempt retry loop (~21s of fake time). That is what keeps
-    // executingQueueRef set while we move to B and confirm there; with A
-    // succeeding immediately the run finishes during B's own send and the
-    // pending path is never exercised at all -- which is how the first version
-    // of this test passed against the unfixed code.
+  it("locks the composer in every scope while a run is in flight, and unlocks it when the run ends", async () => {
+    // rovno#227 audit, findings 1 and 2, resolved by prevention rather than by
+    // handling: only ONE proposal run exists at a time and the composer is
+    // locked everywhere while it runs, so a second queue cannot be created.
+    //
+    // This replaced an attempt to QUEUE the second run, which was worse than the
+    // bug it fixed: the card stayed in review with Confirm live, so each further
+    // click enqueued a duplicate run that then really executed, applying the
+    // same proposal 12 times with a deductCredit each.
+    //
+    // The lock has to be checked from ANOTHER scope. activeWindow is derived
+    // from workLogs/proposalQueue, which are per-project, so the run's own scope
+    // hides the composer anyway; a different project is where the hole was.
     const randomMock = vi.spyOn(Math, "random").mockReturnValue(0);
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
@@ -206,66 +202,47 @@ describe("AISidebar proposal queue execution analytics (rovno#227)", () => {
       </QueryClientProvider>,
     );
 
-    const confirmAll = async () => {
-      for (let i = 0; i < 12; i++) {
-        const confirm = screen.queryByRole("button", { name: /^Confirm$/i });
-        if (!confirm) break;
-        fireEvent.click(confirm);
-        await act(async () => { vi.advanceTimersByTime(0); });
-      }
-    };
-    const send = async (prompt: string) => {
-      const composer = screen.getByPlaceholderText("Ask AI...");
-      fireEvent.change(composer, { target: { value: prompt } });
-      fireEvent.keyDown(composer, { key: "Enter" });
-      await act(async () => { vi.advanceTimersByTime(4000); });
-    };
-
-    // Project A: confirm, then step only part way in, so the run is genuinely
-    // in flight when we leave.
-    await send("add task for rough-in");
-    await confirmAll();
+    // Project A: send, confirm, and step only part way in. random = 0 forces
+    // every attempt to fail, so the run occupies its full 5-attempt loop and is
+    // genuinely still in flight when we leave.
+    const composer = screen.getByPlaceholderText("Ask AI...");
+    fireEvent.change(composer, { target: { value: "add task for rough-in" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
+    await act(async () => { vi.advanceTimersByTime(4000); });
+    for (let i = 0; i < 12; i++) {
+      const confirm = screen.queryByRole("button", { name: /^Confirm$/i });
+      if (!confirm) break;
+      fireEvent.click(confirm);
+      await act(async () => { vi.advanceTimersByTime(0); });
+    }
     await act(async () => { vi.advanceTimersByTime(500); });
 
-    // Leave for project B while A is still executing, and confirm a queue there.
+    // Another project, while A is still running: no composer, and a note saying
+    // why rather than a silently dead input.
     fireEvent.click(screen.getByText("GO_TO_B"));
     await act(async () => { vi.advanceTimersByTime(0); });
-    await send("add task for wiring");
-    // Finding 2: A's tail must not have wiped B's queue before we can confirm it.
-    expect(screen.queryByRole("button", { name: /^Confirm$/i })).not.toBeNull();
-    await confirmAll();
-    // B is now QUEUED behind A's still-running retry loop. Let B succeed once it
-    // finally gets its turn, so its outcome is distinguishable from A's.
-    randomMock.mockReturnValue(0.99);
+    expect(screen.queryByPlaceholderText("Ask AI...")).toBeNull();
+    expect(screen.getByText("A proposal is being applied")).toBeInTheDocument();
 
+    // Let A finish. The composer comes back, so the lock is tied to the run and
+    // not a permanent dead end.
+    randomMock.mockReturnValue(0.99);
     for (let i = 0; i < 300; i++) {
       await act(async () => { vi.advanceTimersByTime(1000); });
     }
+    expect(screen.queryByText("A proposal is being applied")).toBeNull();
+    expect(screen.getByPlaceholderText("Ask AI...")).toBeInTheDocument();
 
+    // Exactly one confirmed item, exactly one terminal event: no duplicate run
+    // was ever created.
     const events = trackEventMock.mock.calls
       .filter((call) => String(call[0]).startsWith("ai_proposal"))
       .map((call) => ({ event: String(call[0]), payload: call[1] as Record<string, unknown> }));
     const confirmed = events.filter((e) => e.event === "ai_proposal_confirmed");
     const terminal = events.filter((e) => e.event !== "ai_proposal_confirmed");
-
-    // The scope change really happened: both projects confirmed something.
-    expect(new Set(confirmed.map((e) => e.payload.project_id)))
-      .toEqual(new Set(["project-a", "project-b"]));
-
-    // Finding 1, the load-bearing assertion. B was confirmed while A's run was
-    // still in flight. Before the fix that queue was DROPPED: B emitted
-    // ai_proposal_confirmed and never terminated, so
-    // `confirmed - applied - unavailable` counted a phantom.
-    const confirmedB = confirmed.filter((e) => e.payload.project_id === "project-b");
-    expect(confirmedB.length).toBeGreaterThan(0);
-    const terminalB = terminal.filter((e) => e.payload.project_id === "project-b");
-    expect(terminalB.map((e) => e.event)).toEqual(confirmedB.map(() => "ai_proposal_applied"));
-
-    // And the invariant the subtraction rests on, across both scopes: every
-    // confirmed proposal reached a terminal event. This is the assertion that
-    // fails when the second queue is dropped instead of queued.
-    expect([...terminal.map((e) => e.payload.proposal_id)].sort())
-      .toEqual([...confirmed.map((e) => e.payload.proposal_id)].sort());
+    expect(confirmed).toHaveLength(1);
+    expect(terminal).toHaveLength(1);
+    expect(confirmed[0].payload.project_id).toBe("project-a");
   });
 
   it("emits NOTHING terminal when the retries are exhausted, leaving it derivable by subtraction", async () => {
