@@ -58,7 +58,17 @@ export type AnalyticsEventName =
   | "ai_response_received"
   | "ai_proposal_generated"
   | "ai_proposal_revised"
+  // rovno#227. Three distinct steps, deliberately separate goals in Metrika.
+  // `ai_proposal_confirmed` is the CONFIRM click and is the old
+  // `ai_proposal_applied` under an honest name; `ai_proposal_applied` now means
+  // the change actually landed; `ai_proposal_unavailable` is a type that failed
+  // closed without being attempted. Each new name needs a goal created in the
+  // Metrika UI before it counts — reachGoal on an unconfigured name is dropped.
+  // The retries-exhausted case gets no event on purpose: it is
+  // confirmed - applied - unavailable, so it costs no goal.
+  | "ai_proposal_confirmed"
   | "ai_proposal_applied"
+  | "ai_proposal_unavailable"
   | "ai_proposal_rejected"
   | "ai_live_text_completed"
   // ─── New events added during Mixpanel → Yandex Metrika migration (2026-06).

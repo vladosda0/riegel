@@ -110,7 +110,11 @@ import {
   filterPhotoConsultProposalChangesBySeam,
   type PhotoConsultApplyAction,
 } from "@/lib/commit-proposal";
-import { proposalFailureReasonKey, resolveProposalFastFail } from "@/lib/ai-proposal-execution";
+import {
+  proposalFailureReasonKey,
+  resolveProposalExecutionAnalytics,
+  resolveProposalFastFail,
+} from "@/lib/ai-proposal-execution";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { SaveLearnTargetDialog } from "@/components/ai/SaveLearnTargetDialog";
@@ -1332,6 +1336,31 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
 
       setWorkLogs(new Map());
 
+      // rovno#227: ONE emission point for the whole item, so the three outcomes
+      // cannot drift apart the way they did when the only event fired at confirm
+      // time. Which event (or none) is a pure decision, unit-tested in
+      // @/lib/ai-proposal-execution — this loop has no direct coverage and is
+      // where four blocking defects hid during the #224 rounds.
+      const executionAnalytics = resolveProposalExecutionAnalytics({
+        success,
+        unavailableReason,
+        attempts: attempt,
+      });
+      if (executionAnalytics) {
+        trackEvent(executionAnalytics.event, {
+          // The proposal's own project, matching ai_proposal_confirmed above.
+          project_id: queueItem.proposal.project_id,
+          surface: "ai",
+          proposal_id: queueItem.proposal.id,
+          proposal_type: queueItem.proposal.type,
+          // Zero for a fast-fail, which never entered the retry loop.
+          attempts: executionAnalytics.attempts,
+          ...(executionAnalytics.event === "ai_proposal_unavailable"
+            ? { reason: executionAnalytics.reason }
+            : {}),
+        });
+      }
+
       if (!success) {
         addEvent({
           id: `evt-proposal-failed-${Date.now()}-${cursor}`,
@@ -1896,8 +1925,14 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       // on these two goals as of this release. Proposals raised from /home used
       // to report "" and now report the real id, so a report or funnel grouped
       // on it shows a step at the deploy boundary. On /project/* nothing changes.
+      //
+      // rovno#227: this is the CONFIRM click, so it is `ai_proposal_confirmed`.
+      // It used to be sent as `ai_proposal_applied`, before the queue had
+      // attempted anything and with no counter-event on failure, which reported
+      // a 100% apply rate for types that fail closed on every path. The real
+      // `ai_proposal_applied` is now emitted by runQueueExecution on success.
       if (decision === "confirmed") {
-        trackEvent("ai_proposal_applied", {
+        trackEvent("ai_proposal_confirmed", {
           project_id: current.proposal.project_id,
           surface: "ai",
           proposal_id: current.proposal.id,
