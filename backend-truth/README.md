@@ -170,6 +170,7 @@ It is an allowlist-specific extractor for the source migrations below, not a gen
 - `supabase/migrations/20260726120000_drop_debug_org_rls_state2.sql`
 - `supabase/migrations/20260727120000_drop_out_of_band_debug_rpcs.sql`
 - `supabase/migrations/20260729130000_project_invites_expires_at.sql`
+- `supabase/migrations/20260806070000_can_access_storage_object_archived_documents.sql`
 
 ## Exclusions
 
