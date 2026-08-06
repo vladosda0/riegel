@@ -1222,10 +1222,6 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
     runScopeKey: string,
     next: ProposalQueueState | null | ((prev: ProposalQueueState | null) => ProposalQueueState | null),
   ) => {
-    if (typeof process !== "undefined" && process.env.DIAG_QUEUE) {
-      // eslint-disable-next-line no-console
-      console.log("DIAGQ", JSON.stringify({ active: activeScopeKeyRef.current, run: runScopeKey, match: activeScopeKeyRef.current === runScopeKey }));
-    }
     if (activeScopeKeyRef.current === runScopeKey) {
       setProposalQueue(next as Parameters<typeof setProposalQueue>[0]);
       return;
@@ -1235,6 +1231,21 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       ? (next as (prev: ProposalQueueState | null) => ProposalQueueState | null)(saved.proposalQueue)
       : next;
     scopedSidebarStateByKey.set(runScopeKey, { ...saved, proposalQueue: resolved });
+  }, []);
+
+  const writeRunProposalExecutionLinks = useCallback((
+    runScopeKey: string,
+    next: (prev: Record<string, ProposalExecutionGroupMeta>) => Record<string, ProposalExecutionGroupMeta>,
+  ) => {
+    if (activeScopeKeyRef.current === runScopeKey) {
+      setProposalExecutionLinks(next);
+      return;
+    }
+    const saved = scopedSidebarStateByKey.get(runScopeKey) ?? createEmptyScopedSidebarState();
+    scopedSidebarStateByKey.set(runScopeKey, {
+      ...saved,
+      proposalExecutionLinks: next(saved.proposalExecutionLinks),
+    });
   }, []);
 
   const writeRunWorkLogs = useCallback((runScopeKey: string, next: Map<string, WorkLogEntry>) => {
@@ -1256,6 +1267,12 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       finishQueueRunRef.current?.();
       return;
     }
+
+    // The handoff is in a `finally` because the caller launches this with
+    // `void`: an escaping rejection would otherwise leave executingQueueRef set
+    // for the component's life, and since rovno#227 that flag gates every FUTURE
+    // run, so pending snapshots would pile up and none of them would ever start.
+    try {
 
     writeRunProposalQueue(runScopeKey, (prev) => (prev
       ? {
@@ -1344,7 +1361,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
           if (proposalEventId) {
             const childEventIds = result.eventIds.filter((eventId) => eventId !== proposalEventId);
             if (childEventIds.length > 0) {
-              setProposalExecutionLinks((prev) => ({
+              writeRunProposalExecutionLinks(runScopeKey, (prev) => ({
                 ...prev,
                 [proposalEventId]: {
                   summary: queueItem.proposal.summary,
@@ -1446,8 +1463,10 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
 
     writeRunWorkLogs(runScopeKey, new Map());
     writeRunProposalQueue(runScopeKey, null);
-    finishQueueRunRef.current?.();
-  }, [workspaceMode.kind, seamForProjectCommit, t, WORK_STEPS_COMMIT, writeRunProposalQueue, writeRunWorkLogs]);
+    } finally {
+      finishQueueRunRef.current?.();
+    }
+  }, [workspaceMode.kind, seamForProjectCommit, t, WORK_STEPS_COMMIT, writeRunProposalQueue, writeRunWorkLogs, writeRunProposalExecutionLinks]);
 
   // rovno#227 audit. A queue confirmed while another run is in flight used to be
   // DROPPED: beginQueueExecution returned early and the card stayed in review,
