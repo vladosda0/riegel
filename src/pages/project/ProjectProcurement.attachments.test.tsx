@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -14,6 +14,15 @@ let workspaceMode: { kind: string; profileId?: string } = { kind: "supabase", pr
 // Lets a test seed the item the page renders. Attachments are always [] on the real supabase read
 // paths, so the Remove-button case can only be reached by seeding one here.
 let itemOverrides: Partial<ProcurementItemV2> = {};
+
+const SEEDED_ATTACHMENT = {
+  id: "att-1",
+  url: "https://example.com/receipt.pdf",
+  type: "link" as const,
+  name: "receipt.pdf",
+  isLocal: false,
+  createdAt: "2026-08-07T00:00:00.000Z",
+};
 
 vi.mock("@/hooks/use-workspace-source", async () => {
   const actual = await vi.importActual<typeof import("@/hooks/use-workspace-source")>(
@@ -159,14 +168,7 @@ describe("ProjectProcurement attachments", () => {
   it("produces an empty supabase patch for an attachment-only change", () => {
     const original = buildItem();
     const draft = buildItem({
-      attachments: [{
-        id: "att-1",
-        url: "https://example.com/receipt.pdf",
-        type: "link",
-        name: "receipt.pdf",
-        isLocal: false,
-        createdAt: "2026-08-07T00:00:00.000Z",
-      }],
+      attachments: [SEEDED_ATTACHMENT],
     });
 
     expect(diffProcurementItemPatch(original, draft)).toEqual({});
@@ -203,32 +205,52 @@ describe("ProjectProcurement attachments", () => {
   // the guard is on the control rather than on that accident.
   it("disables Remove for an existing attachment in supabase mode", () => {
     itemOverrides = {
-      attachments: [{
-        id: "att-1",
-        url: "https://example.com/receipt.pdf",
-        type: "link",
-        name: "receipt.pdf",
-        isLocal: false,
-        createdAt: "2026-08-07T00:00:00.000Z",
-      }],
+      attachments: [SEEDED_ATTACHMENT],
     };
     renderDetail();
 
     expect(screen.getByRole("button", { name: "Remove" })).toBeDisabled();
   });
 
+  // The three handler guards are belt-and-braces behind controls that are already disabled, so
+  // nothing a user can do reaches them, and the `disabled` assertions above do not cover them: a
+  // mutation run confirmed that deleting `if (isSupabaseMode) return;` from a handler leaves the
+  // whole suite green. The test below strips the attribute the UI relies on and drives the handler
+  // directly. It is deliberately exercising a state the UI cannot produce today, because that is
+  // the state the guards exist for: the day `attachments` gains a read path.
+  //
+  // Only addUrlAttachment is covered this way, and the reason is measured, not assumed. In supabase
+  // mode this harness cannot observe a draft mutation at all: the mocked
+  // useProjectProcurementItemsState returns a fresh buildItem() on every render, so detailItem's
+  // identity changes constantly and the detail re-seeds editForm, reverting any edit before an
+  // assertion can see it. Verified by probe — with the removeAttachment guard DELETED, a
+  // forced-enabled Remove click still leaves the row on screen, while the same click in local mode
+  // (stable store data, no re-seed) drops it. A "removeAttachment refuses" test written this way
+  // therefore passes with or without the guard, which is worse than no test.
+  //
+  // So these two guards are knowingly uncovered, and the gap is recorded rather than papered over:
+  //   - removeAttachment  (1708) — not observable through this harness, see above
+  //   - addLocalAttachments (1681) — driven by a hidden file input; needs a DataTransfer fixture
+  // Covering them properly means either a stable-identity mock or extracting the three handlers into
+  // a pure module. Tracked in rovno#298.
+  it("addUrlAttachment refuses in supabase mode even when the control is forced enabled", () => {
+    renderDetail();
+
+    const urlInput = screen.getByPlaceholderText("Paste a link to receipt/invoice (PDF, Drive, etc.)");
+    urlInput.removeAttribute("disabled");
+    fireEvent.change(urlInput, { target: { value: "https://example.com/added.pdf" } });
+    fireEvent.keyDown(urlInput, { key: "Enter" });
+
+    // The guard returned early, so no attachment row was created.
+    expect(screen.queryByText("added.pdf")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+  });
+
   // Control: the same seeded attachment stays removable in local mode, where the draft persists.
   it("keeps Remove enabled for an existing attachment in local mode", () => {
     workspaceMode = { kind: "local" };
     itemOverrides = {
-      attachments: [{
-        id: "att-1",
-        url: "https://example.com/receipt.pdf",
-        type: "link",
-        name: "receipt.pdf",
-        isLocal: false,
-        createdAt: "2026-08-07T00:00:00.000Z",
-      }],
+      attachments: [SEEDED_ATTACHMENT],
     };
     renderDetail();
 

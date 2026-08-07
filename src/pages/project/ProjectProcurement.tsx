@@ -137,6 +137,10 @@ const EMPTY_SYNC_STATE = {
 
 const TABS: ProcurementTab[] = ["requested", "ordered", "in_stock"];
 
+// Ties the disabled attachment controls to the badge that explains why they are disabled. Only one
+// detail dialog is mounted at a time, so a constant id cannot collide.
+const ATTACHMENTS_COMING_SOON_ID = "procurement-attachments-coming-soon";
+
 type Translator = (key: string, options?: Record<string, unknown>) => string;
 
 const TAB_META: Record<ProcurementTab, { labelKey: string; className: string }> = {
@@ -1694,11 +1698,13 @@ export default function ProjectProcurement() {
   };
 
   const removeAttachment = (attachmentId: string) => {
-    // The third attachments patchEditForm site, guarded like the other two. Unreachable in
-    // supabase mode today only because both read paths hardcode `attachments: []`, so without
-    // this the invariant "no editor path leaves a non-persistable delta in the draft" would rest
-    // on a mapper constant rather than on the guards, and would break silently the day the
-    // backing column lands.
+    // The third attachments patchEditForm site, guarded like the other two, so that no ATTACHMENTS
+    // path can leave a non-persistable delta in the draft. Scoped to attachments deliberately: the
+    // wider claim would be false, because `type` is the other non-persistable field with an editor
+    // control and its handler is unguarded (see rovno#297). Unreachable in supabase mode today only
+    // because both read paths hardcode `attachments: []`, so without this the attachments invariant
+    // would rest on a mapper constant rather than on the guards, and would break silently the day
+    // the backing column lands.
     if (isSupabaseMode) return;
     patchEditForm((prev) => {
       const current = prev.attachments ?? [];
@@ -3339,6 +3345,7 @@ export default function ProjectProcurement() {
                       // in supabase mode, so editing it here would Save-toast then silently revert.
                       disabled={!canEdit || isSupabaseMode}
                       title={isSupabaseMode ? t("common.comingSoon") : undefined}
+                      aria-describedby={isSupabaseMode ? ATTACHMENTS_COMING_SOON_ID : undefined}
                     />
                     <Input
                       ref={filePickerRef}
@@ -3357,16 +3364,25 @@ export default function ProjectProcurement() {
                       onClick={() => filePickerRef.current?.click()}
                       disabled={!canEdit || isSupabaseMode}
                       title={isSupabaseMode ? t("common.comingSoon") : undefined}
+                      aria-describedby={isSupabaseMode ? ATTACHMENTS_COMING_SOON_ID : undefined}
                     >
                       {t("procurement.action.addFile")}
                     </Button>
-                    {/* The titles above cannot surface on their own: Button's base class carries
-                        disabled:pointer-events-none, so a disabled control never receives hover.
-                        The visible badge is what actually tells the user why the controls are
-                        greyed, and it matches the disabled + title + Badge shape already used
-                        for handleRequestMore in the row actions of this same page. */}
+                    {/* Neither title above is reliable: Button's base class carries
+                        disabled:pointer-events-none so it never receives hover at all, and Chromium
+                        does not fire hover on a disabled input either. The visible badge is what
+                        actually tells the user why the controls are greyed, and aria-describedby is
+                        what tells assistive tech, since a disabled control is out of the tab order
+                        and would otherwise reach the badge by nothing. Matches the
+                        disabled + title + Badge shape already used for handleRequestMore in the row
+                        actions of this same page; w-fit because unlike that row this container is
+                        flex-col below sm, where the default stretch would blow the pill full width. */}
                     {isSupabaseMode && (
-                      <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-normal">
+                      <Badge
+                        id={ATTACHMENTS_COMING_SOON_ID}
+                        variant="secondary"
+                        className="h-5 w-fit px-1.5 text-[10px] font-normal"
+                      >
                         {t("common.comingSoon")}
                       </Badge>
                     )}
@@ -3391,7 +3407,7 @@ export default function ProjectProcurement() {
                               </a>
                               <button
                                 type="button"
-                                className="text-muted-foreground hover:text-destructive"
+                                className="text-muted-foreground hover:text-destructive disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-muted-foreground"
                                 onClick={() => removeAttachment(attachment.id)}
                                 disabled={!canEdit || isSupabaseMode}
                               >
