@@ -174,10 +174,11 @@ describe("ProjectProcurement attachments", () => {
     expect(diffProcurementItemPatch(original, draft)).toEqual({});
   });
 
-  // Disabling the controls is not enough on its own: `title` cannot surface on a disabled control,
-  // because Button's base class carries `disabled:pointer-events-none` and so never receives hover.
-  // The visible badge is the only thing that tells the user why the controls are greyed, which is
-  // the same "nothing tells them" gap #291 was filed about.
+  // Disabling the controls is not enough on its own: `title` cannot surface on either control.
+  // Button's base class carries `disabled:pointer-events-none` so it never receives hover, and
+  // Chromium does not fire hover on a disabled input either. The visible badge is the only thing
+  // that tells the user why the controls are greyed, which is the same "nothing tells them" gap
+  // #291 was filed about.
   it("shows a visible «coming soon» badge in supabase mode, not just an unreachable title", () => {
     renderDetail();
 
@@ -224,11 +225,12 @@ describe("ProjectProcurement attachments", () => {
   // now covers addUrlAttachment.
   //
   // Why only that one, measured rather than assumed. react-dom's `shouldPreventMouseEvent` drops
-  // onClick/onMouseDown/onMouseUp when the fiber's PROPS carry `disabled` on an interactive
-  // element, and `removeAttribute("disabled")` mutates the DOM node, not the props. So a handler
-  // exposed only through onClick — which is exactly removeAttachment's Remove button — cannot be
-  // driven from a test while the control is props-disabled. `onChange` and `onKeyDown` are absent
-  // from that switch and dispatch normally, which is why the URL input below is reachable.
+  // the whole mouse-event family — onClick, onDoubleClick, onMouseDown/Move/Up, onMouseEnter and
+  // their Capture variants — when the fiber's PROPS carry `disabled` on an interactive element, and
+  // `removeAttribute("disabled")` mutates the DOM node, not the props. So a handler exposed only
+  // through onClick — which is exactly removeAttachment's Remove button — cannot be driven from a
+  // test while the control is props-disabled. `onChange` and `onKeyDown` are absent from that
+  // switch and dispatch normally, which is why the URL input below is reachable.
   //
   // A "removeAttachment refuses" test was written this way, measured to pass with the guard
   // DELETED, and removed again rather than shipped: an inert test reports coverage that does not
@@ -248,8 +250,10 @@ describe("ProjectProcurement attachments", () => {
     fireEvent.change(urlInput, { target: { value: "https://example.com/added.pdf" } });
     fireEvent.keyDown(urlInput, { key: "Enter" });
 
-    // The guard returned early, so no attachment row was created.
-    expect(screen.queryByText("added.pdf")).toBeNull();
+    // The guard returned early, so no attachment row was created. Match the FULL url: addUrlAttachment
+    // stores `name: url` and attachmentDisplayName renders it verbatim, so a "added.pdf" matcher
+    // never matches whether the row exists or not, and the assertion would be inert.
+    expect(screen.queryByText("https://example.com/added.pdf")).toBeNull();
     expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
   });
 
