@@ -225,12 +225,17 @@ describe("ProjectProcurement attachments", () => {
   // now covers addUrlAttachment.
   //
   // Why only that one, measured rather than assumed. react-dom's `shouldPreventMouseEvent` drops
-  // the whole mouse-event family — onClick, onDoubleClick, onMouseDown/Move/Up, onMouseEnter and
-  // their Capture variants — when the fiber's PROPS carry `disabled` on an interactive element, and
+  // `onClick` when the fiber's PROPS carry `disabled` on an interactive element, and
   // `removeAttribute("disabled")` mutates the DOM node, not the props. So a handler exposed only
   // through onClick — which is exactly removeAttachment's Remove button — cannot be driven from a
-  // test while the control is props-disabled. `onChange` and `onKeyDown` are absent from that
-  // switch and dispatch normally, which is why the URL input below is reachable.
+  // test while the control is props-disabled. `onChange` and `onKeyDown` are not covered by that
+  // switch and dispatch normally, which is why the URL input below is reachable. Both halves were
+  // verified by instrumented probe, not read off the source.
+  //
+  // Deliberately NOT enumerating the rest of that switch here. It is a private React implementation
+  // detail, nothing below depends on which other names it covers, and two attempts at spelling the
+  // list out were both wrong (one too narrow, one inventing a handler name that does not exist).
+  // If you need the full set, read it from react-dom rather than from this comment.
   //
   // A "removeAttachment refuses" test was written this way, measured to pass with the guard
   // DELETED, and removed again rather than shipped: an inert test reports coverage that does not
