@@ -92,7 +92,9 @@ export function shouldUseHostedLiveTextAssistantPath(workspaceKind: string, proj
 // Mode picker
 // ---------------------------------------------------------------------------
 
-const PROPOSAL_INTENT_RE = /\b(estimate|scope|work|proposal|quote|budget)\b/i;
+// `\b` is ASCII-only, so it never fires next to Cyrillic: the Russian stems match without it.
+const PROPOSAL_INTENT_RE =
+  /\b(estimate|scope|work|proposal|quote|budget)\b|(смет|объ[её]м[а-я]* работ|предложен|бюджет|стоимост|расцен|коммерческ)/i;
 
 export function pickInferenceMode(userMessage: string, aiAccess: AIAccess): InferenceMode {
   if (aiAccess !== "project_pool") return "consult";
