@@ -1650,6 +1650,10 @@ export default function ProjectProcurement() {
   };
 
   const addUrlAttachment = () => {
+    // Attachments have no procurement_items column and are dropped from the supabase patch, so the
+    // control is disabled + marked "coming soon" in supabase mode. Guard here too in case the
+    // handler is reached, to avoid a "Сохранено" toast over a draft that silently reverts.
+    if (isSupabaseMode) return;
     const url = attachmentUrl.trim();
     if (!url) return;
 
@@ -1670,6 +1674,7 @@ export default function ProjectProcurement() {
   };
 
   const addLocalAttachments = (files: FileList | null) => {
+    if (isSupabaseMode) return;
     if (!files || files.length === 0) return;
     const now = new Date().toISOString();
 
@@ -3324,7 +3329,10 @@ export default function ProjectProcurement() {
                       }}
                       placeholder={t("procurement.detail.attachmentPlaceholder")}
                       className="h-9 sm:flex-1"
-                      disabled={!canEdit}
+                      // No procurement_items attachments column exists; the draft stays client-only
+                      // in supabase mode, so editing it here would Save-toast then silently revert.
+                      disabled={!canEdit || isSupabaseMode}
+                      title={isSupabaseMode ? t("common.comingSoon") : undefined}
                     />
                     <Input
                       ref={filePickerRef}
@@ -3341,7 +3349,8 @@ export default function ProjectProcurement() {
                       variant="outline"
                       className="h-9 w-full sm:w-auto"
                       onClick={() => filePickerRef.current?.click()}
-                      disabled={!canEdit}
+                      disabled={!canEdit || isSupabaseMode}
+                      title={isSupabaseMode ? t("common.comingSoon") : undefined}
                     >
                       {t("procurement.action.addFile")}
                     </Button>
