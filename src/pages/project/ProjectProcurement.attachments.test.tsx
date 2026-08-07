@@ -11,6 +11,9 @@ const PROJECT_ID = "project-procurement-attachments";
 const ITEM_ID = "procurement-attachments-item";
 
 let workspaceMode: { kind: string; profileId?: string } = { kind: "supabase", profileId: "u1" };
+// Lets a test seed the item the page renders. Attachments are always [] on the real supabase read
+// paths, so the Remove-button case can only be reached by seeding one here.
+let itemOverrides: Partial<ProcurementItemV2> = {};
 
 vi.mock("@/hooks/use-workspace-source", async () => {
   const actual = await vi.importActual<typeof import("@/hooks/use-workspace-source")>(
@@ -32,7 +35,7 @@ vi.mock("@/hooks/use-procurement-source", async () => {
   );
   return {
     ...actual,
-    useProjectProcurementItemsState: () => ({ items: [buildItem()], isLoading: false }),
+    useProjectProcurementItemsState: () => ({ items: [buildItem(itemOverrides)], isLoading: false }),
   };
 });
 
@@ -124,6 +127,7 @@ function renderDetail() {
 describe("ProjectProcurement attachments", () => {
   beforeEach(() => {
     workspaceMode = { kind: "supabase", profileId: "u1" };
+    itemOverrides = {};
   });
 
   it("disables the attachment controls in supabase mode, where nothing it produces is persisted", () => {
@@ -166,5 +170,68 @@ describe("ProjectProcurement attachments", () => {
     });
 
     expect(diffProcurementItemPatch(original, draft)).toEqual({});
+  });
+
+  // Disabling the controls is not enough on its own: `title` cannot surface on a disabled control,
+  // because Button's base class carries `disabled:pointer-events-none` and so never receives hover.
+  // The visible badge is the only thing that tells the user why the controls are greyed, which is
+  // the same "nothing tells them" gap #291 was filed about.
+  it("shows a visible «coming soon» badge in supabase mode, not just an unreachable title", () => {
+    renderDetail();
+
+    const addFileButton = screen.getByRole("button", { name: "Add file" });
+    const badge = screen.getByText("Coming soon");
+
+    expect(addFileButton).toBeDisabled();
+    expect(badge).toBeVisible();
+    // The badge must sit beside the controls it explains, not somewhere else on the page.
+    expect(addFileButton.parentElement).toContainElement(badge);
+  });
+
+  // Control: the badge is an explanation for a supabase-only restriction. In local mode the controls
+  // work, so an unconditional badge would be a lie.
+  it("shows no badge in local mode, where the controls work", () => {
+    workspaceMode = { kind: "local" };
+    renderDetail();
+
+    expect(screen.getByRole("button", { name: "Add file" })).not.toBeDisabled();
+    expect(screen.queryByText("Coming soon")).toBeNull();
+  });
+
+  // removeAttachment is the third attachments patchEditForm site. It is unreachable in supabase mode
+  // today only because both read paths hardcode `attachments: []`, so this test seeds one to prove
+  // the guard is on the control rather than on that accident.
+  it("disables Remove for an existing attachment in supabase mode", () => {
+    itemOverrides = {
+      attachments: [{
+        id: "att-1",
+        url: "https://example.com/receipt.pdf",
+        type: "link",
+        name: "receipt.pdf",
+        isLocal: false,
+        createdAt: "2026-08-07T00:00:00.000Z",
+      }],
+    };
+    renderDetail();
+
+    expect(screen.getByRole("button", { name: "Remove" })).toBeDisabled();
+  });
+
+  // Control: the same seeded attachment stays removable in local mode, where the draft persists.
+  it("keeps Remove enabled for an existing attachment in local mode", () => {
+    workspaceMode = { kind: "local" };
+    itemOverrides = {
+      attachments: [{
+        id: "att-1",
+        url: "https://example.com/receipt.pdf",
+        type: "link",
+        name: "receipt.pdf",
+        isLocal: false,
+        createdAt: "2026-08-07T00:00:00.000Z",
+      }],
+    };
+    renderDetail();
+
+    expect(screen.getByRole("button", { name: "Remove" })).not.toBeDisabled();
   });
 });

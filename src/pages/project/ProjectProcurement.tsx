@@ -1694,6 +1694,12 @@ export default function ProjectProcurement() {
   };
 
   const removeAttachment = (attachmentId: string) => {
+    // The third attachments patchEditForm site, guarded like the other two. Unreachable in
+    // supabase mode today only because both read paths hardcode `attachments: []`, so without
+    // this the invariant "no editor path leaves a non-persistable delta in the draft" would rest
+    // on a mapper constant rather than on the guards, and would break silently the day the
+    // backing column lands.
+    if (isSupabaseMode) return;
     patchEditForm((prev) => {
       const current = prev.attachments ?? [];
       const target = current.find((attachment) => attachment.id === attachmentId);
@@ -3354,6 +3360,16 @@ export default function ProjectProcurement() {
                     >
                       {t("procurement.action.addFile")}
                     </Button>
+                    {/* The titles above cannot surface on their own: Button's base class carries
+                        disabled:pointer-events-none, so a disabled control never receives hover.
+                        The visible badge is what actually tells the user why the controls are
+                        greyed, and it matches the disabled + title + Badge shape already used
+                        for handleRequestMore in the row actions of this same page. */}
+                    {isSupabaseMode && (
+                      <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-normal">
+                        {t("common.comingSoon")}
+                      </Badge>
+                    )}
                   </div>
 
                   {(editForm.attachments ?? []).length > 0 ? (
@@ -3377,7 +3393,7 @@ export default function ProjectProcurement() {
                                 type="button"
                                 className="text-muted-foreground hover:text-destructive"
                                 onClick={() => removeAttachment(attachment.id)}
-                                disabled={!canEdit}
+                                disabled={!canEdit || isSupabaseMode}
                               >
                                 {t("common.remove")}
                               </button>
