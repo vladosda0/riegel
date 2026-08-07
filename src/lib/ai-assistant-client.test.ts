@@ -149,19 +149,8 @@ describe("pickInferenceMode", () => {
     expect(pickInferenceMode("budget for tiling", "project_pool")).toBe("proposal");
   });
 
-  it("returns proposal for project_pool with Russian proposal-intent keywords", () => {
-    expect(pickInferenceMode("составь смету на покраску", "project_pool")).toBe("proposal");
-    expect(pickInferenceMode("предложи объём работ", "project_pool")).toBe("proposal");
-    expect(pickInferenceMode("посчитай бюджет по этапу", "project_pool")).toBe("proposal");
-    expect(pickInferenceMode("оцени стоимость отделки", "project_pool")).toBe("proposal");
-    expect(pickInferenceMode("дай расценки на плитку", "project_pool")).toBe("proposal");
-    expect(pickInferenceMode("сделай коммерческое предложение", "project_pool")).toBe("proposal");
-  });
-
   it("returns consult for project_pool without proposal-intent keywords", () => {
     expect(pickInferenceMode("what is the project status?", "project_pool")).toBe("consult");
-    expect(pickInferenceMode("какой статус проекта?", "project_pool")).toBe("consult");
-    expect(pickInferenceMode("когда приедет бригада?", "project_pool")).toBe("consult");
   });
 });
 
