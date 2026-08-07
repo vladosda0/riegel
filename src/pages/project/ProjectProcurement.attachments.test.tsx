@@ -181,6 +181,7 @@ describe("ProjectProcurement attachments", () => {
   it("shows a visible «coming soon» badge in supabase mode, not just an unreachable title", () => {
     renderDetail();
 
+    const urlInput = screen.getByPlaceholderText("Paste a link to receipt/invoice (PDF, Drive, etc.)");
     const addFileButton = screen.getByRole("button", { name: "Add file" });
     const badge = screen.getByText("Coming soon");
 
@@ -188,6 +189,11 @@ describe("ProjectProcurement attachments", () => {
     expect(badge).toBeVisible();
     // The badge must sit beside the controls it explains, not somewhere else on the page.
     expect(addFileButton.parentElement).toContainElement(badge);
+    // A disabled control is out of the tab order, so the association is the only route assistive
+    // tech has to the badge. Without these two assertions both aria-describedby attributes can be
+    // deleted with the suite still green (measured).
+    expect(urlInput).toHaveAttribute("aria-describedby", badge.id);
+    expect(addFileButton).toHaveAttribute("aria-describedby", badge.id);
   });
 
   // Control: the badge is an explanation for a supabase-only restriction. In local mode the controls
@@ -213,31 +219,32 @@ describe("ProjectProcurement attachments", () => {
   });
 
   // The three handler guards are belt-and-braces behind controls that are already disabled, so
-  // nothing a user can do reaches them, and the `disabled` assertions above do not cover them: a
-  // mutation run confirmed that deleting `if (isSupabaseMode) return;` from a handler leaves the
-  // whole suite green. The test below strips the attribute the UI relies on and drives the handler
-  // directly. It is deliberately exercising a state the UI cannot produce today, because that is
-  // the state the guards exist for: the day `attachments` gains a read path.
+  // nothing a user can do reaches them. Before this test existed, deleting
+  // `if (isSupabaseMode) return;` from ANY of the three left the whole suite green; the test below
+  // now covers addUrlAttachment.
   //
-  // Only addUrlAttachment is covered this way, and the reason is measured, not assumed. In supabase
-  // mode this harness cannot observe a draft mutation at all: the mocked
-  // useProjectProcurementItemsState returns a fresh buildItem() on every render, so detailItem's
-  // identity changes constantly and the detail re-seeds editForm, reverting any edit before an
-  // assertion can see it. Verified by probe — with the removeAttachment guard DELETED, a
-  // forced-enabled Remove click still leaves the row on screen, while the same click in local mode
-  // (stable store data, no re-seed) drops it. A "removeAttachment refuses" test written this way
-  // therefore passes with or without the guard, which is worse than no test.
+  // Why only that one, measured rather than assumed. react-dom's `shouldPreventMouseEvent` drops
+  // onClick/onMouseDown/onMouseUp when the fiber's PROPS carry `disabled` on an interactive
+  // element, and `removeAttribute("disabled")` mutates the DOM node, not the props. So a handler
+  // exposed only through onClick — which is exactly removeAttachment's Remove button — cannot be
+  // driven from a test while the control is props-disabled. `onChange` and `onKeyDown` are absent
+  // from that switch and dispatch normally, which is why the URL input below is reachable.
+  //
+  // A "removeAttachment refuses" test was written this way, measured to pass with the guard
+  // DELETED, and removed again rather than shipped: an inert test reports coverage that does not
+  // exist. An earlier version of this comment blamed the mocked items hook re-seeding editForm.
+  // That was wrong and is corrected here: the seed effect early-returns on
+  // `initializedDetailIdRef.current === detailItem.id`, the mock always returns the same id, and a
+  // stable-identity mock changes nothing — removeAttachment is simply never invoked.
   //
   // So these two guards are knowingly uncovered, and the gap is recorded rather than papered over:
-  //   - removeAttachment  (1708) — not observable through this harness, see above
-  //   - addLocalAttachments (1681) — driven by a hidden file input; needs a DataTransfer fixture
-  // Covering them properly means either a stable-identity mock or extracting the three handlers into
-  // a pure module. Tracked in rovno#298.
-  it("addUrlAttachment refuses in supabase mode even when the control is forced enabled", () => {
+  //   - removeAttachment    — onClick only, see above; needs the handler extracted to a pure module
+  //   - addLocalAttachments — driven by a hidden file input; needs a DataTransfer fixture
+  // Tracked in rovno#298.
+  it("addUrlAttachment refuses in supabase mode even when its keyboard path is driven directly", () => {
     renderDetail();
 
     const urlInput = screen.getByPlaceholderText("Paste a link to receipt/invoice (PDF, Drive, etc.)");
-    urlInput.removeAttribute("disabled");
     fireEvent.change(urlInput, { target: { value: "https://example.com/added.pdf" } });
     fireEvent.keyDown(urlInput, { key: "Enter" });
 
