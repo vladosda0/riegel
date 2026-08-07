@@ -241,6 +241,22 @@ export default function UserCatalogPage() {
     };
   }, [rows, scheduleFlush]);
 
+  const flushRef = useRef(flushDirtyRows);
+  useEffect(() => {
+    flushRef.current = flushDirtyRows;
+  }, [flushDirtyRows]);
+
+  // An edit made inside the debounce window right before navigating away must
+  // not be lost: the cleanup above only cancels the timer, and there is no
+  // other flush path. Declared after it so React clears the timer first, and
+  // routed through the ref because the route reuses this component across
+  // :catalogId — a mount-time closure would flush against the wrong catalog.
+  useEffect(() => {
+    return () => {
+      flushRef.current();
+    };
+  }, []);
+
   const editorRows: EditorRowData[] = useMemo(() => {
     if (!rows) return [];
     const names = articleNamesQuery.data;
