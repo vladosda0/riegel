@@ -885,6 +885,81 @@ describe("ProjectEstimate", () => {
     expect(within(footer).queryByText(byNormalizedText(formatMoney(0, state.project.currency)))).not.toBeInTheDocument();
   });
 
+  it("keeps persisted summary pricing for an EDITABLE summary co_owner whose line costs are redacted", async () => {
+    // Same actor as the two tests above — co_owner, summary, build_myself, and
+    // able to edit. The single difference is that the store hydrated through the
+    // operational RPC and zeroed the cost fields, which is what happens in
+    // Supabase mode. Recomputing client pricing from those zeros is the ₽0.00
+    // defect (rovno#301 is unrelated; this is rovno#282).
+    const projectId = "project-estimate-summary-editable-redacted-costs";
+    const profile = setStoredAuthProfile({
+      email: `${projectId}@example.com`,
+      name: "Co Owner User",
+    });
+
+    addProject({
+      id: projectId,
+      owner_id: "other-owner-id",
+      title: "Workspace Project",
+      type: "residential",
+      project_mode: "build_myself",
+      automation_level: "assisted",
+      current_stage_id: "",
+      progress_pct: 0,
+    });
+
+    addMember({
+      project_id: projectId,
+      user_id: profile.id,
+      role: "co_owner",
+      ai_access: "project_pool",
+      credit_limit: 500,
+      used_credits: 0,
+      finance_visibility: "summary",
+    });
+    setAuthRole("co_owner");
+
+    const seeded = seedEstimateLine(projectId);
+    expect(seeded).not.toBeNull();
+    if (!seeded?.line) return;
+
+    updateEstimateV2Project(projectId, { projectMode: "build_myself" });
+    updateLine(projectId, seeded.line.id, { qtyMilli: 2_000, discountBpsOverride: 0 });
+    // What estimate-v2-store writes for a redacted line. Set before the snapshot:
+    // changing a pricing-driving field clears cached summary cents.
+    updateLine(projectId, seeded.line.id, { costUnitCents: 0, costRedacted: true, markupBps: 0 });
+    // The snapshot is the only truthful pricing source for such a user.
+    updateLine(projectId, seeded.line.id, {
+      summaryClientUnitCents: 19_999,
+      summaryClientTotalCents: 39_998,
+    });
+
+    const state = getEstimateV2ProjectState(projectId);
+    const redactedLine = state.lines.find((item) => item.id === seeded.line.id);
+    expect(redactedLine?.costRedacted).toBe(true);
+    expect(redactedLine?.summaryClientUnitCents).toBe(19_999);
+    const zero = formatMoney(0, state.project.currency);
+
+    await act(async () => {
+      renderProjectEstimate(projectId);
+      await flushUi();
+    });
+
+    const lineRow = screen.getByText("Concrete").closest("tr");
+    expect(lineRow).not.toBeNull();
+    if (!lineRow) return;
+
+    expect(within(lineRow).getByText(byNormalizedText(formatMoney(19_999, state.project.currency)))).toBeInTheDocument();
+    expect(within(lineRow).getByText(byNormalizedText(formatMoney(39_998, state.project.currency)))).toBeInTheDocument();
+
+    // The header/footer block is the sharp edge: it fell to the recompute branch
+    // and rendered ₽0.00 under per-line prices that were correct.
+    const footer = screen.getByText("Total across all stages").closest("div.rounded-lg");
+    expect(footer).not.toBeNull();
+    if (!(footer instanceof HTMLElement)) return;
+    expect(within(footer).queryByText(byNormalizedText(zero))).not.toBeInTheDocument();
+  });
+
   it("keeps persisted summary pricing for read-only summary viewers while internal detail stays redacted", async () => {
     const projectId = "project-estimate-summary-viewer-snapshot-pricing";
     setupLocalProject(projectId, { finance_visibility: "summary" });

@@ -1019,8 +1019,15 @@ export default function ProjectEstimate() {
   const canEditEstimate = canManageEstimate;
   const canSubmitToClient = canManageEstimate && canSubmitByMembership;
   const isContractorMode = projectMode === "contractor";
+  // Two independent reasons to price from the persisted snapshot rather than
+  // recompute, and conflating them rendered ₽0.00 for a summary co_owner
+  // (rovno#282): they cannot edit, so nothing can have gone stale; OR the store
+  // hydrated through the operational RPC and zeroed the cost fields, so there is
+  // nothing truthful left to recompute from. `canEditEstimate` answers only the
+  // first, and is true for every co_owner regardless of finance visibility.
+  const hasRedactedLineCosts = lines.some((line) => line.costRedacted);
   const useReadOnlySummaryPricing = estimateFinanceMode === "summary"
-    && !canEditEstimate
+    && (!canEditEstimate || hasRedactedLineCosts)
     && !isCurrentUserLoading
     && !isProjectLoading
     && !isMembersLoading
