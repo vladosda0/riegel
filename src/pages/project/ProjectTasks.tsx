@@ -416,6 +416,10 @@ export default function ProjectTasks() {
         });
         return;
       }
+      // Everything in doneFiles was already uploaded and finalized as is_final by
+      // the loop above, so keeping the selection makes a second click re-upload
+      // the same photos. Drop it and let the retry be a deliberate re-pick.
+      setDoneFiles([]);
       toast({
         title: t("tasks.toast.cannotComplete.title"),
         description: error instanceof Error ? error.message : t("tasks.toast.cannotComplete.fallback"),
@@ -1179,7 +1183,9 @@ export default function ProjectTasks() {
             </div>
 
             <div className="flex justify-end gap-2 pt-sp-1">
-              <Button variant="outline" onClick={() => setDonePrompt(null)}>{t("common.back")}</Button>
+              {/* Leaving mid-upload lets the finishing loop tear down whatever
+                  prompt is open by then, including one opened on another task. */}
+              <Button variant="outline" disabled={doneUploading} onClick={() => setDonePrompt(null)}>{t("common.back")}</Button>
               <Button
                 className="bg-success text-success-foreground hover:bg-success/90"
                 onClick={() => void handleConfirmDone()}
@@ -1189,7 +1195,13 @@ export default function ProjectTasks() {
               </Button>
             </div>
           </div>
-          <div className="fixed inset-0 z-[61] bg-black/40" onClick={() => setDonePrompt(null)} />
+          <div
+            className="fixed inset-0 z-[61] bg-black/40"
+            onClick={() => {
+              if (doneUploading) return;
+              setDonePrompt(null);
+            }}
+          />
         </div>
       )}
 

@@ -478,4 +478,94 @@ describe("ProjectTasks", () => {
     );
     expect(finalizeUpload).toHaveBeenCalled();
   });
+
+  it("drops the photo selection after a failed Done confirm, so a retry cannot re-upload the same files", async () => {
+    const prepareUpload = vi.fn().mockResolvedValue({
+      bucket: "media",
+      objectPath: "project-1/photo.jpg",
+      uploadIntentId: "intent-1",
+    });
+    const uploadBytes = vi.fn().mockResolvedValue(undefined);
+    const finalizeUpload = vi.fn().mockResolvedValue(undefined);
+    mocks.useMediaUploadMutations.mockReturnValue({ prepareUpload, uploadBytes, finalizeUpload });
+    mocks.usePermission.mockReturnValue(buildPermission("contractor"));
+    mocks.useTasks.mockReturnValue([buildTask({ status: "in_progress" })]);
+    // A transient failure, not a lost CAS: this is the generic branch, the one
+    // that leaves the prompt open and the button live.
+    mocks.changeTaskStatus.mockRejectedValue(new Error("network down"));
+
+    const { container } = renderProjectTasks();
+
+    fireEvent.click(screen.getByText("Estimate task"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Done" }));
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(fileInput, {
+      target: { files: [new File(["photo"], "photo.jpg", { type: "image/jpeg" })] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
+
+    await waitFor(() =>
+      expect(mocks.toast).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Unable to complete task" }),
+      ),
+    );
+    expect(finalizeUpload).toHaveBeenCalledTimes(1);
+
+    // The prompt stays open so the failure is recoverable, but the selection is
+    // gone: retrying has to be a deliberate re-pick rather than a second click
+    // on files that were already uploaded and finalized as is_final.
+    expect(screen.getByText("Add final result photos")).toBeInTheDocument();
+    expect(screen.getByText("No files selected")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Mark Done/i })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
+    await waitFor(() => expect(finalizeUpload).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps Back and the backdrop inert while acceptance photos are still uploading", async () => {
+    let releaseUpload: () => void = () => {};
+    const prepareUpload = vi.fn().mockResolvedValue({
+      bucket: "media",
+      objectPath: "project-1/photo.jpg",
+      uploadIntentId: "intent-1",
+    });
+    const uploadBytes = vi.fn().mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseUpload = () => resolve();
+        }),
+    );
+    const finalizeUpload = vi.fn().mockResolvedValue(undefined);
+    mocks.useMediaUploadMutations.mockReturnValue({ prepareUpload, uploadBytes, finalizeUpload });
+    mocks.usePermission.mockReturnValue(buildPermission("contractor"));
+    mocks.useTasks.mockReturnValue([buildTask({ status: "in_progress" })]);
+
+    const { container } = renderProjectTasks();
+
+    fireEvent.click(screen.getByText("Estimate task"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Done" }));
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(fileInput, {
+      target: { files: [new File(["photo"], "photo.jpg", { type: "image/jpeg" })] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
+
+    await waitFor(() => expect(uploadBytes).toHaveBeenCalled());
+
+    // Leaving mid-upload is what let a finished loop tear down a prompt the user
+    // had since opened on a different task, and toast success about it.
+    const back = screen.getByRole("button", { name: "Back" });
+    expect(back).toBeDisabled();
+    fireEvent.click(back);
+    expect(screen.getByText("Add final result photos")).toBeInTheDocument();
+
+    const backdrop = container.querySelector(".z-\\[61\\]") as HTMLElement;
+    fireEvent.click(backdrop);
+    expect(screen.getByText("Add final result photos")).toBeInTheDocument();
+
+    releaseUpload();
+    await waitFor(() => expect(mocks.changeTaskStatus).toHaveBeenCalled());
+  });
 });
