@@ -641,25 +641,21 @@ describe("ProjectParticipants", () => {
       );
     });
 
-    it("blocks saving a credit limit above the owner plan's monthly AI quota", async () => {
+    it("offers no editable credit limit, so there is no above-cap value to block", async () => {
       mountSupabaseOwner({ members: [contractor("m-a")], planCode: "master" });
-      const updateSpy = vi.spyOn(workspaceSource, "updateWorkspaceProjectMemberRole");
       renderParticipants();
 
       fireEvent.click(screen.getByText("m-a"));
       const drawer = await screen.findByRole("dialog", { name: "m-a" });
       // contractor default ai=consult_only already shows the requests field.
       const requests = within(drawer).getByLabelText("Request limit");
-      fireEvent.change(requests, { target: { value: "5000" } });
 
-      expect(within(drawer).getByText(/At most 500/)).toBeInTheDocument();
-      const saveBtn = within(drawer).getByRole("button", { name: "Save access" });
-      expect(saveBtn).toBeDisabled();
-      fireEvent.click(saveBtn);
-      expect(updateSpy).not.toHaveBeenCalled();
-
-      // Lowering it under the cap re-enables save.
-      fireEvent.change(requests, { target: { value: "300" } });
+      // project_members.credit_limit has no reader and consume_ai_credit meters
+      // the member's own subscription, so the field is parked behind «Soon»
+      // (rovno#301, option B). The above-cap guard it needed went with it: this
+      // test previously typed 5000 against the owner plan's quota of 500.
+      expect(requests).toBeDisabled();
+      expect(within(drawer).queryByText(/At most 500/)).not.toBeInTheDocument();
       expect(within(drawer).getByRole("button", { name: "Save access" })).toBeEnabled();
     });
   });

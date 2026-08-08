@@ -133,7 +133,9 @@ export function computeAccessPreview(input: {
 
   // The AI row gets its own badge wording: the person USES the assistant, so
   // "views/edits" would mislead. consult_only → «Консультации», project_pool →
-  // «Полный доступ · лимит N» (state drives only color/icon).
+  // «Полный доступ» (state drives only color/icon). No limit line: credit_limit
+  // has no reader, so naming a number promised an enforcement that does not
+  // exist (rovno#301). The drawer field reads «Скоро» for the same reason.
   items.push({
     key: "ai",
     labelKey: "participants.preview.ai",
@@ -142,11 +144,7 @@ export function computeAccessPreview(input: {
       ? { stateLabelKey: "participants.preview.aiState.consult" }
       : {}),
     ...(axes.aiAccess === "project_pool"
-      ? {
-          stateLabelKey: "participants.preview.aiState.full",
-          detailKey: "participants.preview.aiLimit",
-          detailParams: { limit: input.creditLimit ?? 0 },
-        }
+      ? { stateLabelKey: "participants.preview.aiState.full" }
       : {}),
   });
 

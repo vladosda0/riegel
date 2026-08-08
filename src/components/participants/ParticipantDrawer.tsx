@@ -267,17 +267,11 @@ export function ParticipantDrawer(props: ParticipantDrawerProps) {
 
   const emailValid = !isEdit ? /\S+@\S+\.\S+/.test(email.trim()) : true;
   const roleAllowed = readOnly || roleOptions.includes(form.role);
-  // A member cannot spend more AI credits than the owner's plan grants per
-  // month, so a limit above the plan quota is refused client-side (there is no
-  // DB constraint for this — feedback #8).
-  const aiCreditCap = seat.aiMonthlyLimit != null && seat.aiMonthlyLimit >= 0 ? seat.aiMonthlyLimit : null;
-  const creditLimitTooHigh = !readOnly && form.aiAccess !== "none"
-    && aiCreditCap != null && parseCreditLimit(form.creditLimit) > aiCreditCap;
   // The seat gate must also hold for the CURRENTLY selected role, not only for
   // switching cards — otherwise the default role sails past the cap on submit.
   const selectedRoleSeatBlocked = !readOnly && Boolean(seatBlockReasonFor(form.role));
   const canSubmit = !readOnly && roleAllowed && axesAllowed && emailValid
-    && !creditLimitTooHigh && !selectedRoleSeatBlocked && !saving;
+    && !selectedRoleSeatBlocked && !saving;
 
   function seatBlockReasonFor(role: MemberRole): string | null {
     if (!ASSIGNABLE_ROLES.includes(role)) return null;
@@ -503,28 +497,25 @@ export function ParticipantDrawer(props: ParticipantDrawerProps) {
               // (sm:min-h-9) so texts top-align and the inputs sit on one line
               // even when a label wraps.
               <div className="grid gap-3 sm:grid-cols-3">
+                {/* The request limit joins them: project_members.credit_limit
+                    has no reader, and consume_ai_credit meters the member's own
+                    subscription, so an editable number promised an enforcement
+                    that does not exist (rovno#301). */}
                 <div>
-                  <label
-                    className="flex items-start text-caption font-medium text-foreground sm:min-h-9"
-                    htmlFor="participant-credit-limit"
-                  >
+                  <span className="flex items-start justify-between gap-1.5 text-caption font-medium text-muted-foreground sm:min-h-9">
                     {t("participants.drawer.requestsLimit")}
-                  </label>
+                    <Badge variant="outline" className="shrink-0 border-border px-1.5 py-0 text-[10px] font-medium text-muted-foreground">
+                      {t("participants.drawer.soon")}
+                    </Badge>
+                  </span>
                   <Input
                     id="participant-credit-limit"
                     type="number"
-                    min={0}
-                    max={aiCreditCap ?? undefined}
-                    value={form.creditLimit}
-                    disabled={readOnly}
-                    onChange={(event) => setForm((current) => ({ ...current, creditLimit: event.target.value }))}
+                    disabled
+                    placeholder="—"
                     className="mt-1"
+                    aria-label={t("participants.drawer.requestsLimit")}
                   />
-                  {creditLimitTooHigh && (
-                    <p className="mt-1 text-caption text-warning">
-                      {t("participants.drawer.creditLimitTooHigh", { limit: aiCreditCap })}
-                    </p>
-                  )}
                 </div>
                 {/* Photo/document analysis are pool-only features; they get
                     per-member limits once shipped — the disabled fields
