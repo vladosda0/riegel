@@ -1001,7 +1001,11 @@ describe("ProjectEstimate", () => {
       await flushUi();
     });
 
-    expect(screen.getByText("Owner only")).toBeInTheDocument();
+    // Not "Owner only": they ARE a co-owner, and saying so would send the owner
+    // hunting for a role fix that does not exist instead of raising finance
+    // visibility to detail.
+    expect(screen.getByText("Read-only: needs full finance access")).toBeInTheDocument();
+    expect(screen.queryByText("Owner only")).not.toBeInTheDocument();
   });
 
   it("prices from the operational upper block when the RPC returned no resource lines at all", async () => {

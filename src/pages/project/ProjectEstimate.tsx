@@ -132,7 +132,7 @@ import {
   type EstimateLineClientDisplayMode,
 } from "@/lib/estimate-v2/pricing";
 import { SHOW_ESTIMATE_VERSION_UI } from "@/lib/estimate-v2/show-estimate-version-ui";
-import { resolveProjectEstimateCtaState } from "@/lib/estimate-v2/project-estimate-cta";
+import { canPublishClientShare, resolveProjectEstimateCtaState } from "@/lib/estimate-v2/project-estimate-cta";
 import { getDefaultFinanceVisibility } from "@/lib/participant-role-policy";
 import {
   combinePlanFact,
@@ -1017,12 +1017,23 @@ export default function ProjectEstimate() {
   const canExportEstimateCsv = seamAllowsEstimateExportCsv(perm.seam);
   const canManageEstimate = projectDomainAllowsManage(estimateAccess);
   // Editing needs finance detail, not just the role. A co_owner below detail
-  // could reach every edit control, but `queueProjectDraftSync` refuses their
-  // writes with `blocked_permission` (estimate-v2-store.ts), so the affordance
-  // only ever discarded their work — and each edit also cleared the persisted
-  // snapshot that was the sole truthful pricing source for them (rovno#282).
+  // could reach every edit control, and every edit cleared the persisted snapshot
+  // that was the sole truthful pricing source for them (rovno#282). In managed
+  // supabase mode their writes were then refused by `queueProjectDraftSync` as
+  // `blocked_permission`, so nothing was persisted either. In demo/local that
+  // check is never reached and the edits did survive in the workspace cache;
+  // withdrawing them there is deliberate, not a side effect.
   const canEditEstimate = canManageEstimate && estimateFinanceMode === "detail";
-  const canSubmitToClient = canManageEstimate && canSubmitByMembership;
+  // Publishing is strictly stronger than editing, so it takes the same gate. The
+  // share snapshot is built from the RAW lines and ShareEstimate recomputes from
+  // them with no snapshot preference, so a below-detail member would publish a
+  // client-facing estimate of zeroes — and since this page now shows them the
+  // correct money, they would have no signal at all (rovno#282, audit round 2).
+  const canSubmitToClient = canPublishClientShare({
+    canManageEstimate,
+    isSubmitterRole: canSubmitByMembership,
+    financeMode: estimateFinanceMode,
+  });
   const isContractorMode = projectMode === "contractor";
   // Which pricing SOURCE to read is a different question from who may edit, and
   // it is keyed on the ROLE-level `canManageEstimate` on purpose: a manager
@@ -2754,7 +2765,11 @@ export default function ProjectEstimate() {
                 onChange={handleEstimateStatusChange}
               />
               {!canEditEstimate && (
-                <div className="text-caption text-muted-foreground">{t("estimate.header.ownerOnly")}</div>
+                <div className="text-caption text-muted-foreground">
+                  {canManageEstimate
+                    ? t("estimate.header.needsFinanceDetail")
+                    : t("estimate.header.ownerOnly")}
+                </div>
               )}
             </div>
           )}
