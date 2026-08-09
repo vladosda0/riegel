@@ -481,15 +481,10 @@ function PermissionFormSections(props: {
 
           <div className="rounded-card border border-border/70 bg-background/70 p-3">
             <label className="text-caption font-medium text-foreground">{t("participants.permission.creditLimit")}</label>
-            <Input
-              type="number"
-              min={0}
-              value={form.creditLimit}
-              onChange={(event) => {
-                onFormChange((current) => ({ ...current, creditLimit: event.target.value }));
-              }}
-              className="mt-1"
-            />
+            {/* Parked like the redesign's field: nothing reads
+                project_members.credit_limit (rovno#301). The stored value is
+                still submitted unchanged, so no data is lost. */}
+            <Input type="number" disabled placeholder="—" className="mt-1" />
           </div>
         </div>
       </SettingsSection>

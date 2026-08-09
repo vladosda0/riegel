@@ -3333,8 +3333,8 @@
   "participants.axisHelp.docs.view": "Видит внутренние документы, но не может их изменять.",
   "participants.axisHelp.docs.edit": "Загружает и изменяет внутренние документы проекта.",
   "participants.axisHelp.ai.none": "Без доступа к ИИ-ассистенту проекта.",
-  "participants.axisHelp.ai.consult_only": "Может консультироваться с ИИ по проекту в рамках лимита запросов.",
-  "participants.axisHelp.ai.project_pool": "Полный доступ к ИИ проекта: вопросы, анализ и действия — в рамках лимита запросов.",
+  "participants.axisHelp.ai.consult_only": "Может консультироваться с ИИ по проекту.",
+  "participants.axisHelp.ai.project_pool": "Полный доступ к ИИ проекта: вопросы, анализ и действия.",
   "participants.preview.aiState.consult": "Консультации",
   "participants.preview.aiState.full": "Полный доступ",
   "participants.drawer.requestsLimit": "Лимит запросов",
@@ -3587,5 +3587,6 @@
   "invite.error.project_owner_over_limit": "У пригласившего исчерпан лимит участников проекта. Попросите его улучшить тариф или освободить место, чтобы вы могли присоединиться.",
   "participants.error.sendExpired": "Срок действия приглашения истёк. Отзовите его и пригласите заново.",
   "participants.error.sendNoLongerPending": "Приглашение уже принято или отозвано.",
-  "participants.error.sendNotFound": "Приглашение не найдено."
+  "participants.error.sendNotFound": "Приглашение не найдено.",
+  "estimate.header.needsFinanceDetail": "Только чтение: нужен полный доступ к финансам"
 }
