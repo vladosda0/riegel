@@ -413,9 +413,11 @@ export default function ProjectTasks() {
         expectedStatus: donePrompt.expectedStatus,
         commentBody: doneComment.trim() || undefined,
       });
-      if (!isCurrentRun()) return;
+      // Invalidate even for an abandoned run: the write landed, so skipping the
+      // refresh would leave the board showing the old status and let the next
+      // Done attempt re-upload the same photos as is_final. Guarding AFTER the
+      // await is what keeps the abandoned run from touching prompt state.
       await invalidateProjectTasks();
-      // The refetch is a real network round trip, so Cancel can land inside it.
       if (!isCurrentRun()) return;
       trackEvent("task_marked_done", {
         project_id: pid,

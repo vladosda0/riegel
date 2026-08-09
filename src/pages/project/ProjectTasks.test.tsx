@@ -639,6 +639,63 @@ describe("ProjectTasks", () => {
     }
   });
 
+  it("still refreshes the board when the run is cancelled after the status write landed", async () => {
+    // The write reached the server, so skipping the refresh would leave the board
+    // on the old status. A retry would then capture that stale expectedStatus,
+    // sail past the pre-upload converge guard, and re-upload the same photos as
+    // is_final.
+    let releaseStatusWrite: () => void = () => {};
+    const invalidateSpy = vi
+      .spyOn(QueryClient.prototype, "invalidateQueries")
+      .mockResolvedValue(undefined);
+
+    try {
+      const prepareUpload = vi.fn().mockResolvedValue({
+        bucket: "media",
+        objectPath: "project-1/photo.jpg",
+        uploadIntentId: "intent-1",
+      });
+      const uploadBytes = vi.fn().mockResolvedValue(undefined);
+      const finalizeUpload = vi.fn().mockResolvedValue(undefined);
+      mocks.useMediaUploadMutations.mockReturnValue({ prepareUpload, uploadBytes, finalizeUpload });
+      mocks.usePermission.mockReturnValue(buildPermission("contractor"));
+      mocks.useTasks.mockReturnValue([buildTask({ status: "in_progress" })]);
+      mocks.changeTaskStatus.mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseStatusWrite = () => resolve();
+          }),
+      );
+
+      const { container } = renderProjectTasks();
+
+      fireEvent.click(screen.getByText("Estimate task"));
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Done" }));
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+      fireEvent.change(fileInput, {
+        target: { files: [new File(["photo"], "photo.jpg", { type: "image/jpeg" })] },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
+
+      await waitFor(() => expect(mocks.changeTaskStatus).toHaveBeenCalled());
+      invalidateSpy.mockClear();
+
+      // Walk away while the status write is still in flight, then let it land.
+      fireEvent.click(screen.getByRole("button", { name: "Back" }));
+      releaseStatusWrite();
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(invalidateSpy).toHaveBeenCalled();
+      expect(mocks.toast).not.toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Task marked as Done" }),
+      );
+    } finally {
+      invalidateSpy.mockRestore();
+    }
+  });
+
   it("lets a cancelled upload run finish without disturbing a prompt opened afterwards", async () => {
     let releaseUpload: () => void = () => {};
     const prepareUpload = vi.fn().mockResolvedValue({
