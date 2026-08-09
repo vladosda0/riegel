@@ -1016,18 +1016,24 @@ export default function ProjectEstimate() {
   const estimateFinanceMode = seamEstimateFinanceVisibilityMode(perm.seam);
   const canExportEstimateCsv = seamAllowsEstimateExportCsv(perm.seam);
   const canManageEstimate = projectDomainAllowsManage(estimateAccess);
-  const canEditEstimate = canManageEstimate;
+  // Editing needs finance detail, not just the role. A co_owner below detail
+  // could reach every edit control, but `queueProjectDraftSync` refuses their
+  // writes with `blocked_permission` (estimate-v2-store.ts), so the affordance
+  // only ever discarded their work — and each edit also cleared the persisted
+  // snapshot that was the sole truthful pricing source for them (rovno#282).
+  const canEditEstimate = canManageEstimate && estimateFinanceMode === "detail";
   const canSubmitToClient = canManageEstimate && canSubmitByMembership;
   const isContractorMode = projectMode === "contractor";
-  // Two independent reasons to price from the persisted snapshot rather than
-  // recompute, and conflating them rendered ₽0.00 for a summary co_owner
-  // (rovno#282): they cannot edit, so nothing can have gone stale; OR the store
-  // hydrated through the operational RPC and zeroed the cost fields, so there is
-  // nothing truthful left to recompute from. `canEditEstimate` answers only the
-  // first, and is true for every co_owner regardless of finance visibility.
+  // Which pricing SOURCE to read is a different question from who may edit, and
+  // it is keyed on the ROLE-level `canManageEstimate` on purpose: a manager
+  // holding live costs must recompute even though the line above just made them
+  // read-only. Prefer the persisted snapshot when there is nothing truthful to
+  // recompute from: the store zeroed the costs, or it hydrated through the
+  // operational RPC and returned no resource lines at all, in which case no line
+  // survives to carry `costRedacted` and the upper block is the only pricing.
   const hasRedactedLineCosts = lines.some((line) => line.costRedacted);
   const useReadOnlySummaryPricing = estimateFinanceMode === "summary"
-    && (!canEditEstimate || hasRedactedLineCosts)
+    && (!canManageEstimate || hasRedactedLineCosts || (operationalUpperBlock != null && lines.length === 0))
     && !isCurrentUserLoading
     && !isProjectLoading
     && !isMembersLoading
