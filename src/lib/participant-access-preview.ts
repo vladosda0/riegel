@@ -101,7 +101,6 @@ const PREVIEW_DOMAINS: ReadonlyArray<{ domain: ProjectDomain; labelKey: string }
 export function computeAccessPreview(input: {
   role: MemberRole;
   axes: ParticipantAxes;
-  creditLimit?: number;
 }): AccessPreviewItem[] {
   const { role, axes } = input;
   const items: AccessPreviewItem[] = PREVIEW_DOMAINS.map(({ domain, labelKey }) => ({
@@ -134,8 +133,9 @@ export function computeAccessPreview(input: {
   // The AI row gets its own badge wording: the person USES the assistant, so
   // "views/edits" would mislead. consult_only → «Консультации», project_pool →
   // «Полный доступ» (state drives only color/icon). No limit line: credit_limit
-  // has no reader, so naming a number promised an enforcement that does not
-  // exist (rovno#301). The drawer field reads «Скоро» for the same reason.
+  // has no reader (rovno-db 20260522130400_create_usage_rpcs.sql meters the
+  // member's own subscription instead), so naming a number here promised an
+  // enforcement that does not exist (rovno#301).
   items.push({
     key: "ai",
     labelKey: "participants.preview.ai",

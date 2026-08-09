@@ -91,7 +91,6 @@ describe("participant-access-preview", () => {
       const items = computeAccessPreview({
         role: "owner",
         axes: axes({ aiAccess: "project_pool", financeVisibility: "detail", internalDocsVisibility: "edit" }),
-        creditLimit: 500,
       });
       expect(previewItem(items, "estimate").state).toBe("edits");
       expect(previewItem(items, "hr").state).toBe("edits");

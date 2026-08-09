@@ -49,7 +49,6 @@ import {
   buildCreateForm,
   buildFormFromRecord,
   formAxes,
-  parseCreditLimit,
   recordAxes,
   resolveViewerRegime,
   seatLimitReached,
@@ -499,8 +498,10 @@ export function ParticipantDrawer(props: ParticipantDrawerProps) {
               <div className="grid gap-3 sm:grid-cols-3">
                 {/* The request limit joins them: project_members.credit_limit
                     has no reader, and consume_ai_credit meters the member's own
-                    subscription, so an editable number promised an enforcement
-                    that does not exist (rovno#301). */}
+                    subscription (rovno-db
+                    supabase/migrations/20260522130400_create_usage_rpcs.sql),
+                    so an editable number promised an enforcement that does not
+                    exist (rovno#301). */}
                 <div>
                   <span className="flex items-start justify-between gap-1.5 text-caption font-medium text-muted-foreground sm:min-h-9">
                     {t("participants.drawer.requestsLimit")}
@@ -563,7 +564,6 @@ export function ParticipantDrawer(props: ParticipantDrawerProps) {
             name={targetName}
             role={form.role}
             axes={axes}
-            creditLimit={parseCreditLimit(form.creditLimit)}
           />
 
           {!isEdit && activeOrgName && (

@@ -519,6 +519,11 @@ describe("ProjectTasks", () => {
     expect(screen.getByText("No files selected")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Mark Done/i })).toBeDisabled();
 
+    // FileInput holds its own filename state and its own native value. Left
+    // alone it keeps showing the picked file next to "No files selected", and
+    // re-picking that same file fires no change event at all.
+    expect(screen.queryByText("photo.jpg")).not.toBeInTheDocument();
+
     fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
     await waitFor(() => expect(finalizeUpload).toHaveBeenCalledTimes(1));
   });

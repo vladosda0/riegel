@@ -205,6 +205,7 @@ export default function ProjectTasks() {
   const [donePrompt, setDonePrompt] = useState<{ taskId: string; expectedStatus: TaskStatus } | null>(null);
   const [doneFiles, setDoneFiles] = useState<File[]>([]);
   const [doneUploading, setDoneUploading] = useState(false);
+  const [doneFilesResetKey, setDoneFilesResetKey] = useState(0);
   const [doneComment, setDoneComment] = useState("");
 
   // --- Blocked prompt --- (same capture-at-open rule as the Done prompt above)
@@ -416,10 +417,14 @@ export default function ProjectTasks() {
         });
         return;
       }
-      // Everything in doneFiles was already uploaded and finalized as is_final by
-      // the loop above, so keeping the selection makes a second click re-upload
-      // the same photos. Drop it and let the retry be a deliberate re-pick.
+      // Files the loop got through are attached as is_final and cannot be told
+      // apart from here, so a second click over the same selection would
+      // re-upload them. Drop it: the retry has to be a deliberate re-pick.
+      // FileInput keeps its own filename state and its own native value, so it
+      // is remounted too, or the row would keep showing the old file next to
+      // "no files selected" and re-picking that file would fire no change event.
       setDoneFiles([]);
+      setDoneFilesResetKey((key) => key + 1);
       toast({
         title: t("tasks.toast.cannotComplete.title"),
         description: error instanceof Error ? error.message : t("tasks.toast.cannotComplete.fallback"),
@@ -1162,6 +1167,7 @@ export default function ProjectTasks() {
 
             <div className="space-y-2">
               <FileInput
+                key={doneFilesResetKey}
                 accept="image/*"
                 multiple
                 disabled={doneUploading}

@@ -48,7 +48,6 @@ function renderDrawer() {
         viewersPending: 0,
         editorsLimit: 10,
         viewersLimit: 10,
-        aiMonthlyLimit: 500,
       }}
       resendAvailable={false}
       saving={false}
