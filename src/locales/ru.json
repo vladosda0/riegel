@@ -1200,7 +1200,6 @@
   "participants.dropdown.editAccess": "Изменить доступ",
   "participants.dropdown.resendEmail": "Отправить email повторно",
   "participants.editAccessButton": "Изменить доступ",
-  "participants.creditLimit": "Лимит кредитов: {{value}}",
   "participants.usedCredits": " · Использовано {{value}}",
   "participants.viewerRegimeRow": "Режим наблюдателя: {{value}}",
   "participants.sensitiveAccess": "Чувствительный доступ",

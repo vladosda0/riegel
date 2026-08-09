@@ -1019,10 +1019,10 @@ export default function ProjectEstimate() {
   // Editing needs finance detail, not just the role. A co_owner below detail
   // could reach every edit control, and every edit cleared the persisted snapshot
   // that was the sole truthful pricing source for them (rovno#282). In managed
-  // supabase mode their writes were then refused by `queueProjectDraftSync` as
-  // `blocked_permission`, so nothing was persisted either. In demo/local that
-  // check is never reached and the edits did survive in the workspace cache;
-  // withdrawing them there is deliberate, not a side effect.
+  // supabase mode `queueProjectDraftSync` caches the edit locally and then
+  // refuses to sync it as `blocked_permission`, so it never reached the DB. In
+  // demo/local it returns before that cache write and the edit lived only in the
+  // in-memory store. Withdrawing it there is deliberate, not a side effect.
   const canEditEstimate = canManageEstimate && estimateFinanceMode === "detail";
   // Publishing is strictly stronger than editing, so it takes the same gate. The
   // share snapshot is built from the RAW lines and ShareEstimate recomputes from
@@ -2049,6 +2049,12 @@ export default function ProjectEstimate() {
       versionNumber: number,
       snapshotPayload: typeof currentVersionSnapshot,
     ): Promise<{ ok: true } | { ok: false; error: string }> => {
+      // The gate lives here rather than at the call sites: two of the four
+      // publish paths are only unreachable today because SHOW_ESTIMATE_VERSION_UI
+      // is false, and that constant invites being flipped back on.
+      if (!canSubmitToClient) {
+        return { ok: false, error: t("estimate.export.share.cannotSubmit") };
+      }
       const options = submitOptionsFor();
       try {
         await publishEstimateShareSnapshot({

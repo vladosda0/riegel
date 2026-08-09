@@ -1104,8 +1104,10 @@ function LegacyProjectParticipants() {
                           </span>
                         </TableCell>
                         <TableCell className="text-right">
+                          {/* Only the credits actually consumed. The per-member
+                              limit is enforced by nothing (rovno#301), so the
+                              "N/M" form asserted a cap that never applied. */}
                           <span className="text-body-sm">{member.used_credits}</span>
-                          <span className="text-caption text-muted-foreground">/{member.credit_limit}</span>
                         </TableCell>
                         {canManageAccess && (
                           <TableCell>
@@ -1296,11 +1298,12 @@ function LegacyProjectParticipants() {
                               <BrainCircuit className="h-3.5 w-3.5" />
                               {t(aiAccessLabels[record.aiAccess])}
                             </div>
-                            <div className="flex items-center gap-1.5">
-                              <Coins className="h-3.5 w-3.5" />
-                              {t("participants.creditLimit", { count: record.creditLimit })}
-                              {typeof record.usedCredits === "number" ? ` · ${t("participants.usedCredits", { count: record.usedCredits })}` : ""}
-                            </div>
+                            {typeof record.usedCredits === "number" && (
+                              <div className="flex items-center gap-1.5">
+                                <Coins className="h-3.5 w-3.5" />
+                                {t("participants.usedCredits", { count: record.usedCredits })}
+                              </div>
+                            )}
                             <div className="flex items-center gap-1.5">
                               <Shield className="h-3.5 w-3.5" />
                               {t(financeVisibilityLabels[record.financeVisibility])}
@@ -1385,10 +1388,7 @@ function LegacyProjectParticipants() {
                               <BrainCircuit className="h-3.5 w-3.5" />
                               {t(aiAccessLabels[record.aiAccess])}
                             </div>
-                            <div className="flex items-center gap-1.5">
-                              <Coins className="h-3.5 w-3.5" />
-                              {t("participants.creditLimit", { count: record.creditLimit })}
-                            </div>
+
                             <div className="flex items-center gap-1.5">
                               <Shield className="h-3.5 w-3.5" />
                               {t(financeVisibilityLabels[record.financeVisibility])}

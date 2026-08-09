@@ -1186,7 +1186,6 @@
   "participants.dropdown.editAccess": "Edit access",
   "participants.dropdown.resendEmail": "Resend email",
   "participants.editAccessButton": "Edit access",
-  "participants.creditLimit": "Credit limit: {{value}}",
   "participants.usedCredits": " · Used {{value}}",
   "participants.viewerRegimeRow": "Viewer regime: {{value}}",
   "participants.sensitiveAccess": "Sensitive access",
