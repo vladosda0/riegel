@@ -2044,16 +2044,25 @@ export default function ProjectEstimate() {
         };
     };
 
+    // A co_owner below detail IS the co-owner the generic string tells them to
+    // go and find, so that wording sends them after a person who does not exist.
+    const shareDenialMessage = () => (
+      canManageEstimate && canSubmitByMembership && estimateFinanceMode !== "detail"
+        ? t("estimate.export.share.needsFinanceDetail")
+        : t("estimate.export.share.cannotSubmit")
+    );
+
     const publishToBackend = async (
       shareToken: string,
       versionNumber: number,
       snapshotPayload: typeof currentVersionSnapshot,
-    ): Promise<{ ok: true } | { ok: false; error: string }> => {
-      // The gate lives here rather than at the call sites: two of the four
-      // publish paths are only unreachable today because SHOW_ESTIMATE_VERSION_UI
-      // is false, and that constant invites being flipped back on.
+    ): Promise<{ ok: true } | { ok: false; reason: "forbidden" | "network"; error: string }> => {
+      // The gate lives here rather than at the call sites: three of the four
+      // publish paths are unreachable today because SHOW_ESTIMATE_VERSION_UI is
+      // false, and two of those had no gate of their own. Callers may ignore a
+      // network failure and still hand out the link; they may not ignore this.
       if (!canSubmitToClient) {
-        return { ok: false, error: t("estimate.export.share.cannotSubmit") };
+        return { ok: false, reason: "forbidden", error: shareDenialMessage() };
       }
       const options = submitOptionsFor();
       try {
@@ -2069,6 +2078,7 @@ export default function ProjectEstimate() {
       } catch (error) {
         return {
           ok: false,
+          reason: "network",
           error: error instanceof Error ? error.message : t("estimate.export.share.submitFailed"),
         };
       }
@@ -2088,7 +2098,8 @@ export default function ProjectEstimate() {
         // (it is idempotent — re-publishing the same approved snapshot is a
         // no-op). If the network call fails we still hand out the link so
         // same-session readers continue to work.
-        await publishToBackend(latestApproved.shareId, latestApproved.number, latestApproved.snapshot);
+        const published = await publishToBackend(latestApproved.shareId, latestApproved.number, latestApproved.snapshot);
+        if (!published.ok && published.reason === "forbidden") return { error: published.error };
         return { url: buildShareLink(latestApproved.shareId) };
       }
     }
@@ -2098,11 +2109,12 @@ export default function ProjectEstimate() {
     // re-open the link. Mirrors the prior submit-to-client resubmission flow.
     if (latestProposed?.submitted) {
       if (!hasPendingChangesSinceSubmission) {
-        await publishToBackend(latestProposed.shareId, latestProposed.number, latestProposed.snapshot);
+        const published = await publishToBackend(latestProposed.shareId, latestProposed.number, latestProposed.snapshot);
+        if (!published.ok && published.reason === "forbidden") return { error: published.error };
         return { url: buildShareLink(latestProposed.shareId) };
       }
       if (!canSubmitToClient) {
-        return { error: t("estimate.export.share.cannotSubmit") };
+        return { error: shareDenialMessage() };
       }
       try {
         const ok = refreshVersionSnapshot(pid, latestProposed.id, currentUser.id, submitOptionsFor());
@@ -2127,7 +2139,7 @@ export default function ProjectEstimate() {
 
     // No submitted version yet — create a fresh proposed one.
     if (!canSubmitToClient) {
-      return { error: t("estimate.export.share.cannotSubmit") };
+      return { error: shareDenialMessage() };
     }
     try {
       const snapshot = createVersionSnapshot(pid, currentUser.id);
@@ -2150,8 +2162,11 @@ export default function ProjectEstimate() {
   }, [
     availableParticipantSlots,
     buildShareLink,
+    canManageEstimate,
+    canSubmitByMembership,
     canSubmitToClient,
     currentUser.id,
+    estimateFinanceMode,
     currentVersionSnapshot,
     hasPendingChangesSinceSubmission,
     latestApproved,

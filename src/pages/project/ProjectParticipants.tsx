@@ -1301,7 +1301,7 @@ function LegacyProjectParticipants() {
                             {typeof record.usedCredits === "number" && (
                               <div className="flex items-center gap-1.5">
                                 <Coins className="h-3.5 w-3.5" />
-                                {t("participants.usedCredits", { count: record.usedCredits })}
+                                {t("participants.usedCredits", { value: record.usedCredits })}
                               </div>
                             )}
                             <div className="flex items-center gap-1.5">

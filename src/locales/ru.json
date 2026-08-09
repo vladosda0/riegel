@@ -1200,7 +1200,7 @@
   "participants.dropdown.editAccess": "Изменить доступ",
   "participants.dropdown.resendEmail": "Отправить email повторно",
   "participants.editAccessButton": "Изменить доступ",
-  "participants.usedCredits": " · Использовано {{value}}",
+  "participants.usedCredits": "Использовано {{value}}",
   "participants.viewerRegimeRow": "Режим наблюдателя: {{value}}",
   "participants.sensitiveAccess": "Чувствительный доступ",
   "participants.toast.alreadyInvited": "Уже приглашён",
@@ -3587,5 +3587,6 @@
   "participants.error.sendExpired": "Срок действия приглашения истёк. Отзовите его и пригласите заново.",
   "participants.error.sendNoLongerPending": "Приглашение уже принято или отозвано.",
   "participants.error.sendNotFound": "Приглашение не найдено.",
-  "estimate.header.needsFinanceDetail": "Только чтение: нужен полный доступ к финансам"
+  "estimate.header.needsFinanceDetail": "Только чтение: нужен полный доступ к финансам",
+  "estimate.export.share.needsFinanceDetail": "Чтобы создать публичную ссылку, нужен полный доступ к финансам сметы. Попроси владельца поднять тебе видимость финансов до «Детально»."
 }

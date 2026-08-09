@@ -1186,7 +1186,7 @@
   "participants.dropdown.editAccess": "Edit access",
   "participants.dropdown.resendEmail": "Resend email",
   "participants.editAccessButton": "Edit access",
-  "participants.usedCredits": " · Used {{value}}",
+  "participants.usedCredits": "Used {{value}}",
   "participants.viewerRegimeRow": "Viewer regime: {{value}}",
   "participants.sensitiveAccess": "Sensitive access",
   "participants.toast.alreadyInvited": "Already invited",
@@ -3531,5 +3531,6 @@
   "participants.error.sendExpired": "This invite has expired. Revoke it and invite again.",
   "participants.error.sendNoLongerPending": "This invite has already been accepted or revoked.",
   "participants.error.sendNotFound": "Invite not found.",
-  "estimate.header.needsFinanceDetail": "Read-only: needs full finance access"
+  "estimate.header.needsFinanceDetail": "Read-only: needs full finance access",
+  "estimate.export.share.needsFinanceDetail": "Creating a public link needs full finance access to the estimate. Ask the owner to raise your finance visibility to full detail."
 }
