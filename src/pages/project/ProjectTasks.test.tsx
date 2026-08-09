@@ -579,6 +579,66 @@ describe("ProjectTasks", () => {
     );
   });
 
+  it("does not report success or tear down a later prompt when cancelled during the post-write refetch", async () => {
+    // invalidateQueries is a real network refetch in supabase mode, so Cancel can
+    // land INSIDE it, after the status write has already succeeded. That window
+    // sits past every other guard in the handler.
+    let releaseInvalidate: () => void = () => {};
+    const invalidateSpy = vi
+      .spyOn(QueryClient.prototype, "invalidateQueries")
+      .mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseInvalidate = () => resolve();
+          }),
+      );
+
+    try {
+      const prepareUpload = vi.fn().mockResolvedValue({
+        bucket: "media",
+        objectPath: "project-1/photo.jpg",
+        uploadIntentId: "intent-1",
+      });
+      const uploadBytes = vi.fn().mockResolvedValue(undefined);
+      const finalizeUpload = vi.fn().mockResolvedValue(undefined);
+      mocks.useMediaUploadMutations.mockReturnValue({ prepareUpload, uploadBytes, finalizeUpload });
+      mocks.usePermission.mockReturnValue(buildPermission("contractor"));
+      mocks.useTasks.mockReturnValue([buildTask({ status: "in_progress" })]);
+
+      const { container } = renderProjectTasks();
+
+      fireEvent.click(screen.getByText("Estimate task"));
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Done" }));
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+      fireEvent.change(fileInput, {
+        target: { files: [new File(["photo"], "photo.jpg", { type: "image/jpeg" })] },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
+
+      // The write landed; we are now parked inside the refetch.
+      await waitFor(() => expect(mocks.changeTaskStatus).toHaveBeenCalled());
+
+      fireEvent.click(screen.getByRole("button", { name: "Back" }));
+      fireEvent.click(screen.getByText("Estimate task"));
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Done" }));
+      expect(screen.getByText("Add final result photos")).toBeInTheDocument();
+
+      releaseInvalidate();
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      // The second prompt survives, and no success is claimed for the run the
+      // user walked away from.
+      expect(screen.getByText("Add final result photos")).toBeInTheDocument();
+      expect(mocks.toast).not.toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Task marked as Done" }),
+      );
+    } finally {
+      invalidateSpy.mockRestore();
+    }
+  });
+
   it("lets a cancelled upload run finish without disturbing a prompt opened afterwards", async () => {
     let releaseUpload: () => void = () => {};
     const prepareUpload = vi.fn().mockResolvedValue({

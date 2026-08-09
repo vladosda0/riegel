@@ -415,6 +415,8 @@ export default function ProjectTasks() {
       });
       if (!isCurrentRun()) return;
       await invalidateProjectTasks();
+      // The refetch is a real network round trip, so Cancel can land inside it.
+      if (!isCurrentRun()) return;
       trackEvent("task_marked_done", {
         project_id: pid,
         task_id: donePrompt.taskId,
@@ -436,6 +438,7 @@ export default function ProjectTasks() {
         // final. Say so plainly instead of the generic "the list refreshed",
         // which would leave the user guessing where their photos went.
         await invalidateProjectTasks();
+        if (!isCurrentRun()) return;
         setDonePrompt(null);
         toast({
           title: t("tasks.toast.donePhotosKept.title"),
