@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -528,7 +528,7 @@ describe("ProjectTasks", () => {
     await waitFor(() => expect(finalizeUpload).toHaveBeenCalledTimes(1));
   });
 
-  it("keeps Back and the backdrop inert while acceptance photos are still uploading", async () => {
+  it("lets the user leave a stalled upload instead of trapping them in the prompt", async () => {
     let releaseUpload: () => void = () => {};
     const prepareUpload = vi.fn().mockResolvedValue({
       bucket: "media",
@@ -559,18 +559,69 @@ describe("ProjectTasks", () => {
 
     await waitFor(() => expect(uploadBytes).toHaveBeenCalled());
 
-    // Leaving mid-upload is what let a finished loop tear down a prompt the user
-    // had since opened on a different task, and toast success about it.
+    // Nothing in the upload chain has a timeout or an abort, and the prompt is a
+    // hand-rolled full-screen overlay with no Escape handler, so Back has to stay
+    // usable or a stalled network traps the user until a page reload.
     const back = screen.getByRole("button", { name: "Back" });
-    expect(back).toBeDisabled();
+    expect(back).toBeEnabled();
     fireEvent.click(back);
-    expect(screen.getByText("Add final result photos")).toBeInTheDocument();
+    expect(screen.queryByText("Add final result photos")).not.toBeInTheDocument();
 
-    const backdrop = container.querySelector(".z-\\[61\\]") as HTMLElement;
-    fireEvent.click(backdrop);
+    // The abandoned run must not come back and act on a prompt that is gone: no
+    // status write, no success toast, no teardown of whatever is open by then.
+    releaseUpload();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mocks.changeTaskStatus).not.toHaveBeenCalled();
+    expect(mocks.toast).not.toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Task marked as Done" }),
+    );
+  });
+
+  it("lets a cancelled upload run finish without disturbing a prompt opened afterwards", async () => {
+    let releaseUpload: () => void = () => {};
+    const prepareUpload = vi.fn().mockResolvedValue({
+      bucket: "media",
+      objectPath: "project-1/photo.jpg",
+      uploadIntentId: "intent-1",
+    });
+    const uploadBytes = vi.fn().mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseUpload = () => resolve();
+        }),
+    );
+    const finalizeUpload = vi.fn().mockResolvedValue(undefined);
+    mocks.useMediaUploadMutations.mockReturnValue({ prepareUpload, uploadBytes, finalizeUpload });
+    mocks.usePermission.mockReturnValue(buildPermission("contractor"));
+    mocks.useTasks.mockReturnValue([buildTask({ status: "in_progress" })]);
+
+    const { container } = renderProjectTasks();
+
+    fireEvent.click(screen.getByText("Estimate task"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Done" }));
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(fileInput, {
+      target: { files: [new File(["photo"], "photo.jpg", { type: "image/jpeg" })] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
+    await waitFor(() => expect(uploadBytes).toHaveBeenCalled());
+
+    // Abandon it, then open the prompt again on the same task.
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByText("Estimate task"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Done" }));
     expect(screen.getByText("Add final result photos")).toBeInTheDocument();
 
     releaseUpload();
-    await waitFor(() => expect(mocks.changeTaskStatus).toHaveBeenCalled());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // The second prompt is untouched: still open, still waiting for its own files.
+    expect(screen.getByText("Add final result photos")).toBeInTheDocument();
+    expect(screen.getByText("No files selected")).toBeInTheDocument();
+    expect(mocks.changeTaskStatus).not.toHaveBeenCalled();
   });
 });

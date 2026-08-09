@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useParams, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useProject, usePermission, useMedia, useWorkspaceMode } from "@/hooks/use-mock-data";
@@ -206,6 +206,10 @@ export default function ProjectTasks() {
   const [doneFiles, setDoneFiles] = useState<File[]>([]);
   const [doneUploading, setDoneUploading] = useState(false);
   const [doneFilesResetKey, setDoneFilesResetKey] = useState(0);
+  // Bumped by every confirm run and by Cancel. A run whose id no longer matches
+  // has been abandoned: it stops issuing uploads and must never touch prompt
+  // state, or a finishing loop tears down whatever prompt is open by then.
+  const doneRunIdRef = useRef(0);
   const [doneComment, setDoneComment] = useState("");
 
   // --- Blocked prompt --- (same capture-at-open rule as the Done prompt above)
@@ -332,6 +336,18 @@ export default function ProjectTasks() {
   }, [invalidateProjectTasks, toast, t]);
 
   // Confirm Done
+  // Leaving must stay possible while photos upload: storage-js exposes no way to
+  // abort the request in flight, and nothing in the chain has a timeout, so a
+  // stalled network would otherwise trap the user in a full-screen prompt with no
+  // Escape handler. Abandoning the run is what makes that safe.
+  const cancelDonePrompt = useCallback(() => {
+    doneRunIdRef.current += 1;
+    setDonePrompt(null);
+    setDoneFiles([]);
+    setDoneComment("");
+    setDoneUploading(false);
+  }, []);
+
   const handleConfirmDone = useCallback(async () => {
     if (!donePrompt) return;
     const task = tasks.find((entry) => entry.id === donePrompt.taskId);
@@ -364,9 +380,16 @@ export default function ProjectTasks() {
       return;
     }
 
+    const runId = doneRunIdRef.current + 1;
+    doneRunIdRef.current = runId;
+    const isCurrentRun = () => doneRunIdRef.current === runId;
+
     setDoneUploading(true);
     try {
       for (const file of doneFiles) {
+        // Cancel cannot abort the request already in flight: storage-js `upload()`
+        // takes no AbortSignal. It does stop every file after this one.
+        if (!isCurrentRun()) return;
         const intent = await prepareUpload({
           mediaType: "photo",
           clientFilename: file.name,
@@ -385,10 +408,12 @@ export default function ProjectTasks() {
       );
       // The RPC inserts the acceptance comment once (server-side) alongside the
       // status change; the same text also rode along as the photo caption above.
+      if (!isCurrentRun()) return;
       await source.changeTaskStatus(donePrompt.taskId, "done", {
         expectedStatus: donePrompt.expectedStatus,
         commentBody: doneComment.trim() || undefined,
       });
+      if (!isCurrentRun()) return;
       await invalidateProjectTasks();
       trackEvent("task_marked_done", {
         project_id: pid,
@@ -404,6 +429,7 @@ export default function ProjectTasks() {
       setDoneComment("");
       toast({ title: t("tasks.toast.markedDone") });
     } catch (error) {
+      if (!isCurrentRun()) return;
       if (error instanceof TaskNoLongerAvailableError) {
         // Reaching here means the status write lost the race AFTER the upload
         // loop completed, so the acceptance photos are already attached and
@@ -431,7 +457,7 @@ export default function ProjectTasks() {
         variant: "destructive",
       });
     } finally {
-      setDoneUploading(false);
+      if (isCurrentRun()) setDoneUploading(false);
     }
   }, [
     donePrompt,
@@ -1189,9 +1215,7 @@ export default function ProjectTasks() {
             </div>
 
             <div className="flex justify-end gap-2 pt-sp-1">
-              {/* Leaving mid-upload lets the finishing loop tear down whatever
-                  prompt is open by then, including one opened on another task. */}
-              <Button variant="outline" disabled={doneUploading} onClick={() => setDonePrompt(null)}>{t("common.back")}</Button>
+              <Button variant="outline" onClick={cancelDonePrompt}>{t("common.back")}</Button>
               <Button
                 className="bg-success text-success-foreground hover:bg-success/90"
                 onClick={() => void handleConfirmDone()}
@@ -1201,13 +1225,7 @@ export default function ProjectTasks() {
               </Button>
             </div>
           </div>
-          <div
-            className="fixed inset-0 z-[61] bg-black/40"
-            onClick={() => {
-              if (doneUploading) return;
-              setDonePrompt(null);
-            }}
-          />
+          <div className="fixed inset-0 z-[61] bg-black/40" onClick={cancelDonePrompt} />
         </div>
       )}
 
