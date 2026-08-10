@@ -38,6 +38,18 @@
     <meta property="og:type" content="website" />
     <meta property="og:image" content="https://rovno.ai/rovno-logo.png" />
 
+    <!--
+      The shell is Russian and stays Russian: every route serves this file, and
+      all of them except the landing are Russian-only. og:locale:alternate is
+      deliberately absent here — advertising an English version of /offer,
+      /privacy or /blog/ would claim a translation that does not exist.
+
+      The landing is the one route with a second language version, so it manages
+      og:locale, og:locale:alternate, canonical and hreflang itself, scoped to
+      "/" and torn down on unmount. See src/components/landing/LandingSeo.tsx.
+    -->
+    <meta property="og:locale" content="ru_RU" />
+
     <meta name="twitter:card" content="summary" />
     <meta name="twitter:title" content="Ровно ИИ" />
 

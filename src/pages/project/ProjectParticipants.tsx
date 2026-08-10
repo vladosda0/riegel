@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { describeInviteCreateError, describeInviteSendError } from "@/lib/invite-error-copy";
 import { showTierLimitPaywall } from "@/lib/tier-limit-error";
 import {
   AlertTriangle,
   BrainCircuit,
-  Coins,
   Crown,
   Eye,
   FileText,
@@ -54,6 +54,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -150,7 +151,6 @@ type ParticipantPermissionRecord = {
   internalDocsVisibility: InternalDocsVisibility;
   viewerRegime?: ViewerRegime;
   creditLimit: number;
-  usedCredits?: number;
   inviteStatus?: WorkspaceProjectInvite["status"];
 };
 
@@ -266,7 +266,6 @@ function PermissionFormSections(props: {
     financeVisibility: form.financeVisibility,
     internalDocsVisibility: form.internalDocsVisibility,
     viewerRegime: form.role === "viewer" ? form.viewerRegime : undefined,
-    creditLimit: Math.max(0, parseInt(form.creditLimit, 10) || 0),
   }, t);
   const warnings = getPermissionWarnings({
     role: form.role,
@@ -274,7 +273,6 @@ function PermissionFormSections(props: {
     financeVisibility: form.financeVisibility,
     internalDocsVisibility: form.internalDocsVisibility,
     viewerRegime: form.role === "viewer" ? form.viewerRegime : undefined,
-    creditLimit: Math.max(0, parseInt(form.creditLimit, 10) || 0),
   }, t);
 
   const financeDanger = form.financeVisibility === "detail";
@@ -479,16 +477,16 @@ function PermissionFormSections(props: {
           )}
 
           <div className="rounded-card border border-border/70 bg-background/70 p-3">
-            <label className="text-caption font-medium text-foreground">{t("participants.permission.creditLimit")}</label>
-            <Input
-              type="number"
-              min={0}
-              value={form.creditLimit}
-              onChange={(event) => {
-                onFormChange((current) => ({ ...current, creditLimit: event.target.value }));
-              }}
-              className="mt-1"
-            />
+            {/* Parked like the redesign's field: nothing reads
+                project_members.credit_limit (rovno#301). The stored value is
+                still submitted unchanged, so no data is lost. */}
+            <span className="flex items-start justify-between gap-1.5 text-caption font-medium text-muted-foreground">
+              {t("participants.permission.creditLimit")}
+              <Badge variant="outline" className="shrink-0 border-border px-1.5 py-0 text-[10px] font-medium text-muted-foreground">
+                {t("participants.drawer.soon")}
+              </Badge>
+            </span>
+            <Input type="number" disabled placeholder="—" className="mt-1" aria-label={t("participants.permission.creditLimit")} />
           </div>
         </div>
       </SettingsSection>
@@ -630,7 +628,6 @@ function LegacyProjectParticipants() {
         internalDocsVisibility: readInternalDocsVisibility(member) ?? getDefaultInternalDocsVisibility(member.role),
         viewerRegime: member.viewer_regime,
         creditLimit: member.credit_limit,
-        usedCredits: member.used_credits,
       };
     })
   ), [members]);
@@ -766,7 +763,7 @@ function LegacyProjectParticipants() {
           },
         };
       } catch (err) {
-        const message = err instanceof Error ? err.message : t("participants.error.emailSendFallback");
+        const message = describeInviteSendError(err, t, t("participants.error.emailSendFallback"));
         return {
           createdInvite,
           emailDelivery: { kind: "failed", message },
@@ -839,7 +836,7 @@ function LegacyProjectParticipants() {
       if (showTierLimitPaywall(error, t)) return;
       toast({
         title: t("participants.toast.inviteFailed"),
-        description: error instanceof Error ? error.message : t("participants.toast.inviteFailedDesc"),
+        description: describeInviteCreateError(error, t, t("participants.toast.inviteFailedDesc")),
         variant: "destructive",
       });
     },
@@ -876,7 +873,7 @@ function LegacyProjectParticipants() {
     onError: (error) => {
       toast({
         title: t("participants.toast.resendFailed"),
-        description: error instanceof Error ? error.message : t("participants.toast.resendFailedDesc"),
+        description: describeInviteSendError(error, t, t("participants.toast.resendFailedDesc")),
         variant: "destructive",
       });
     },
@@ -1049,14 +1046,13 @@ function LegacyProjectParticipants() {
                     <TableHead>{t("participants.table.member")}</TableHead>
                     <TableHead>{t("participants.table.role")}</TableHead>
                     <TableHead>{t("participants.table.aiAccess")}</TableHead>
-                    <TableHead className="text-right">{t("participants.table.credits")}</TableHead>
                     {canManageAccess && <TableHead className="w-10" />}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {members.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={canManageAccess ? 5 : 4} className="text-center text-muted-foreground">
+                      <TableCell colSpan={canManageAccess ? 4 : 3} className="text-center text-muted-foreground">
                         {t("participants.empty.noActive")}
                       </TableCell>
                     </TableRow>
@@ -1106,10 +1102,6 @@ function LegacyProjectParticipants() {
                           }`}>
                             {t(aiAccessLabels[member.ai_access])}
                           </span>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <span className="text-body-sm">{member.used_credits}</span>
-                          <span className="text-caption text-muted-foreground">/{member.credit_limit}</span>
                         </TableCell>
                         {canManageAccess && (
                           <TableCell>
@@ -1278,7 +1270,6 @@ function LegacyProjectParticipants() {
                     financeVisibility: record.financeVisibility,
                     internalDocsVisibility: record.internalDocsVisibility,
                     viewerRegime: record.viewerRegime,
-                    creditLimit: record.creditLimit,
                   }, t);
 
                   return (
@@ -1299,11 +1290,6 @@ function LegacyProjectParticipants() {
                             <div className="flex items-center gap-1.5">
                               <BrainCircuit className="h-3.5 w-3.5" />
                               {t(aiAccessLabels[record.aiAccess])}
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              <Coins className="h-3.5 w-3.5" />
-                              {t("participants.creditLimit", { count: record.creditLimit })}
-                              {typeof record.usedCredits === "number" ? ` · ${t("participants.usedCredits", { count: record.usedCredits })}` : ""}
                             </div>
                             <div className="flex items-center gap-1.5">
                               <Shield className="h-3.5 w-3.5" />
@@ -1364,7 +1350,6 @@ function LegacyProjectParticipants() {
                     financeVisibility: record.financeVisibility,
                     internalDocsVisibility: record.internalDocsVisibility,
                     viewerRegime: record.viewerRegime,
-                    creditLimit: record.creditLimit,
                   }, t);
 
                   return (
@@ -1389,10 +1374,7 @@ function LegacyProjectParticipants() {
                               <BrainCircuit className="h-3.5 w-3.5" />
                               {t(aiAccessLabels[record.aiAccess])}
                             </div>
-                            <div className="flex items-center gap-1.5">
-                              <Coins className="h-3.5 w-3.5" />
-                              {t("participants.creditLimit", { count: record.creditLimit })}
-                            </div>
+
                             <div className="flex items-center gap-1.5">
                               <Shield className="h-3.5 w-3.5" />
                               {t(financeVisibilityLabels[record.financeVisibility])}

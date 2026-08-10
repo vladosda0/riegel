@@ -3,8 +3,7 @@ import type { Member, Project } from "@/types/entities";
 /**
  * Canonical read model for project-scoped authority in the app shell.
  *
- * Contract surface: docs/permissions.contract.json
- * Discovery index: src/lib/permissions-contract-surfaces.ts
+ * Permission presets: src/lib/permission-contract-actions.ts
  *
  * Sourced from workspace membership + project rows (Supabase queries or demo/local store).
  * `Member.internal_docs_visibility` is hydrated by workspace mappers when present on rows;

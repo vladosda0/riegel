@@ -12,12 +12,16 @@ const currentUser = {
   credits_free: 0,
   credits_paid: 0,
 };
+// The shape useWorkspaceCurrentUserState hands back before the profile query
+// resolves in supabase mode (EMPTY_WORKSPACE_USER).
+const emptyUser = { ...currentUser, id: "", email: "", name: "", avatar: undefined, timezone: "UTC" };
 const contactInfo = { roleTitle: "Foreman", phone: "+7900", bio: "Bio text", signatureBlock: "Sig" };
 const identityMutate = vi.fn();
 const contactMutate = vi.fn();
 const toastMock = vi.fn();
+let activeUser = currentUser;
 
-vi.mock("@/hooks/use-mock-data", () => ({ useCurrentUser: () => currentUser }));
+vi.mock("@/hooks/use-mock-data", () => ({ useCurrentUser: () => activeUser }));
 vi.mock("@/hooks/use-workspace-source", () => ({
   // Authenticated session: Save / avatar edits are enabled (not gated).
   useWorkspaceMode: () => ({ kind: "supabase", profileId: "u1" }),
@@ -32,9 +36,20 @@ import { ProfilePanel } from "@/components/settings/panels/ProfilePanel";
 
 describe("ProfilePanel persistence", () => {
   beforeEach(() => {
+    activeUser = currentUser;
     identityMutate.mockReset().mockResolvedValue(currentUser);
     contactMutate.mockReset().mockResolvedValue(contactInfo);
     toastMock.mockReset();
+  });
+
+  it("re-seeds email when the profile resolves after mount", () => {
+    activeUser = emptyUser;
+    const { rerender } = render(<ProfilePanel />);
+    activeUser = currentUser;
+    rerender(<ProfilePanel />);
+
+    expect(screen.getByDisplayValue("Alex Builder")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("a@b.co")).toBeInTheDocument();
   });
 
   it("seeds fields from loaded identity + contact info", () => {
@@ -55,8 +70,13 @@ describe("ProfilePanel persistence", () => {
 
     await waitFor(() => expect(identityMutate).toHaveBeenCalledTimes(1));
     expect(identityMutate).toHaveBeenCalledWith(
-      expect.objectContaining({ fullName: "Alex B", avatarUrl: null, locale: "en", timezone: "Europe/Moscow" }),
+      expect.objectContaining({ fullName: "Alex B", avatarUrl: null, timezone: "Europe/Moscow" }),
     );
+    // `locale` is deliberately ABSENT: the interface language moved to
+    // Настройки > Предпочтения (rovno #186) and this is a partial update, so
+    // omitting the key leaves the column alone. Sending it from here is what let
+    // an unrelated profile save clobber the user's language.
+    expect(identityMutate.mock.calls[0][0]).not.toHaveProperty("locale");
     expect(contactMutate).toHaveBeenCalledWith(
       expect.objectContaining({ roleTitle: "Lead", phone: "+7900", bio: "Bio text", signatureBlock: "Sig" }),
     );

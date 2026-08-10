@@ -143,12 +143,6 @@ export type SeatInfo = {
   /** null = unknown (actor is not the owner or no subscription data); -1 = unlimited. */
   editorsLimit: number | null;
   viewersLimit: number | null;
-  /**
-   * The owner plan's monthly AI-chat quota (`ai_chat_per_month`); a member's
-   * credit limit above this is meaningless, so the drawer refuses to save it.
-   * null = unknown plan, no client-side cap.
-   */
-  aiMonthlyLimit: number | null;
 };
 
 export function seatLimitReached(used: number, limit: number | null): boolean {

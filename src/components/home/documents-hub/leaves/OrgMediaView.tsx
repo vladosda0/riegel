@@ -6,12 +6,8 @@ import type { OrgDoc } from "@/data/org-source";
 import { SectionChrome } from "@/components/home/documents-hub/SectionChrome";
 import { TileGrid, FileTile } from "@/components/home/documents-hub/tiles";
 import { EmptyState } from "@/components/home/documents-hub/EmptyState";
-import {
-  FilePreviewDialog,
-  downloadStorageUrl,
-  openStorageUrlInNewTab,
-  type PreviewableDocument,
-} from "@/components/home/documents-hub/FilePreviewDialog";
+import { FilePreviewDialog, type PreviewableDocument } from "@/components/home/documents-hub/FilePreviewDialog";
+import { downloadStorageUrl, openStorageUrlInNewTab } from "@/components/home/documents-hub/storage-urls";
 import { toast } from "@/hooks/use-toast";
 import { useSectionFilters } from "@/hooks/use-section-filters";
 import { isMediaMime } from "@/components/home/documents-hub/leaves/MyMediaView";
@@ -49,7 +45,12 @@ export function OrgMediaView() {
 
   function handleDownload(doc: OrgDoc) {
     if (!doc.bucket || !doc.objectPath) return;
-    void downloadStorageUrl(doc.bucket, doc.objectPath, doc.title);
+    void downloadStorageUrl(doc.bucket, doc.objectPath, doc.title).then((ok) => {
+      // rovno #284 round 3: the helper reports every failure (signing, HTTP,
+      // network) through its return value - discarding it made a dead object a
+      // silent no-op in this view while ProjectDocuments showed a toast.
+      if (!ok) toast({ title: t("documents.preview.downloadFailed"), variant: "destructive" });
+    });
   }
   function handleViewInNewTab(doc: OrgDoc) {
     if (!doc.bucket || !doc.objectPath) return;

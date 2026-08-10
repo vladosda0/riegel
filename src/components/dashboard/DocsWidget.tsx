@@ -10,18 +10,22 @@ interface Props {
   className?: string;
 }
 
-function getPreviewDocuments(documents: Document[]): { items: Document[]; hasPinned: boolean } {
-  const projectCreationDocs = documents.filter((d) => d.origin === "project_creation");
-  if (projectCreationDocs.length > 0) {
-    return { items: projectCreationDocs, hasPinned: true };
-  }
+function isPinned(document: Document): boolean {
+  return document.origin === "project_creation";
+}
+
+// Pinned first, then the rest: an ordering, not an either/or. Returning only the
+// pinned ones froze the widget on the seeded documents, so anything added later
+// never reached the dashboard.
+function getPreviewDocuments(documents: Document[]): Document[] {
   // Store insertion order is oldest -> newest; reverse for dashboard preview recency.
-  return { items: [...documents].reverse(), hasPinned: false };
+  const rest = documents.filter((d) => !isPinned(d)).reverse();
+  return [...documents.filter(isPinned), ...rest];
 }
 
 export function DocsWidget({ documents, projectId, className }: Props) {
   const { t } = useTranslation();
-  const { items, hasPinned } = getPreviewDocuments(documents);
+  const items = getPreviewDocuments(documents);
 
   return (
     <div className={cn("glass rounded-card p-sp-2 h-full flex flex-col", className)}>
@@ -46,7 +50,7 @@ export function DocsWidget({ documents, projectId, className }: Props) {
                 <div key={d.id} className="flex items-center gap-2 rounded-panel bg-muted/40 p-1.5 px-sp-2">
                   <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                   <span className="text-caption text-foreground flex-1 truncate">{d.title}</span>
-                  {hasPinned && (
+                  {isPinned(d) && (
                     <span className="inline-flex items-center gap-1 rounded-pill bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">
                       <Pin className="h-2.5 w-2.5" /> {t("docsWidget.pinned")}
                     </span>

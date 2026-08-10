@@ -103,13 +103,14 @@ import {
   trimMessagesForArchive,
   type AiChatArchiveEntryV1,
 } from "@/lib/ai-chat-transcript-storage";
-import { generateProposalQueue, getTextResponse, reviseProposalWithEdits } from "@/lib/ai-engine";
+import { generateProposalQueue, getTextResponseKey, reviseProposalWithEdits } from "@/lib/ai-engine";
 import {
   commitPhotoConsultActions,
   commitProposal,
   filterPhotoConsultProposalChangesBySeam,
   type PhotoConsultApplyAction,
 } from "@/lib/commit-proposal";
+import { proposalFailureReasonKey, resolveProposalFastFail } from "@/lib/ai-proposal-execution";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { SaveLearnTargetDialog } from "@/components/ai/SaveLearnTargetDialog";
@@ -187,7 +188,24 @@ const AUTOMATION_MODE_TO_LEVEL: Record<AutomationMode, 1 | 2 | 3 | 4> = {
 const VALID_AUTOMATION_MODES: Set<AutomationMode> = new Set(["full", "assisted", "manual", "observer"]);
 const COMPOSER_MAX_HEIGHT = 220;
 const GENERAL_MODE_VALUE = "general";
-const ACTIONABLE_PROPOSAL_PATTERN = /\b(task|add task|create task|estimate|cost|budget|procurement|buy|purchase|material|document|contract|report|generate)\b/i;
+// Stems mirror the four matchers in ai-engine.ts (createProjectProposals), so a prompt this
+// gate lets through is one the engine will match.
+//
+// No \b around the Cyrillic group: JS \b is ASCII-only, so an anchored Cyrillic alternative
+// matches nothing a user would type («Добавить задачи», the bare «задач» — both false; a
+// boundary only exists where the run abuts an ASCII word character, as in "aзадачb"). Adding
+// \b back would silently kill the group. LEARN_USER_PROMPT_PATTERN below has that bug on
+// Russian text today: #277.
+//
+// REACHABILITY, verified 2026-08-03: this gate currently never runs. AISidebar's only mount is
+// AppLayout, gated by AI_SIDEBAR_ROUTE_PREFIX = "/project/", so isProjectContext is always true
+// and the isHomeContext branch (incl. GLOBAL_SUGGESTION_KEYS and the "which project?" replay)
+// is dead code. The Cyrillic widening is kept because it is what the gate should say if that
+// mount ever returns, and it can change no behaviour while the branch is unreachable. The full
+// picture — four EN/RU chip asymmetries against the engine, and the delete-vs-restore decision
+// for the dead Home branch — lives in #276; do not act on the asymmetries without re-checking
+// reachability first.
+const ACTIONABLE_PROPOSAL_PATTERN = /\b(task|add task|create task|estimate|cost|budget|procurement|buy|purchase|material|document|contract|report|generate)\b|(задач|смет|бюджет|стоимост|закуп|купи|материал|документ|договор|отч[её]т)/i;
 const LEARN_USER_PROMPT_PATTERN = /^\s*(how|what|why|explain|как|что|почему|объясни|объясните)\b/i;
 const LEARN_LIST_PATTERN = /(?:^|\n)\s*(?:[-*•]|\d+\.)\s+/m;
 
@@ -1149,10 +1167,27 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
   }
 
   function emitProposalDeclinedEvent(proposal: AIProposal, payload: Record<string, unknown> = {}) {
-    if (!isProjectContext) return;
     addEvent({
       id: `evt-proposal-cancelled-${Date.now()}`,
-      project_id: projectId,
+      // The proposal's OWN project, matching the failure event below. These two
+      // emit the same proposal_cancelled type from the same queue UI, and the
+      // queue card renders on /home as well, where the route-derived `projectId`
+      // is "" and getEvents (an exact project_id match) drops the row. Keeping
+      // one route-scoped and one proposal-scoped would mean a declined item
+      // vanished while a failed one was recorded, from the same screen.
+      //
+      // The `if (!isProjectContext) return;` that used to sit here is removed
+      // deliberately, and it had ONE consequence beyond the project id:
+      // addEventToState fans a Notification row out to every member of
+      // event.project_id except event.actor_id. Off /project/* that fan-out
+      // previously did not happen at all. It does now, which matches what a
+      // decline on the project page has always done, but it IS a new
+      // notification on a path that used to write nothing. The failure writer
+      // below gained the same fan-out in this PR, and note it passes
+      // actor_id "ai", which matches no member row, so its exclusion filter
+      // excludes nobody: that one notifies every member INCLUDING whoever ran
+      // the queue.
+      project_id: proposal.project_id,
       actor_id: user.id,
       type: "proposal_cancelled",
       object_type: "proposal",
@@ -1198,14 +1233,30 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       let attempt = 0;
       let success = false;
       let lastError = t("ai.sidebar.toast.executionFailed.title");
+      // Set by a fast-fail branch below, which has already shown a SPECIFIC toast
+      // explaining why the type cannot run. The generic !success handler must not
+      // then fire its own: it would bury the stated reason under a contentless
+      // "не удалось выполнить" AND raise a SECOND toast for the same item,
+      // doubling this queue's burst against TOAST_LIMIT. It also records how many
+      // attempts really happened, which for a fast-fail is zero, not five.
+      let unavailableReason: string | null = null;
 
       while (attempt < 5 && !success) {
-        if (workspaceMode.kind === "supabase" && queueItem.proposal.type === "generate_document") {
-          lastError = t("ai.sidebar.toast.supabaseModeUnavailable.documentDescription");
+        // Whether this item can be attempted at all. The decision is pure and
+        // lives in @/lib/ai-proposal-execution so it can be unit-tested: it used
+        // to be two inline branches in this loop, which no test touches, and both
+        // review-round defects hid in exactly that blind spot.
+        const fastFail = resolveProposalFastFail(queueItem.proposal.type, workspaceMode.kind);
+        if (fastFail) {
+          lastError = t(fastFail.descriptionKey);
           setProposalQueue((prev) => (prev
             ? {
                 ...prev,
-                retryByItemId: { ...prev.retryByItemId, [queueItem.id]: 1 },
+                // 0, not 1: nothing was attempted, matching the `attempts: 0` the
+                // event records. Note retryByItemId currently has no reader
+                // anywhere in the repo, so this particular value is inert; it is
+                // kept consistent so it does not become wrong if one is added.
+                retryByItemId: { ...prev.retryByItemId, [queueItem.id]: 0 },
                 executionErrorByItemId: {
                   ...prev.executionErrorByItemId,
                   [queueItem.id]: lastError,
@@ -1213,10 +1264,11 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
               }
             : prev));
           toast({
-            title: t("ai.sidebar.toast.supabaseModeUnavailable.title"),
+            title: t(fastFail.titleKey),
             description: lastError,
             variant: "destructive",
           });
+          unavailableReason = fastFail.reason;
           break;
         }
 
@@ -1283,7 +1335,13 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       if (!success) {
         addEvent({
           id: `evt-proposal-failed-${Date.now()}-${cursor}`,
-          project_id: projectId,
+          // The proposal's OWN project, not the route's. `projectId` is derived
+          // from location.pathname and is "" everywhere outside /project/*, so on
+          // /home this wrote an event that getEvents (which filters project_id
+          // exactly) could never return: a permanent record that does not exist.
+          // Proposals are only ever generated with a truthy targetProjectId, so
+          // this field is always populated for any item that can reach here.
+          project_id: queueItem.proposal.project_id,
           actor_id: "ai",
           type: "proposal_cancelled",
           object_type: "proposal",
@@ -1292,23 +1350,31 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
           payload: {
             summary: queueItem.proposal.summary,
             status: "failed",
-            reason: "execution_failed",
-            attempts: 5,
+            // A fast-fail never entered the retry loop, so `attempt` is 0. This
+            // used to be the literal 5, which permanently recorded five failed
+            // retries of an operation that was never attempted once.
+            reason: unavailableReason ?? "execution_failed",
+            attempts: attempt,
             source: "ai",
           },
         });
-        toast({
-          title: t("ai.sidebar.toast.executionFailed.title"),
-          description: t("ai.sidebar.toast.executionFailed.description", { summary: queueItem.proposal.summary }),
-          variant: "destructive",
-        });
+        // Only when no fast-fail branch already explained the failure: dispatching
+        // here would raise a SECOND toast for the same item, burying the specific
+        // reason under a generic one and doubling the queue's toast burst.
+        if (!unavailableReason) {
+          toast({
+            title: t("ai.sidebar.toast.executionFailed.title"),
+            description: t("ai.sidebar.toast.executionFailed.description", { summary: queueItem.proposal.summary }),
+            variant: "destructive",
+          });
+        }
       }
     }
 
     setWorkLogs(new Map());
     setProposalQueue(null);
     executingQueueRef.current = false;
-  }, [projectId, workspaceMode.kind, seamForProjectCommit, t, WORK_STEPS_COMMIT]);
+  }, [workspaceMode.kind, seamForProjectCommit, t, WORK_STEPS_COMMIT]);
 
   const beginQueueExecution = useCallback((queueSnapshot: ProposalQueueState) => {
     if (executingQueueRef.current) return;
@@ -1428,7 +1494,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
           : [];
         const assistantContent = proposals.length > 0
           ? t("ai.sidebar.message.proposalsReady", { count: proposals.length })
-          : getTextResponse();
+          : t(getTextResponseKey());
 
         const assistantMsg: AIMessage = {
           id: `msg-${Date.now() + 1}`,
@@ -1713,7 +1779,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
         setMessages((prev) => [...prev, {
           id: `msg-${Date.now()}-project-selected`,
           role: "assistant",
-          content: `Using "${selectedProject.title}". Preparing proposals now.`,
+          content: t("ai.sidebar.message.usingProject", { title: selectedProject.title }),
           timestamp: new Date().toISOString(),
         }]);
       }
@@ -1819,16 +1885,27 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       ));
       const nextIndex = prev.activeIndex < nextItems.length - 1 ? prev.activeIndex + 1 : prev.activeIndex;
       const nextQueue = { ...prev, items: nextItems, activeIndex: nextIndex };
+      // The proposal's own project, for the same reason the two event writers
+      // use it: the route-derived `projectId` is "" on /home, where this queue
+      // is fully usable. Leaving it here would file every /home decision under
+      // an empty project while the activity feed recorded the real one. It also
+      // makes these agree with ai_prompt_submitted, which already reports
+      // targetProjectId.
+      //
+      // NOTE FOR ANALYTICS: this CHANGES the meaning of the project_id dimension
+      // on these two goals as of this release. Proposals raised from /home used
+      // to report "" and now report the real id, so a report or funnel grouped
+      // on it shows a step at the deploy boundary. On /project/* nothing changes.
       if (decision === "confirmed") {
         trackEvent("ai_proposal_applied", {
-          project_id: projectId,
+          project_id: current.proposal.project_id,
           surface: "ai",
           proposal_id: current.proposal.id,
           proposal_type: current.proposal.type,
         });
       } else if (decision === "declined") {
         trackEvent("ai_proposal_rejected", {
-          project_id: projectId,
+          project_id: current.proposal.project_id,
           surface: "ai",
           proposal_id: current.proposal.id,
         });
@@ -2205,7 +2282,12 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       if (event.type === "proposal_cancelled") {
         const status = typeof payload.status === "string" ? payload.status : "cancelled";
         const summary = typeof payload.summary === "string" ? payload.summary : t("ai.sidebar.proposal.summaryFallbackShort");
-        const reason = typeof payload.reason === "string" ? payload.reason.replace(/_/g, " ") : "";
+        // payload.reason is a machine token on a PERMANENT feed entry. This used
+        // to print it with underscores swapped for spaces, which put raw English
+        // ("execution failed") into the Russian feed. Translate the tokens we know
+        // and drop anything else, so a new token cannot leak by default.
+        const reasonKey = proposalFailureReasonKey(payload.reason);
+        const reason = reasonKey ? t(reasonKey) : "";
         const title = status === "failed"
           ? t("ai.sidebar.proposal.statusTitle.failed")
           : t("ai.sidebar.proposal.statusTitle.declined");

@@ -38,6 +38,7 @@ import {
   type WorkspaceProjectInvite,
 } from "@/data/workspace-source";
 import { workspaceQueryKeys } from "@/hooks/use-workspace-source";
+import { describeInviteCreateError, describeInviteSendError } from "@/lib/invite-error-copy";
 import { showTierLimitPaywall, showTierLimitPaywallByType } from "@/lib/tier-limit-error";
 import { getTierLimits } from "@/data/tier-limits";
 import { trackEvent } from "@/lib/analytics";
@@ -272,7 +273,6 @@ export default function ParticipantsScreen() {
       viewersPending,
       editorsLimit: limits ? limits.editors_per_project : null,
       viewersLimit: limits ? limits.viewers_per_project : null,
-      aiMonthlyLimit: limits ? limits.ai_chat_per_month : null,
     };
   }, [members, pendingInvites, actorRole, workspaceMode.kind, subscription.subscription, subscription.isLoading, subscription.isError, runtimeAuth.status, currentUser.plan]);
 
@@ -329,7 +329,7 @@ export default function ParticipantsScreen() {
         } catch (err) {
           emailDelivery = {
             kind: "failed",
-            message: err instanceof Error ? err.message : t("participants.error.emailSendFallback"),
+            message: describeInviteSendError(err, t, t("participants.error.emailSendFallback")),
           };
         }
       }
@@ -379,7 +379,7 @@ export default function ParticipantsScreen() {
       if (showTierLimitPaywall(error, t)) return;
       toast({
         title: t("participants.toast.inviteFailed"),
-        description: error instanceof Error ? error.message : t("participants.toast.inviteFailedDesc"),
+        description: describeInviteCreateError(error, t, t("participants.toast.inviteFailedDesc")),
         variant: "destructive",
       });
     },
@@ -582,7 +582,7 @@ export default function ParticipantsScreen() {
     onError: (error) => {
       toast({
         title: t("participants.toast.resendFailed"),
-        description: error instanceof Error ? error.message : t("participants.toast.resendFailedDesc"),
+        description: describeInviteSendError(error, t, t("participants.toast.resendFailedDesc")),
         variant: "destructive",
       });
     },

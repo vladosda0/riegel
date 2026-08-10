@@ -241,6 +241,36 @@ export default function UserCatalogPage() {
     };
   }, [rows, scheduleFlush]);
 
+  const flushRef = useRef(flushDirtyRows);
+  useEffect(() => {
+    flushRef.current = flushDirtyRows;
+  }, [flushDirtyRows]);
+
+  // An edit made inside the debounce window right before navigating away must
+  // not be lost: the cleanup above only cancels the timer, and there is no
+  // other flush path. Declared after it so React clears the timer first, and
+  // routed through the ref because the route reuses this component across
+  // :catalogId — a mount-time closure would flush against the wrong catalog.
+  // That reuse is only half handled here: an in-place :catalogId change does
+  // not unmount, so this cleanup does not run and the pending edit is still
+  // discarded. Latent today, tracked in rovno#295.
+  //
+  // The flush is deliberately fire-and-forget, and that is load-bearing rather
+  // than an oversight. react-query gates the per-mutate() callbacks on
+  // hasListeners(), and the observers are already unsubscribed by the time this
+  // cleanup runs, so neither onError nor onSuccess fires for it. The cost is a
+  // rejected final write being lost silently, which is no worse than before this
+  // effect existed. The benefit is the part to preserve: flushDirtyRows' onError
+  // re-arms through scheduleFlush, and nothing can clear that timer once the
+  // component is gone. Move the toast and the retry up into the hook-level
+  // mutation options and this becomes permanent detached retries with toast
+  // spam. Read rovno#296 before changing it.
+  useEffect(() => {
+    return () => {
+      flushRef.current();
+    };
+  }, []);
+
   const editorRows: EditorRowData[] = useMemo(() => {
     if (!rows) return [];
     const names = articleNamesQuery.data;

@@ -71,6 +71,21 @@ const STATIC_ROUTES = ["/", "/blog/", "/offer/", "/privacy/", "/refund/", "/cont
 // own. That makes WHEN it is written load-bearing — see the write in main().
 const LEGAL_SHELL_ROUTES = ["/offer/", "/privacy/", "/refund/", "/contacts/"];
 
+// The sitemap deliberately advertises ONLY the Russian landing.
+//
+// The English variant exists at `/?lang=en`, but that URL serves this same
+// static shell: byte-identical Russian HTML, `<html lang="ru">`, Russian title
+// and description. English only appears once JS has run. A sitemap is read
+// mostly by crawlers that do not run JS (GPTBot, ClaudeBot, PerplexityBot, and
+// Google's pre-render pass), so annotating the pair here would hand them two
+// identical Russian documents and assert they are a translation pair — a claim
+// the bytes contradict.
+//
+// The on-page hreflang in LandingSeo is a different case and stays: it only
+// exists after JS has run, and for a client that ran the JS the English
+// alternate is genuinely there. Restore the sitemap annotations when (and only
+// when) a real static English landing is prerendered.
+
 // ---------------------------------------------------------------------------
 // Small utilities
 // ---------------------------------------------------------------------------

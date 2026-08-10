@@ -1,12 +1,24 @@
 /**
  * Contract-driven action state resolution.
  *
- * Execution semantics: docs/permissions.contract.json
- * Explanatory context: Permissions.md
+ * The preset tables below ARE the permission contract. `docs/permissions.contract.json`
+ * and `docs/Permissions.md` were removed in 9b4c292 and nothing replaced them, so editing a
+ * preset cell here changes the product rule directly WHEREVER THAT CELL IS READ.
  *
- * This module maps (role, domain, action) → ActionState using preset defaults
- * derived from the canonical permissions contract. It replaces ad-hoc boolean
- * checks wherever the contract specifies hidden / disabled_visible / enabled.
+ * That qualifier is load-bearing, because six of the sixteen cells are read by
+ * nothing in production today: `edit_estimate_structure`, `export_csv`,
+ * `edit_checklist`, `upload_document`, `upload_media` and `classify` appear only in
+ * their type unions, in the tables below, and in a self-referential expectation
+ * table in `permissions.test.tsx`. Editing one of those is a no-op until a call
+ * site reads it, and the golden test will still go red, which makes the no-op look
+ * like a real change. See rovno#241. The cells that ARE live:
+ * estimate/`edit_estimate_rows`, tasks/{`manage_tasks`,`comment`,`change_status`},
+ * procurement/{`order`,`receive`,`use_from_stock`},
+ * documents_media/{`upload`,`delete`,`rename_or_archive`}.
+ *
+ * This module maps (role, domain, action) → ActionState using preset defaults.
+ * It replaces ad-hoc boolean checks wherever a surface needs
+ * hidden / disabled_visible / enabled.
  *
  * The resolver accepts an optional `overrides` parameter (forward-compatible
  * stub for future Advanced permissions). When undefined, preset behavior is
@@ -16,13 +28,13 @@
 import type { MemberRole } from "@/types/entities";
 
 // ---------------------------------------------------------------------------
-// Vocabulary (mirrors permissions.contract.json → vocab.action_state)
+// Vocabulary
 // ---------------------------------------------------------------------------
 
 export type ActionState = "hidden" | "disabled_visible" | "enabled";
 
 // ---------------------------------------------------------------------------
-// Contract action keys — bounded set matching JSON domains.*.actions
+// Contract action keys — the bounded set of actions each domain exposes
 // ---------------------------------------------------------------------------
 
 export type EstimateAction = "edit_estimate_rows" | "edit_estimate_structure" | "export_csv";
@@ -30,7 +42,7 @@ export type TaskAction = "change_status" | "edit_checklist" | "comment" | "uploa
 export type ProcurementAction = "order" | "receive" | "use_from_stock";
 
 /**
- * Documents/media actions derived from permissions.contract.json → domains.documents_media.
+ * Documents/media actions.
  *
  * `upload` = contribute-level (shared_project by default; internal gated separately
  *   by `canViewInternalDocuments` at call sites — Option 1 keeps view/edit equivalent).
@@ -43,7 +55,7 @@ export type ContractAction = EstimateAction | TaskAction | ProcurementAction | D
 export type ContractDomain = "estimate" | "tasks" | "procurement" | "documents_media";
 
 // ---------------------------------------------------------------------------
-// Preset tables — one-to-one with permissions.contract.json per_role.actions
+// Preset tables — the canonical per-role action states
 // ---------------------------------------------------------------------------
 
 const ESTIMATE_PRESETS: Record<MemberRole, Record<EstimateAction, ActionState>> = {

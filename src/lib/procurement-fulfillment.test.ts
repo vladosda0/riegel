@@ -10,7 +10,9 @@ import {
   computeInStockByLocation,
   computeOrderedOpenQty,
   computeRemainingRequestedQty,
+  isAppliedOrderStatus,
   isEstimateLinkedProcurementItem,
+  isOpenOrderStatus,
 } from "@/lib/procurement-fulfillment";
 import type { InventoryLocation, OrderWithLines, ProcurementItemV2 } from "@/types/entities";
 
@@ -72,7 +74,9 @@ describe("procurement fulfillment utils", () => {
     } as ProcurementItemV2)).toBe(false);
   });
 
-  it("computes remaining qty with split supplier + stock fulfillments", () => {
+  // Retitled and re-expected under the #216 decision: a same-project warehouse move is a
+  // relocation, not a fulfillment. The old title asserted the double count as intended.
+  it("counts the supplier order but not the same-project stock move toward the requirement", () => {
     const projectId = `test-project-${Date.now()}`;
     const item = buildTestRequestLine(projectId, `req-${Date.now()}`, 10);
 
@@ -145,9 +149,106 @@ describe("procurement fulfillment utils", () => {
       },
     ];
 
-    expect(computeRemainingRequestedQty(item, orders)).toBe(3);
+    // 10 required, 3 on a supplier order. The 4-unit stock move relocates units the supplier
+    // order already counted, so it must not subtract again. Ordered-open is unaffected: it
+    // filters to supplier orders already.
+    expect(computeRemainingRequestedQty(item, orders)).toBe(7);
     expect(computeOrderedOpenQty(item.id, orders)).toBe(2);
-    expect(computeFulfilledQty(item.id, orders)).toBe(7);
+    expect(computeFulfilledQty(item.id, orders)).toBe(3);
+  });
+
+  it("does not let an internal warehouse move fulfil a procurement requirement", () => {
+    // The exact scenario from #216: the same 60 units counted twice, once by the supplier
+    // order that bought them and once by the move that carried them across the site.
+    const projectId = `internal-move-${Date.now()}`;
+    const item = buildTestRequestLine(projectId, `req-move-${Date.now()}`, 100);
+    const orders: OrderWithLines[] = [
+      {
+        id: "o-supplier",
+        projectId,
+        status: "received",
+        kind: "supplier",
+        supplierName: "Supplier A",
+        deliverToLocationId: "loc-a",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lines: [
+          {
+            id: "l-supplier",
+            orderId: "o-supplier",
+            procurementItemId: item.id,
+            qty: 60,
+            receivedQty: 60,
+            unit: "pcs",
+            plannedUnitPrice: 100,
+            actualUnitPrice: 120,
+          },
+        ],
+      },
+      {
+        id: "o-move",
+        projectId,
+        status: "received",
+        kind: "stock",
+        transferDirection: null,
+        fromLocationId: "loc-a",
+        toLocationId: "loc-b",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lines: [
+          {
+            id: "l-move",
+            orderId: "o-move",
+            procurementItemId: item.id,
+            qty: 60,
+            receivedQty: 60,
+            unit: "pcs",
+            plannedUnitPrice: 100,
+            actualUnitPrice: 120,
+          },
+        ],
+      },
+    ];
+
+    expect(computeRemainingRequestedQty(item, orders)).toBe(40);
+    expect(computeFulfilledQty(item.id, orders)).toBe(60);
+  });
+
+  it("still counts the incoming side of a cross-project transfer as fulfillment", () => {
+    // Anti-regression guard for option B of #216: excluding every stock order would fix the
+    // double count by inventing an under-count, because a cross-project «in» transfer brings
+    // genuinely new material into this project. Passes BEFORE and AFTER the fix by design; it
+    // fails only if the predicate is widened to `kind === "supplier"`.
+    const projectId = `cross-in-${Date.now()}`;
+    const item = buildTestRequestLine(projectId, `req-cross-${Date.now()}`, 100);
+    const orders: OrderWithLines[] = [
+      {
+        id: "o-cross-in",
+        projectId,
+        status: "received",
+        kind: "stock",
+        transferDirection: "in",
+        fromLocationId: "loc-other-project",
+        toLocationId: "loc-site",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lines: [
+          {
+            id: "l-cross-in",
+            orderId: "o-cross-in",
+            procurementItemId: item.id,
+            qty: 60,
+            receivedQty: 60,
+            unit: "pcs",
+            plannedUnitPrice: 100,
+            actualUnitPrice: 120,
+          },
+        ],
+      },
+    ];
+
+    expect(computeRemainingRequestedQty(item, orders)).toBe(40);
+    expect(computeFulfilledQty(item.id, orders)).toBe(60);
   });
 
   it("clamps requested remaining to zero when ordered quantity exceeds requested", () => {
@@ -797,5 +898,129 @@ describe("computeProjectLastReceivedAt", () => {
     expect(computeProjectLastReceivedAt(projectId, orders)).toBe("2026-06-02T10:00:00.000Z");
     // Orders from another project never count.
     expect(computeProjectLastReceivedAt("other-project", orders)).toBeNull();
+  });
+});
+
+describe("partially received supplier orders", () => {
+  const RECEIVED_AT = "2026-03-05T10:00:00.000Z";
+  const projectId = "partial-project";
+
+  function partialItem(overrides: Partial<ProcurementItemV2> = {}) {
+    return buildTestRequestLine(projectId, "req-partial", 10, {
+      sourceEstimateV2LineId: "line-1",
+      plannedUnitPrice: 100,
+      actualUnitPrice: 120,
+      ...overrides,
+    });
+  }
+
+  /** qty 10 ordered, 4 delivered to loc-site, so 6 are still outstanding. */
+  function partialOrder(status: OrderWithLines["status"] = "partially_received"): OrderWithLines {
+    return {
+      id: "o-partial",
+      projectId,
+      status,
+      kind: "supplier",
+      supplierName: "Supplier A",
+      deliverToLocationId: "loc-site",
+      createdAt: "2026-03-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z",
+      lines: [{
+        id: "l-partial",
+        orderId: "o-partial",
+        procurementItemId: "req-partial",
+        qty: 10,
+        receivedQty: 4,
+        unit: "pcs",
+        plannedUnitPrice: 100,
+        actualUnitPrice: 120,
+      }],
+      receiveEvents: [{
+        id: "ev-partial",
+        orderId: "o-partial",
+        orderLineId: "l-partial",
+        procurementItemId: "req-partial",
+        locationId: "loc-site",
+        deltaQty: 4,
+        eventType: "receive",
+        createdAt: RECEIVED_AT,
+      }],
+    } as unknown as OrderWithLines;
+  }
+
+  const locations = [
+    { id: "loc-site", projectId, name: "Site", isDefault: true },
+  ] as unknown as InventoryLocation[];
+
+  it("reports the unreceived remainder as still open", () => {
+    expect(computeOrderedOpenQty("req-partial", [partialOrder()])).toBe(6);
+  });
+
+  it("counts the order against the requested quantity", () => {
+    expect(computeRemainingRequestedQty(partialItem(), [partialOrder()])).toBe(0);
+    expect(computeFulfilledQty("req-partial", [partialOrder()])).toBe(10);
+  });
+
+  it("puts the delivered units on hand", () => {
+    const groups = computeInStockByLocation(projectId, [partialItem()], [partialOrder()], locations);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].items[0]).toMatchObject({ procurementItemId: "req-partial", qty: 4 });
+    expect(groups[0].totalValue).toBe(480);
+  });
+
+  it("splits the order across committed and received in the header KPIs", () => {
+    const kpis = computeProcurementHeaderKpis(projectId, [partialItem()], [partialOrder()]);
+
+    // 6 outstanding x 120 committed, 4 delivered x 120 received.
+    expect(kpis.committed).toBe(720);
+    expect(kpis.received).toBe(480);
+    expect(kpis.used).toBe(1_200);
+  });
+
+  it("includes the delivered units in purchase price variance", () => {
+    const variance = computePurchasePriceVariance(projectId, [partialItem()], [partialOrder()]);
+
+    // 4 delivered at 120 against a planned 100.
+    expect(variance.deltaTotal).toBe(80);
+    expect(variance.baseTotal).toBe(400);
+    expect(variance.pct).toBe(20);
+  });
+
+  it("surfaces the receipt timestamp", () => {
+    expect(computeLastReceivedAt("req-partial", "loc-site", [partialOrder()])).toBe(RECEIVED_AT);
+    expect(computeProjectLastReceivedAt(projectId, [partialOrder()])).toBe(RECEIVED_AT);
+  });
+
+  it("keeps the order in the ordered tab chip while quantity is outstanding", () => {
+    const totals = computeTabChipTotals(projectId, [partialItem()], [partialOrder()], []);
+
+    expect(totals.ordered.count).toBe(1);
+    expect(totals.ordered.total).toBe(720);
+  });
+
+  it("matches how a placed order of the same shape is treated", () => {
+    const partial = partialOrder("partially_received");
+    const placed = partialOrder("placed");
+
+    expect(computeOrderedOpenQty("req-partial", [partial]))
+      .toBe(computeOrderedOpenQty("req-partial", [placed]));
+    expect(computeProcurementHeaderKpis(projectId, [partialItem()], [partial]))
+      .toEqual(computeProcurementHeaderKpis(projectId, [partialItem()], [placed]));
+  });
+});
+
+describe("order status predicates", () => {
+  // Enumerated over the whole OrderStatus domain: a missing case here is exactly the
+  // defect class this module keeps reintroducing.
+  it.each([
+    ["draft", false, false],
+    ["placed", true, true],
+    ["partially_received", true, true],
+    ["received", true, false],
+    ["voided", false, false],
+  ] as const)("classifies %s", (status, applied, open) => {
+    expect(isAppliedOrderStatus(status)).toBe(applied);
+    expect(isOpenOrderStatus(status)).toBe(open);
   });
 });

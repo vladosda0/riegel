@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as store from "@/data/store";
+import { describeInviteSendError } from "@/lib/invite-error-copy";
 import {
   createWorkspaceProjectInvite,
   DEFAULT_PROFILE_PREFERENCES,
@@ -8,6 +9,7 @@ import {
   mapProfileRowToUser,
   mapProjectMemberRowToMember,
   mapProjectRowToProject,
+  ProjectInviteEmailSendError,
   selectWorkspaceMode,
   sendWorkspaceProjectInviteEmail,
   updateWorkspaceProjectInvite,
@@ -433,5 +435,106 @@ describe("workspace-source helpers", () => {
     );
 
     expect(created.finance_visibility).toBe("none");
+  });
+});
+
+/**
+ * The `diagnostic` flag decides whether a failure's text reaches a Russian toast
+ * verbatim or gets replaced with localized copy. It is assigned HERE, in the
+ * producer, and consumed in `describeInviteSendError`.
+ *
+ * These exist because a review round pointed out that the redesign moved the
+ * safety property out of a string list (which a test exercised end to end) and
+ * into these assignments (which nothing exercised). Flipping `diagnostic` to
+ * `true` on the `{ error }` branch left all 1656 tests green while every English
+ * string the edge function can emit leaked into the UI. Asserting the flag in the
+ * consumer's own tests does not help: those hand-construct it.
+ */
+describe("sendWorkspaceProjectInviteEmail failure classification", () => {
+  function httpErrorWith(body: string, status = 500, statusText = "") {
+    return {
+      data: null,
+      error: Object.assign(new Error("Edge function returned a non-2xx status code"), {
+        context: new Response(body, { status, statusText }),
+      }),
+    };
+  }
+
+  async function caught(): Promise<ProjectInviteEmailSendError> {
+    const err = await sendWorkspaceProjectInviteEmail(
+      { kind: "supabase", profileId: "p1" },
+      "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ProjectInviteEmailSendError);
+    return err as ProjectInviteEmailSendError;
+  }
+
+  it("marks the function's own {error} body as NOT diagnostic, so it gets localized", async () => {
+    invokeMock.mockResolvedValue(httpErrorWith(JSON.stringify({ error: "Failed to send invite email" })));
+
+    const err = await caught();
+
+    expect(err.message).toBe("Failed to send invite email");
+    expect(err.diagnostic).toBe(false);
+    // end to end, so producer and consumer are pinned together rather than each
+    // against its own idea of the contract
+    expect(describeInviteSendError(err, (k) => k, "fallback")).toBe("fallback");
+  });
+
+  it("marks a platform {message} body as diagnostic, because the function never emits one", async () => {
+    // Reachable only from the gateway or edge runtime: function not deployed,
+    // BOOT_ERROR, worker limit, Kong 401. Each is a whole-deployment condition
+    // and this string is the only clue which.
+    invokeMock.mockResolvedValue(
+      httpErrorWith(JSON.stringify({ message: "Requested function was not found" }), 404),
+    );
+
+    const err = await caught();
+
+    expect(err.diagnostic).toBe(true);
+    expect(describeInviteSendError(err, (k) => k, "fallback")).toBe("Requested function was not found");
+  });
+
+  it("keeps a gateway 401 NON-diagnostic, because it is per-user and unreadable", async () => {
+    // A session that lapsed between page load and pressing the button. The
+    // envelope is the platform's, so it takes the {message} branch, but "Invalid
+    // JWT" is English and tells the person reading it nothing they can act on --
+    // unlike a BOOT_ERROR, which is the deployment-wide case that branch exists
+    // for. Status is what separates them.
+    invokeMock.mockResolvedValue(
+      httpErrorWith(JSON.stringify({ code: 401, message: "Invalid JWT" }), 401),
+    );
+
+    const err = await caught();
+
+    expect(err.message).toBe("Invalid JWT");
+    expect(err.diagnostic).toBe(false);
+    expect(describeInviteSendError(err, (k) => k, "fallback")).toBe("fallback");
+  });
+
+  it("marks a bodyless response as diagnostic", async () => {
+    invokeMock.mockResolvedValue(httpErrorWith("", 502, "Bad Gateway"));
+
+    const err = await caught();
+
+    expect(err.message).toBe("HTTP 502 Bad Gateway");
+    expect(err.diagnostic).toBe(true);
+  });
+
+  it("marks a non-JSON body as diagnostic", async () => {
+    invokeMock.mockResolvedValue(httpErrorWith("<html>504 Gateway Timeout</html>", 504));
+
+    const err = await caught();
+
+    expect(err.diagnostic).toBe(true);
+    expect(err.message).toContain("504");
+  });
+
+  it("marks a 200-with-{error} body as NOT diagnostic", async () => {
+    invokeMock.mockResolvedValue({ data: { error: "Invite is no longer pending" }, error: null });
+
+    const err = await caught();
+
+    expect(err.diagnostic).toBe(false);
   });
 });

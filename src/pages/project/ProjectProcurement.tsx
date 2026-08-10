@@ -79,7 +79,9 @@ import {
   computePurchasePriceVariance,
   computeRemainingRequestedQty,
   computeTabChipTotals,
+  isAppliedOrderStatus,
   isEstimateLinkedProcurementItem,
+  isOpenOrderStatus,
   toInventoryKey,
 } from "@/lib/procurement-fulfillment";
 import { fmtCost } from "@/lib/procurement-utils";
@@ -134,6 +136,10 @@ const EMPTY_SYNC_STATE = {
 } as const;
 
 const TABS: ProcurementTab[] = ["requested", "ordered", "in_stock"];
+
+// Ties the disabled attachment controls to the badge that explains why they are disabled. Only one
+// detail dialog is mounted at a time, so a constant id cannot collide.
+const ATTACHMENTS_COMING_SOON_ID = "procurement-attachments-coming-soon";
 
 type Translator = (key: string, options?: Record<string, unknown>) => string;
 
@@ -293,7 +299,7 @@ export default function ProjectProcurement() {
   const { items: baseItems, isLoading: isProcurementItemsLoading } = useProjectProcurementItemsState(pid);
   const orders = useOrders(pid);
   const hasPlacedSupplierOrderLines = useMemo(
-    () => orders.some((o) => o.kind === "supplier" && o.status === "placed" && o.lines.length > 0),
+    () => orders.some((o) => o.kind === "supplier" && isOpenOrderStatus(o.status) && o.lines.length > 0),
     [orders],
   );
   const locations = useLocations(pid);
@@ -790,7 +796,7 @@ export default function ProjectProcurement() {
     orders
       .filter((order) => (
         order.kind === "supplier"
-        && (order.status === "placed" || order.status === "received")
+        && isAppliedOrderStatus(order.status)
       ))
       .filter((order) => {
         if (!search.trim()) return true;
@@ -1648,6 +1654,10 @@ export default function ProjectProcurement() {
   };
 
   const addUrlAttachment = () => {
+    // Attachments have no procurement_items column and are dropped from the supabase patch, so the
+    // control is disabled + marked "coming soon" in supabase mode. Guard here too in case the
+    // handler is reached, to avoid a "Сохранено" toast over a draft that silently reverts.
+    if (isSupabaseMode) return;
     const url = attachmentUrl.trim();
     if (!url) return;
 
@@ -1668,6 +1678,7 @@ export default function ProjectProcurement() {
   };
 
   const addLocalAttachments = (files: FileList | null) => {
+    if (isSupabaseMode) return;
     if (!files || files.length === 0) return;
     const now = new Date().toISOString();
 
@@ -1687,6 +1698,14 @@ export default function ProjectProcurement() {
   };
 
   const removeAttachment = (attachmentId: string) => {
+    // The third attachments patchEditForm site, guarded like the other two, so that no ATTACHMENTS
+    // path can leave a non-persistable delta in the draft. Scoped to attachments deliberately: the
+    // wider claim would be false, because `type` is the other non-persistable field with an editor
+    // control and its handler is unguarded (see rovno#297). Unreachable in supabase mode today only
+    // because both read paths hardcode `attachments: []`, so without this the attachments invariant
+    // would rest on a mapper constant rather than on the guards, and would break silently the day
+    // the backing column lands.
+    if (isSupabaseMode) return;
     patchEditForm((prev) => {
       const current = prev.attachments ?? [];
       const target = current.find((attachment) => attachment.id === attachmentId);
@@ -2221,7 +2240,10 @@ export default function ProjectProcurement() {
                 const deliveryLabel = isReceived
                   ? formatDate(transferReceivedAt, dash)
                   : formatDate(order.deliveryDeadline, dash);
-                const canReceive = isIncoming && order.status === "placed" && canManageProcurement;
+                // Open set, not 'placed' alone: a transfer cannot legitimately be
+                // 'partially_received', but if one ever is, keep the button so the RPC can
+                // reject it loudly rather than stranding the transfer with no affordance.
+                const canReceive = isIncoming && isOpenOrderStatus(order.status) && canManageProcurement;
                 // Distinct title conveys direction (the source project's card is an outgoing
                 // shipment, not an incoming order) without re-introducing a separate badge.
                 const transferTitle = isIncoming
@@ -3319,7 +3341,11 @@ export default function ProjectProcurement() {
                       }}
                       placeholder={t("procurement.detail.attachmentPlaceholder")}
                       className="h-9 sm:flex-1"
-                      disabled={!canEdit}
+                      // No procurement_items attachments column exists; the draft stays client-only
+                      // in supabase mode, so editing it here would Save-toast then silently revert.
+                      disabled={!canEdit || isSupabaseMode}
+                      title={isSupabaseMode ? t("common.comingSoon") : undefined}
+                      aria-describedby={isSupabaseMode ? ATTACHMENTS_COMING_SOON_ID : undefined}
                     />
                     <Input
                       ref={filePickerRef}
@@ -3336,10 +3362,30 @@ export default function ProjectProcurement() {
                       variant="outline"
                       className="h-9 w-full sm:w-auto"
                       onClick={() => filePickerRef.current?.click()}
-                      disabled={!canEdit}
+                      disabled={!canEdit || isSupabaseMode}
+                      title={isSupabaseMode ? t("common.comingSoon") : undefined}
+                      aria-describedby={isSupabaseMode ? ATTACHMENTS_COMING_SOON_ID : undefined}
                     >
                       {t("procurement.action.addFile")}
                     </Button>
+                    {/* Neither title above is reliable: Button's base class carries
+                        disabled:pointer-events-none so it never receives hover at all, and Chromium
+                        does not fire hover on a disabled input either. The visible badge is what
+                        actually tells the user why the controls are greyed, and aria-describedby is
+                        what tells assistive tech, since a disabled control is out of the tab order
+                        and would otherwise reach the badge by nothing. Matches the
+                        disabled + title + Badge shape already used for handleRequestMore in the row
+                        actions of this same page; w-fit because unlike that row this container is
+                        flex-col below sm, where the default stretch would blow the pill full width. */}
+                    {isSupabaseMode && (
+                      <Badge
+                        id={ATTACHMENTS_COMING_SOON_ID}
+                        variant="secondary"
+                        className="h-5 w-fit px-1.5 text-[10px] font-normal"
+                      >
+                        {t("common.comingSoon")}
+                      </Badge>
+                    )}
                   </div>
 
                   {(editForm.attachments ?? []).length > 0 ? (
@@ -3361,9 +3407,9 @@ export default function ProjectProcurement() {
                               </a>
                               <button
                                 type="button"
-                                className="text-muted-foreground hover:text-destructive"
+                                className="text-muted-foreground hover:text-destructive disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-muted-foreground"
                                 onClick={() => removeAttachment(attachment.id)}
-                                disabled={!canEdit}
+                                disabled={!canEdit || isSupabaseMode}
                               >
                                 {t("common.remove")}
                               </button>

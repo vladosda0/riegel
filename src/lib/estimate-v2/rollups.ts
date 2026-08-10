@@ -4,6 +4,7 @@ import { getProcurementItems } from "@/data/procurement-store";
 import {
   computeOrderedOpenQty,
   computeRemainingRequestedQty,
+  isAppliedOrderStatus,
 } from "@/lib/procurement-fulfillment";
 import { computeProjectTotals } from "@/lib/estimate-v2/pricing";
 import { toDayIndex } from "@/lib/estimate-v2/schedule";
@@ -65,6 +66,28 @@ function toCents(value: number): number {
   return Math.max(0, Math.round(value * 100));
 }
 
+/**
+ * Whether the estimate finance header has any real recorded spend to show.
+ *
+ * When this is false the header renders «—» for «Факт расход» and for the per-type
+ * breakdown, and the overspend / risk / finished-accuracy signals all stay inert. It must
+ * therefore admit exactly the order states that `computeFactFromDataSources` counts as
+ * spend — the two enumerations drifting apart is silent, because a corrected spend figure
+ * is simply gated off the screen. Kept in this module, next to that computation, so the
+ * pair stays visibly coupled.
+ */
+export function hasActualFinancialData(input: {
+  hrPaymentCount: number;
+  orders: OrderWithLines[];
+}): boolean {
+  return input.hrPaymentCount > 0
+    || input.orders.some((order) => (
+      order.kind === "supplier"
+      && isAppliedOrderStatus(order.status)
+      && order.lines.length > 0
+    ));
+}
+
 function paidByHrItemId(hrPayments: HRPayment[]): Map<string, number> {
   const map = new Map<string, number>();
   hrPayments.forEach((payment) => {
@@ -86,7 +109,7 @@ export function computeFactFromDataSources(input: {
   let spentAbovePlannedCents = 0;
 
   const procurementItemsById = new Map(input.procurementItems.map((item) => [item.id, item]));
-  const supplierOrders = input.orders.filter((order) => order.kind === "supplier" && (order.status === "placed" || order.status === "received"));
+  const supplierOrders = input.orders.filter((order) => order.kind === "supplier" && isAppliedOrderStatus(order.status));
 
   supplierOrders.forEach((order) => {
     order.lines.forEach((line) => {

@@ -1,4 +1,4 @@
-import { computeInStockByLocation } from "@/lib/procurement-fulfillment";
+import { computeInStockByLocation, isAppliedOrderStatus } from "@/lib/procurement-fulfillment";
 import type { InventoryLocation, OrderWithLines, ProcurementItemV2, Task } from "@/types/entities";
 import type { EstimateV2ResourceLine, EstimateV2Stage, EstimateV2Work, EstimateV2WorkStatus, ResourceLineType } from "@/types/estimate-v2";
 import type { HRPayment, HRPlannedItem } from "@/types/hr";
@@ -152,7 +152,7 @@ function buildDeleteGuardContext(input: DeleteGuardSourceData): DeleteGuardConte
 
   const supplierOrderedQtyByProcurementId = new Map<string, number>();
   input.orders
-    .filter((order) => order.kind === "supplier" && (order.status === "placed" || order.status === "received"))
+    .filter((order) => order.kind === "supplier" && isAppliedOrderStatus(order.status))
     .forEach((order) => {
       order.lines.forEach((line) => {
         supplierOrderedQtyByProcurementId.set(

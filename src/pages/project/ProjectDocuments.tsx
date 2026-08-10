@@ -20,6 +20,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FileInput } from "@/components/ui/file-input";
+import { DOCUMENT_UPLOAD_ACCEPT } from "@/lib/document-file-types";
+import { downloadStorageUrl } from "@/components/home/documents-hub/storage-urls";
 import { Textarea } from "@/components/ui/textarea";
 import {
   AlertDialog,
@@ -200,6 +202,7 @@ export default function ProjectDocuments() {
   const canManageDocuments = resolveActionState(perm.role, "documents_media", "rename_or_archive") === "enabled";
   const canCommentOnDocuments = !isSupabaseMode && projectDomainAllowsContribute(commentsAccess);
 
+  const [downloadingViewedDocument, setDownloadingViewedDocument] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadVisibilityClass, setUploadVisibilityClass] = useState<DocMediaVisibilityClass>("shared_project");
@@ -616,13 +619,79 @@ export default function ProjectDocuments() {
     URL.revokeObjectURL(url);
   }
 
+  /**
+   * Download the document currently open in the preview dialog.
+   *
+   * rovno #284 slice S2. The original code was `window.open(previewUrl)`, which
+   * is not a download at all. The mechanism now lives in storage-urls.ts
+   * (fetch -> blob -> object URL - see its header for why that design and not
+   * the two that preceded it). This handler owns only the page concerns: mode
+   * dispatch, the in-flight guard, the filename choice, and the failure toast.
+   */
+  async function handleDownloadViewedDocument() {
+    if (!viewDoc || !latestViewedVersion || downloadingViewedDocument) return;
+
+    // Local/demo mode has no storage object; the body is inline text.
+    if (!isSupabaseMode) {
+      handleDownloadDocument(viewDoc, latestViewedVersion.content);
+      return;
+    }
+
+    if (!viewedStorage?.bucket || !viewedStorage?.objectPath) return;
+
+    // rovno #284. Signing is a network round trip, and this handler is async
+    // where the code it replaced was synchronous. Without an in-flight flag a
+    // second click during that round trip mints a second signed URL and saves a
+    // second copy - and the absence of any feedback while waiting is exactly
+    // what provokes the second click.
+    setDownloadingViewedDocument(true);
+    try {
+      // The stored filename carries the real extension; the title is the
+      // fallback and the helper recovers its extension from the object path.
+      // `buildDocumentDownloadName` is deliberately NOT used here: it appends
+      // `.txt`, which is right for the inline-text path and wrong for a .docx.
+      const ok = await downloadStorageUrl(
+        viewedStorage.bucket,
+        viewedStorage.objectPath,
+        viewedStorage.filename?.trim() || viewDoc.title,
+      );
+      if (!ok) {
+        toast({ title: t("documents.preview.downloadFailed"), variant: "destructive" });
+      }
+    } finally {
+      setDownloadingViewedDocument(false);
+    }
+  }
+
   const generatePreviewChanges: ProposalChange[] = [
     { entity_type: "document", action: "create", label: generateTitle || t("documents.generate.previewChangeFallback"), after: t("documents.generate.previewChangeAfter") },
   ];
 
   const latestViewedVersion = viewDoc?.versions[viewDoc.versions.length - 1];
   const viewedDocumentIsArchived = latestViewedVersion?.status === "archived";
-  const viewedStorage = latestViewedVersion?.storage;
+  /**
+   * rovno #284, and the other half of #243.
+   *
+   * A document archived BEFORE the #243 fix shipped carries a marker version
+   * with `storage_object_id = null`. `shapeDocumentsWithVersions` already heals
+   * that - but only into `file_meta`, which is what the LIST row renders. The
+   * preview effect and the Download button read the VERSION's storage instead,
+   * so those documents showed their filename in the list and then had a dead
+   * preview and a permanently disabled Download button: the file looked present
+   * and was unreachable.
+   *
+   * The fallback is gated on ARCHIVED, and that gate is what makes this mirror
+   * the mapper rather than diverge from it: `shapeDocumentsWithVersions` falls
+   * back to "newest version with storage" only when NO version is current,
+   * which is exactly the archived case. An un-gated fallback (round 2 of this
+   * branch shipped one) would also fire for an active document whose current
+   * version has no storage yet, and would present a SUPERSEDED version's file
+   * under the current title - the mapper deliberately shows no file there.
+   */
+  const viewedStorage = latestViewedVersion?.storage
+    ?? (viewedDocumentIsArchived
+      ? [...(viewDoc?.versions ?? [])].reverse().find((version) => version.storage)?.storage
+      : undefined);
   const viewedMimeType = viewedStorage?.mimeType ?? viewDoc?.file_meta?.mime ?? null;
   const canDownloadViewedDocument = Boolean(
     viewDoc
@@ -919,6 +988,7 @@ export default function ProjectDocuments() {
                 <div className="space-y-1">
                   <label className="text-body-sm font-medium text-foreground">{t("documents.upload.fileLabel")}</label>
                   <FileInput
+                    accept={DOCUMENT_UPLOAD_ACCEPT}
                     disabled={uploading}
                     onChange={(event) => {
                       const file = event.target.files?.[0] ?? null;
@@ -1203,14 +1273,8 @@ export default function ProjectDocuments() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => {
-                      if (isSupabaseMode && previewUrl) {
-                        window.open(previewUrl, "_blank", "noopener,noreferrer");
-                        return;
-                      }
-                      handleDownloadDocument(viewDoc, latestViewedVersion.content);
-                    }}
-                    disabled={!canDownloadViewedDocument}
+                    onClick={() => { void handleDownloadViewedDocument(); }}
+                    disabled={!canDownloadViewedDocument || downloadingViewedDocument}
                   >
                     <Download className="h-3.5 w-3.5 mr-1.5" /> {t("documents.preview.action.download")}
                   </Button>

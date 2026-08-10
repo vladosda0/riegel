@@ -1,22 +1,10 @@
 // Portfolio CSV export (spec Part 3 §6 module 6 / P1). Full-precision values, one row
 // per project; redacted (non-detail) projects export their non-monetary fields only.
 
+// The formula-injection guard and the quoting rule live in @/lib/csv so this
+// exporter and the estimate exporter cannot drift apart again (rovno #195).
+import { buildCsvRow, CSV_BOM } from "@/lib/csv";
 import type { PortfolioFinanceSnapshot, PortfolioProjectRow } from "@/lib/finance/portfolio-read-model";
-
-const BOM = "﻿";
-
-function escapeCsv(value: string): string {
-  // Neutralize spreadsheet formula injection: a cell starting with = + - @ (or tab/CR)
-  // is evaluated as a formula by Excel/Sheets even inside quotes, so prefix a literal
-  // apostrophe before RFC-quoting. Skip plain signed numbers (e.g. "-100000.00") so
-  // negative money/percent cells stay numeric rather than becoming text.
-  const isPlainNumber = /^-?\d/.test(value);
-  const guarded = !isPlainNumber && /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
-  if (/[",\r\n]/.test(guarded)) {
-    return `"${guarded.replace(/"/g, '""')}"`;
-  }
-  return guarded;
-}
 
 function moneyCell(cents: number | null): string {
   // Full rubles with 2 decimals; dot decimal so spreadsheets parse it as a number.
@@ -57,12 +45,12 @@ function rowFor(project: PortfolioProjectRow, labels: CsvLabels): string {
     moneyCell(project.toBePaidCents),
     project.riskFlags.map((flag) => labels.risk[flag]).join("; "),
   ];
-  return cells.map((cell) => escapeCsv(cell)).join(",");
+  return buildCsvRow(cells);
 }
 
 /** Build a UTF-8 BOM CSV string for the portfolio (header + one row per project). */
 export function buildPortfolioCsv(snapshot: PortfolioFinanceSnapshot, labels: CsvLabels): string {
-  const header = [
+  const header = buildCsvRow([
     labels.columns.title,
     labels.columns.status,
     labels.columns.contract,
@@ -73,10 +61,10 @@ export function buildPortfolioCsv(snapshot: PortfolioFinanceSnapshot, labels: Cs
     labels.columns.progressPct,
     labels.columns.toBePaid,
     labels.columns.risks,
-  ].map((cell) => escapeCsv(cell)).join(",");
+  ]);
 
   const lines = snapshot.projects.map((project) => rowFor(project, labels));
-  return BOM + [header, ...lines].join("\r\n") + "\r\n";
+  return CSV_BOM + [header, ...lines].join("\r\n") + "\r\n";
 }
 
 export type { CsvLabels as PortfolioCsvLabels };

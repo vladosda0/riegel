@@ -289,17 +289,65 @@
    below 900px (its own JS), so it isn't grid-overridden here.
    ============================================================ */
 
+/* The language buttons use inline `all: unset` to shed the UA button styling,
+   which also sheds the UA focus ring — and `all` outranks the UA :focus-visible
+   rule, so a keyboard user gets no visible focus at all on a control that
+   changes site-wide state (WCAG 2.4.7 AA). !important is needed to beat the
+   inline `all`. min-height keeps the target from falling under 24px once the
+   ≤640px block tightens the padding; it is deliberately vertical-only, because
+   widening these buttons eats the nav's measured width budget (see the 480px
+   and 640px blocks below). */
+.rv-landing .rv-lang-switch button {
+  min-height: 24px !important;
+  box-sizing: border-box !important;
+}
+/* The ring colour comes from --rv-focus-ring, set by each container, NOT from
+   currentColor. The outline sits outside the button, so it must contrast with
+   what the control is sitting ON. currentColor got that wrong twice: cream on a
+   cream nav for the switcher's active pill, and blue on a blue strip for the
+   prompt's primary button — a 1.00:1 ring, i.e. none at all, on exactly the
+   controls the rule exists to protect. currentColor stays only as the fallback.
+
+   NOTE: other landing buttons using inline `all: unset` (the FAQ accordion
+   headers, the KeyFeatures arrows) still have NO focus indicator. They are
+   unchanged by this feature and out of its scope; adding them needs a class on
+   each, which is its own change. */
+.rv-landing .rv-lang-switch button:focus-visible,
+.rv-landing .rv-lang-prompt button:focus-visible {
+  outline: 2px solid var(--rv-focus-ring, currentColor) !important;
+  outline-offset: 2px !important;
+}
+
+/* The nav's tools container is overflow:hidden (it animates to zero width when
+   the bar condenses), which clips a ring drawn 2px out. Below 1120px the
+   container hugs the switcher, so the outer edge fell outside it and lost 1px
+   on every side. Tucking the ring in by 1px keeps the whole 2px stroke inside
+   the clip; nothing else about the control moves. */
+.rv-landing .rv-nav-tools .rv-lang-switch button:focus-visible {
+  outline-offset: 1px !important;
+}
+
 /* Tablet — 4-up card grids drop to 2 columns. */
 @media (max-width: 1024px) {
   .rv-landing .rv-cols-4 { grid-template-columns: repeat(2, 1fr) !important; }
 }
 
-/* Below desktop — stack the hero, 3-up pricing, and 2-up FAQ; hide the
-   desktop nav links (logo + primary CTA + Войти remain). */
+/* Below desktop — stack the hero, 3-up pricing, and 2-up FAQ. */
 @media (max-width: 900px) {
   .rv-landing .rv-hero { grid-template-columns: 1fr !important; }
   .rv-landing .rv-cols-3 { grid-template-columns: 1fr !important; }
   .rv-landing .rv-faq-grid { grid-template-columns: 1fr !important; }
+}
+
+/* Hide the desktop nav links (logo + language switcher + primary CTA + «Войти»
+   remain). This threshold is set by the WIDEST language, not by a device size:
+   the full Russian bar — logo 106 + links 431 + switcher 75 + «Войти» 83 +
+   «Начать проект» 162 + gutters — needs ~1001px, so anything narrower clips the
+   CTA (the nav is nowrap and fixed, so it never wraps and never shows up as
+   page scroll). It used to sit at 900px, which fit Russian with 0px to spare
+   until the switcher was added; 1060px left only 12px, which a different font
+   render or a browser zoom step would eat. Re-measure in RU before lowering. */
+@media (max-width: 1120px) {
   .rv-landing .rv-nav-anchors { display: none !important; }
 }
 
@@ -313,4 +361,28 @@
   .rv-landing .rv-nav { padding-left: 16px !important; padding-right: 16px !important; }
   .rv-landing h1 { font-size: 40px !important; }
   .rv-landing h2 { font-size: 32px !important; }
+
+  /* The nav is `white-space: nowrap`, so anything that doesn't fit spills past
+     the right edge instead of wrapping — it never announces itself by wrapping,
+     it just clips the CTA. Desktop sizing needs ~503px of the 343px available
+     at 375px, so logo + language switcher + «Войти» + the primary CTA are all
+     scaled down here. Keep this block and the nav's inline styles in agreement,
+     and measure the EXPANDED nav (scroll position 0) — the condensed pill drops
+     to logo + CTA and fits either way, which makes overflow easy to miss. */
+  .rv-landing .rv-nav img { height: 34px !important; }
+  .rv-landing .rv-nav-tools { gap: 10px !important; margin-right: 10px !important; }
+  .rv-landing .rv-nav .rv-lang-switch button { padding: 3px 6px !important; letter-spacing: .02em !important; }
+  .rv-landing .rv-nav .rv-btn--secondary { font-size: 14px !important; padding: 6px 10px !important; }
+  .rv-landing .rv-nav .rv-btn--primary { font-size: 15px !important; padding: 8px 12px !important; }
+}
+
+/* Small phones — even at the reduced sizing above, logo + switcher + «Войти» +
+   CTA need ~344px against the 288px a 320px screen leaves after gutters.
+   Shrinking the remaining 56px away makes every control too small to tap, so
+   the SECONDARY action leaves the bar instead: the signup screen the primary
+   CTA opens carries its own «Уже есть аккаунт? Войти» link, so log-in is one
+   tap away rather than gone. The switcher stays — it is the only in-page way
+   to correct a wrong language guess without scrolling to the footer. */
+@media (max-width: 480px) {
+  .rv-landing .rv-nav .rv-btn--secondary { display: none !important; }
 }

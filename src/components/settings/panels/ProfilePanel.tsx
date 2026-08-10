@@ -19,7 +19,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { Camera, Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
-import { setAppLanguage } from "@/i18n";
 
 const TIMEZONES = [
   { value: "auto", labelKey: "profile.timezoneOption.auto" },
@@ -30,21 +29,27 @@ const TIMEZONES = [
   { value: "Asia/Tokyo", label: "Asia/Tokyo (UTC+9)" },
 ] as const;
 
-const LANGUAGES: { value: string; label: string; disabled?: boolean }[] = [
-  { value: "ru", label: "Русский" },
-  { value: "en", label: "English" },
-  { value: "de", label: "Deutsch", disabled: true },
-  { value: "fr", label: "Français", disabled: true },
-  { value: "es", label: "Español", disabled: true },
-];
-
-function normalizeSelectableLanguage(locale: string | undefined): "ru" | "en" {
-  const raw = locale || "en";
-  // Only ru/en are real translation bundles; any placeholder (de/fr/es) or stale
-  // backend value falls back to English.
-  return raw === "ru" || raw === "en" ? raw : "en";
-}
-
+// The interface language lives in Настройки > Предпочтения and NOWHERE else
+// (rovno #186). This panel used to carry a second selector that wrote
+// profiles.locale while Предпочтения wrote localStorage, so the two disagreed and
+// saving any unrelated field here silently overwrote a language chosen there.
+//
+// This panel no longer sends `locale` at all. That is safe because
+// updateProfileIdentity is a genuine partial update (`if (patch.locale !==
+// undefined)` in the Supabase source; the browser source ignores the patch
+// entirely), so omitting the field leaves the column untouched rather than
+// nulling it. workspace-source.identity.test.ts pins that invariant, because it
+// is now the only thing standing between a Профиль save and a reset locale.
+//
+// NOTE on profiles.locale itself: after this change nothing writes it and
+// nothing reads it. A pre-merge review established there is no reader anywhere,
+// not in any component, edge function or SQL function (AI answer language comes
+// from profile_settings.ai_output_language). An earlier revision of this change
+// added a write from Предпочтения justified as feeding "AI and notification
+// language"; that justification was simply false, and the write brought a race,
+// a rarely-firing trigger and Sentry noise with it, so it was dropped. Reading
+// the column at boot is option A on #186 and needs a backfill first: today's
+// rows say 'en' only by accident of the old column default.
 export function ProfilePanel() {
   const { t } = useTranslation();
   const user = useCurrentUser();
@@ -69,11 +74,10 @@ export function ProfilePanel() {
   const needsSignIn = workspaceMode.kind === "guest";
 
   const [name, setName] = useState(user.name);
-  const [email] = useState(user.email);
+  const [email, setEmail] = useState(user.email);
   const [roleTitle, setRoleTitle] = useState("");
   const [phone, setPhone] = useState(PHONE_PREFILL);
   const [timezone, setTimezone] = useState(user.timezone || "auto");
-  const [language, setLanguage] = useState(() => normalizeSelectableLanguage(user.locale));
   const [signature, setSignature] = useState("");
   const [bio, setBio] = useState("");
   const [avatarUrl, setAvatarUrl] = useState(user.avatar ?? "");
@@ -82,8 +86,8 @@ export function ProfilePanel() {
   // Seed identity fields once the current user resolves (async in supabase mode).
   useEffect(() => {
     setName(user.name);
+    setEmail(user.email);
     setTimezone(user.timezone || "auto");
-    setLanguage(normalizeSelectableLanguage(user.locale));
     setAvatarUrl(user.avatar ?? "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user.id]);
@@ -108,7 +112,6 @@ export function ProfilePanel() {
     name !== user.name ||
     (avatarUrl ?? "") !== (user.avatar ?? "") ||
     timezone !== (user.timezone || "auto") ||
-    language !== normalizeSelectableLanguage(user.locale) ||
     roleTitle !== (contactInfo?.roleTitle ?? "") ||
     (phoneValueForSave(phone) ?? "") !== (contactInfo?.phone ?? "") ||
     bio !== (contactInfo?.bio ?? "") ||
@@ -134,10 +137,11 @@ export function ProfilePanel() {
   const handleSave = async () => {
     try {
       await Promise.all([
+        // No `locale` here on purpose. This is a partial update, so omitting the
+        // field leaves the column alone; Настройки > Предпочтения owns it.
         updateIdentity.mutateAsync({
           fullName: name.trim() || null,
           avatarUrl: avatarUrl || null,
-          locale: language,
           timezone,
         }),
         updateContactInfo.mutateAsync({
@@ -147,12 +151,6 @@ export function ProfilePanel() {
           signatureBlock: signature.trim() || null,
         }),
       ]);
-      // Apply the chosen interface language live and persist it for the next boot.
-      // Saving locale to the backend alone never reached i18n, so the UI appeared
-      // not to change. Only ru/en are real bundles.
-      if (language === "ru" || language === "en") {
-        setAppLanguage(language);
-      }
       toast({ title: t("profile.savedToast"), description: t("profile.savedToastDescription") });
     } catch (error) {
       toast({
@@ -166,7 +164,6 @@ export function ProfilePanel() {
   const handleDiscard = () => {
     setName(user.name);
     setTimezone(user.timezone || "auto");
-    setLanguage(normalizeSelectableLanguage(user.locale));
     setAvatarUrl(user.avatar ?? "");
     setRoleTitle(contactInfo?.roleTitle ?? "");
     setPhone(contactInfo?.phone ?? PHONE_PREFILL);
@@ -239,19 +236,6 @@ export function ProfilePanel() {
                 {TIMEZONES.map((tz) => (
                   <SelectItem key={tz.value} value={tz.value}>
                     {"labelKey" in tz ? t(tz.labelKey) : tz.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label>{t("profile.language")}</Label>
-            <Select value={language} onValueChange={(value) => setLanguage(normalizeSelectableLanguage(value))}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {LANGUAGES.map((lang) => (
-                  <SelectItem key={lang.value} value={lang.value} disabled={lang.disabled}>
-                    {lang.label}
                   </SelectItem>
                 ))}
               </SelectContent>

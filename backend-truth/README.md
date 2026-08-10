@@ -1,5 +1,5 @@
 <!-- Generated file. Read-only. Regenerate from rovno-db. -->
-<!-- Secondary summary view. Structured JSON and mirrored SQL are authoritative over this markdown. -->
+<!-- Summary view. The migrations under supabase/migrations/ are authoritative. -->
 
 DO NOT EDIT.
 
@@ -17,12 +17,18 @@ It is an allowlist-specific extractor for the source migrations below, not a gen
 - The mirror is deterministic and should be fully replaced on sync.
 - Unsupported or unexpected SQL in the curated allowlist causes generation to fail instead of writing partial output.
 
-## Contract Precedence
+## What This Is, And What It Is Not
 
-1. Mirrored SQL for exact source auditability
-2. Normalized JSON for machine-readable contract views
-3. Generated TypeScript for reference-only developer inspection
-4. Generated Markdown for human-readable secondary summaries
+- `generated/supabase-types.ts` is the one load-bearing artifact: it is imported by
+  `rovno/src`, so schema drift fails `npm run typecheck` instead of reaching a user.
+- It is generated from the CURATED allowlist below, so it is deliberately partial.
+  A table or RPC in an excluded migration is absent here and typed nowhere.
+- The migrations under `rovno-db/supabase/migrations/` are the only complete picture.
+  An object's real definition is every migration touching its name, in timestamp order.
+- Structured JSON contract views, per-slice bundles, markdown contracts and a mirrored
+  SQL copy used to live here too. They were removed in rovno-db#106: nothing read them,
+  and being silently two-thirds complete made them actively misleading for the RLS and
+  permission questions where being wrong costs the most.
 
 ## Source Migrations
 
@@ -159,6 +165,12 @@ It is an allowlist-specific extractor for the source migrations below, not a gen
 - `supabase/migrations/20260713150000_change_task_status_v2.sql`
 - `supabase/migrations/20260716205000_payment_intents_operation_identity_key.sql`
 - `supabase/migrations/20260720120000_payment_intents_order_attempt.sql`
+- `supabase/migrations/20260725120000_invite_replay_guard.sql`
+- `supabase/migrations/20260725190000_profiles_locale_default_ru.sql`
+- `supabase/migrations/20260726120000_drop_debug_org_rls_state2.sql`
+- `supabase/migrations/20260727120000_drop_out_of_band_debug_rpcs.sql`
+- `supabase/migrations/20260729130000_project_invites_expires_at.sql`
+- `supabase/migrations/20260806070000_can_access_storage_object_archived_documents.sql`
 
 ## Exclusions
 
@@ -175,9 +187,4 @@ It is an allowlist-specific extractor for the source migrations below, not a gen
 
 - Extension `pgcrypto` from `supabase/migrations/20260306160000_extensions_and_base_helpers.sql`
 - Extension `pg_trgm` from `supabase/migrations/20260613120000_enable_pg_trgm_and_article_name_search_indexes.sql`
-
-## Derived Contract Bundles
-
-- `slices/*.json` are derived contract bundles filtered from the canonical structured artifacts.
-- `contracts/*.md` are secondary summary views rendered mechanically from those structured artifacts.
 

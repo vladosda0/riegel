@@ -3,9 +3,38 @@ import type {
   InventoryLocation,
   OrderLine,
   OrderReceiveEvent,
+  OrderStatus,
   OrderWithLines,
   ProcurementItemV2,
 } from "@/types/entities";
+
+/**
+ * The order exists operationally: placed, not voided, not a draft — so its lines represent
+ * real committed quantities and real money.
+ *
+ * `partially_received` is the state between `placed` and `received` and belongs here with
+ * them. Omitting it silently zeroes spend, on-hand stock, procurement KPIs and the estimate
+ * delete guards for a half-delivered order, which reads as "clean" because every individual
+ * status check looks reasonable in isolation.
+ *
+ * Domain note: this is the CLIENT model (`OrderStatus`). The Supabase row domain is a
+ * different set (`cancelled` where this has `voided`), so it cannot share this predicate and
+ * is checked separately in two places that must stay in agreement with it:
+ * `orderRowStatusAllowsOperationalLineHydration` in `@/data/orders-source` and the
+ * same-named `isAppliedOrderStatus` in `@/data/procurement-source`.
+ */
+export function isAppliedOrderStatus(status: OrderStatus): boolean {
+  return status === "placed" || status === "partially_received" || status === "received";
+}
+
+/**
+ * An applied order that still has unreceived quantity outstanding, i.e. money that is
+ * committed but not yet delivered. `received` is excluded because a fully received order
+ * has nothing open left; `partially_received` is included because it does.
+ */
+export function isOpenOrderStatus(status: OrderStatus): boolean {
+  return status === "placed" || status === "partially_received";
+}
 
 export interface InStockItemByLocation {
   procurementItemId: string;
@@ -64,7 +93,40 @@ export interface ProcurementHeaderKpis {
 }
 
 function isAppliedOrder(order: OrderWithLines): boolean {
-  return order.status === "placed" || order.status === "received";
+  return isAppliedOrderStatus(order.status);
+}
+
+/**
+ * Which applied orders count as FULFILLING a procurement requirement, as opposed to merely
+ * moving units that were already counted.
+ *
+ * Supplier orders always count: they are how material enters the project. Stock orders are the
+ * subtle case. A cross-project transfer's «in» side brings genuinely new material into this
+ * project and must count. A same-project warehouse-to-warehouse move (`transferDirection`
+ * null/undefined) only relocates units a supplier order already counted, so counting it again
+ * subtracts the same quantity a second time and drives «Осталось заказать» down with ordinary
+ * warehouse activity. The «out» side of a cross-project transfer never matches a procurement
+ * item anyway — `20260630140000_cross_project_transfer_deferred_receipt.sql` writes that line
+ * with a NULL `procurement_item_id` — but it is excluded explicitly so this predicate states
+ * the whole rule instead of leaning on that.
+ *
+ * NOT covered here, deliberately: this predicate says WHICH KINDS of order count, not WHEN.
+ * The caller's `isAppliedOrder` filter admits `placed`, so a cross-project «in» transfer counts
+ * from the moment it is placed, before the goods arrive. Per
+ * `20260630140000_cross_project_transfer_deferred_receipt.sql`, placing such a transfer moves
+ * NOTHING — it writes two `placed` orders and no `inventory_movements` row — so an in-transit
+ * transfer already zeroes the requirement while nothing has physically arrived, and it stays
+ * that way if the transfer is never received. That behaviour predates #216 and is unchanged by
+ * it (the filter used to be `isAppliedOrder` alone); tightening it to
+ * `transferDirection === "in" && status === "received"` would move `toBePaidPlannedCents` in
+ * `estimate-v2/rollups.ts` and is its own decision, not part of the double-count fix.
+ *
+ * The sibling helpers in this file (`computeOrderedOpenQty`, `computeProcurementHeaderKpis`,
+ * `computePurchasePriceVariance`, `computeProjectLastReceivedAt`) filter to supplier orders
+ * only, which is right for what each of them measures. See #216.
+ */
+function countsTowardFulfillment(order: OrderWithLines): boolean {
+  return order.kind === "supplier" || order.transferDirection === "in";
 }
 
 function unitPriceForItem(item: ProcurementItemV2): number {
@@ -92,7 +154,7 @@ export function computeRemainingRequestedQty(
   if (!item) return 0;
 
   const fulfilledFromOrders = orders
-    .filter(isAppliedOrder)
+    .filter((order) => isAppliedOrder(order) && countsTowardFulfillment(order))
     .flatMap((order) => order.lines)
     .filter((line) => line.procurementItemId === item.id)
     .reduce((sum, line) => sum + line.qty, 0);
@@ -102,15 +164,25 @@ export function computeRemainingRequestedQty(
 
 export function computeOrderedOpenQty(requestId: string, orders: OrderWithLines[]): number {
   return orders
-    .filter((order) => order.kind === "supplier" && order.status === "placed")
+    .filter((order) => order.kind === "supplier" && isOpenOrderStatus(order.status))
     .flatMap((order) => order.lines)
     .filter((line) => line.procurementItemId === requestId)
     .reduce((sum, line) => sum + Math.max(line.qty - line.receivedQty, 0), 0);
 }
 
+/**
+ * No production caller today; the tests are its only consumers, and that is deliberate rather
+ * than an oversight. It is `computeRemainingRequestedQty` without the `requiredQty` subtraction,
+ * so its four assertions pin `countsTowardFulfillment` from a second angle on the same fixtures.
+ *
+ * Contrast with `getProcurementReadProjectSummary`, which this same change DELETED: that one was
+ * dead AND wrong (it routed through a snapshot that is empty in Supabase mode), so leaving it
+ * exported invited a future caller to inherit a defect. This one is dead and correct. If it ever
+ * stops being exercised alongside its twin, delete it rather than letting the two drift.
+ */
 export function computeFulfilledQty(requestId: string, orders: OrderWithLines[]): number {
   return orders
-    .filter(isAppliedOrder)
+    .filter((order) => isAppliedOrder(order) && countsTowardFulfillment(order))
     .flatMap((order) => order.lines)
     .filter((line) => line.procurementItemId === requestId)
     .reduce((sum, line) => sum + line.qty, 0);
@@ -495,7 +567,7 @@ export function computeTabChipTotals(
   // transfer is a real placed order in this project, so it belongs in the "ordered" tally.
   const orderedOrders = orders.filter((order) =>
     order.projectId === projectId
-    && order.status === "placed"
+    && isOpenOrderStatus(order.status)
     && (order.kind === "supplier" || order.transferDirection != null));
   const itemById = new Map(items.map((item) => [item.id, item]));
   const ordered: TabChipStat = {

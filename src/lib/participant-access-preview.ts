@@ -101,7 +101,6 @@ const PREVIEW_DOMAINS: ReadonlyArray<{ domain: ProjectDomain; labelKey: string }
 export function computeAccessPreview(input: {
   role: MemberRole;
   axes: ParticipantAxes;
-  creditLimit?: number;
 }): AccessPreviewItem[] {
   const { role, axes } = input;
   const items: AccessPreviewItem[] = PREVIEW_DOMAINS.map(({ domain, labelKey }) => ({
@@ -133,7 +132,10 @@ export function computeAccessPreview(input: {
 
   // The AI row gets its own badge wording: the person USES the assistant, so
   // "views/edits" would mislead. consult_only → «Консультации», project_pool →
-  // «Полный доступ · лимит N» (state drives only color/icon).
+  // «Полный доступ» (state drives only color/icon). No limit line: credit_limit
+  // has no reader (rovno-db 20260522130400_create_usage_rpcs.sql meters the
+  // member's own subscription instead), so naming a number here promised an
+  // enforcement that does not exist (rovno#301).
   items.push({
     key: "ai",
     labelKey: "participants.preview.ai",
@@ -142,11 +144,7 @@ export function computeAccessPreview(input: {
       ? { stateLabelKey: "participants.preview.aiState.consult" }
       : {}),
     ...(axes.aiAccess === "project_pool"
-      ? {
-          stateLabelKey: "participants.preview.aiState.full",
-          detailKey: "participants.preview.aiLimit",
-          detailParams: { limit: input.creditLimit ?? 0 },
-        }
+      ? { stateLabelKey: "participants.preview.aiState.full" }
       : {}),
   });
 

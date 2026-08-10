@@ -107,9 +107,25 @@ Never treat UI or mock types as DB truth. If the contract is missing a field or 
 
 **Backend-shaped or data work**
 
-- `backend-truth/schema/tables.json`, `relations.json`, `rpc-functions.json`, `rls-summary.json`
-- `backend-truth/generated/supabase-types.ts`
-- Relevant `backend-truth/slices/*.json` and `backend-truth/contracts/*.md`
+- `backend-truth/generated/supabase-types.ts` — the compile-time source of truth. Generated from the
+  committed migrations and imported by 19 files in `src/`, so schema drift fails `npm run typecheck`
+  rather than reaching a user.
+- The migrations themselves, in `~/projects/rovno-db/supabase/migrations/`. **This is the only
+  complete picture.** An object's real definition is the result of every migration touching its name,
+  in timestamp order — so before concluding anything about a table, policy, trigger or function,
+  search for LATER migrations touching that same name.
+
+> **`backend-truth/` is `generated/supabase-types.ts` plus its README and MANIFEST, and nothing
+> else.** The `schema/`, `slices/`, `contracts/` and `sql/` families, and `generated/
+> db-public-schema.ts`, were removed in rovno-db#106 (2026-08-04): nothing imported or cited them,
+> and they were silently partial in a way they never admitted — 67 of 205 migrations excluded, RLS
+> among them, so `workspace_documents` had real RLS policies in `rovno-db` and appeared in
+> `rls-summary.json` not at all. If you find a stale copy in an old checkout, do not read it.
+>
+> The partiality applies to what survives, too: `supabase-types.ts` is generated from the same
+> curated allowlist, so an object living only in an excluded migration is typed nowhere. It is
+> load-bearing for drift detection, not a map of the schema. The migrations remain the only
+> complete picture.
 
 **App architecture**
 
@@ -251,7 +267,7 @@ If prod is broken / unsure → **immediately notify the user** describing what h
 
 | Area        | Location |
 |------------|----------|
-| Contract   | `backend-truth/README.md`, `schema/`, `slices/`, `contracts/`, `generated/` |
+| Contract   | `backend-truth/generated/supabase-types.ts` (+ `README.md`, `MANIFEST.json`); the full picture is `rovno-db/supabase/migrations/` |
 | Permissions| `src/lib/permissions.ts` |
 | Data entry | `src/data/store.ts`, `src/hooks/use-mock-data.ts` |
 | Supabase   | `src/integrations/supabase/` |

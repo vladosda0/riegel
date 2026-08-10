@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { FileInput } from "@/components/ui/file-input";
+import { DOCUMENT_UPLOAD_ACCEPT } from "@/lib/document-file-types";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
@@ -729,6 +730,7 @@ export function QuickActions({
                 <div className="space-y-1">
                   <label className="text-body-sm font-medium text-foreground">{t("quickActions.document.fileLabel")}</label>
                   <FileInput
+                    accept={DOCUMENT_UPLOAD_ACCEPT}
                     onChange={(event) => setDocumentFile(event.target.files?.[0] ?? null)}
                   />
                 </div>

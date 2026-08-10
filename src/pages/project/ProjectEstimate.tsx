@@ -89,6 +89,7 @@ import {
   useWorkspaceProjectState,
 } from "@/hooks/use-workspace-source";
 import { trackEvent } from "@/lib/analytics";
+import { buildCsvDocument, CSV_BOM } from "@/lib/csv";
 import { useTierQuota } from "@/hooks/useTierQuota";
 import { showTierLimitPaywallByType } from "@/lib/tier-limit-error";
 import {
@@ -117,7 +118,11 @@ import type { EstimateV2ProjectSyncState } from "@/data/estimate-v2-store";
 import { getPlanningSource } from "@/data/planning-source";
 import { addEvent, getUserById } from "@/data/store";
 import { createWorkspaceProjectInvite, sendWorkspaceProjectInviteEmail } from "@/data/workspace-source";
+import { describeInviteCreateError, describeInviteSendError } from "@/lib/invite-error-copy";
 import {
+  computeEffectiveDiscountBps,
+  computeEffectiveMarkupBps,
+  computeEffectiveTaxBps,
   computeLineTotals,
   computeProjectTotals,
   computeStageTotals,
@@ -127,12 +132,13 @@ import {
   type EstimateLineClientDisplayMode,
 } from "@/lib/estimate-v2/pricing";
 import { SHOW_ESTIMATE_VERSION_UI } from "@/lib/estimate-v2/show-estimate-version-ui";
-import { resolveProjectEstimateCtaState } from "@/lib/estimate-v2/project-estimate-cta";
+import { canPublishClientShare, resolveProjectEstimateCtaState } from "@/lib/estimate-v2/project-estimate-cta";
 import { getDefaultFinanceVisibility } from "@/lib/participant-role-policy";
 import {
   combinePlanFact,
   computeFactFromDataSources,
   computePlannedFromEstimateV2,
+  hasActualFinancialData as hasActualFinancialDataFor,
 } from "@/lib/estimate-v2/rollups";
 import { fromDayIndex, toDayIndex } from "@/lib/estimate-v2/schedule";
 import { computeEac, computeFinishedAccuracy } from "@/lib/estimate-v2/finance-insights";
@@ -339,19 +345,37 @@ function buildHierarchyNumbers(
   return { stageNumberById, workNumberById };
 }
 
-function effectiveDiscountForDisplay(line: EstimateV2ResourceLine, _stage: EstimateV2Stage, projectDiscountBps: number): number {
-  if (line.discountBpsOverride != null && line.discountBpsOverride > 0) return line.discountBpsOverride;
-  return projectDiscountBps;
+/**
+ * Display-side wrappers over the pricing resolvers. They exist only to adapt the
+ * call shape: the screen has a bare `projectXBps` number where pricing wants the
+ * project object.
+ *
+ * They DELEGATE rather than reimplement, deliberately. Two earlier revisions of
+ * this PR wrote the resolution rule out a second time here and it drifted both
+ * times: first with no clamp at all (an out-of-band value printed raw while
+ * pricing charged the clamped figure), then with a hand-rolled
+ * `Math.max(0, Math.min(10_000, raw))` that still missed clampBps's rounding and
+ * non-finite guard, so Infinity printed 100% against a charged 0% and 1250.6
+ * printed 12.506% against a charged 12.51%.
+ *
+ * Whatever the table, the CSV and the PDF show must be the number the client is
+ * actually charged. Delegation makes that structural instead of a promise: there
+ * is one resolution rule and one clamp, and pricing.test.ts covers them.
+ *
+ * The discount resolver also has the deliberate absence of a stage tier: it used
+ * to take a stage and discard it as `_stage`, advertising a capability neither
+ * side implements (#207).
+ */
+function effectiveDiscountForDisplay(line: EstimateV2ResourceLine, projectDiscountBps: number): number {
+  return computeEffectiveDiscountBps(line, { discountBps: projectDiscountBps });
 }
 
 function effectiveMarkupForDisplay(line: EstimateV2ResourceLine, projectMarkupBps: number): number {
-  if (line.markupBps > 0) return line.markupBps;
-  return projectMarkupBps;
+  return computeEffectiveMarkupBps(line, { markupBps: projectMarkupBps });
 }
 
 function effectiveTaxForDisplay(line: EstimateV2ResourceLine, projectTaxBps: number): number {
-  if (line.taxBpsOverride != null && line.taxBpsOverride > 0) return line.taxBpsOverride;
-  return projectTaxBps;
+  return computeEffectiveTaxBps(line, { taxBps: projectTaxBps });
 }
 
 function estimateStatusLabelKey(status: EstimateExecutionStatus): string {
@@ -414,16 +438,6 @@ const dayRangeFormatter = new Intl.DateTimeFormat("ru-RU", {
 function formatDayIndex(dayIndex: number | null): string {
   if (dayIndex == null) return "—";
   return dayRangeFormatter.format(new Date(fromDayIndex(dayIndex)));
-}
-
-function buildCsv(rows: string[][]): string {
-  return rows
-    .map((row) => row.map((cell) => {
-      const normalized = cell.replace(/"/g, '""');
-      if (/[",\n]/.test(normalized)) return `"${normalized}"`;
-      return normalized;
-    }).join(","))
-    .join("\n");
 }
 
 const RESOURCE_TYPE_OPTIONS: Array<{ value: ResourceLineType; labelKey: string }> = [
@@ -1002,11 +1016,35 @@ export default function ProjectEstimate() {
   const estimateFinanceMode = seamEstimateFinanceVisibilityMode(perm.seam);
   const canExportEstimateCsv = seamAllowsEstimateExportCsv(perm.seam);
   const canManageEstimate = projectDomainAllowsManage(estimateAccess);
-  const canEditEstimate = canManageEstimate;
-  const canSubmitToClient = canManageEstimate && canSubmitByMembership;
+  // Editing needs finance detail, not just the role. A co_owner below detail
+  // could reach every edit control, and every edit cleared the persisted snapshot
+  // that was the sole truthful pricing source for them (rovno#282). In managed
+  // supabase mode `queueProjectDraftSync` caches the edit locally and then
+  // refuses to sync it as `blocked_permission`, so it never reached the DB. In
+  // demo/local it returns before that cache write and the edit lived only in the
+  // in-memory store. Withdrawing it there is deliberate, not a side effect.
+  const canEditEstimate = canManageEstimate && estimateFinanceMode === "detail";
+  // Publishing is strictly stronger than editing, so it takes the same gate. The
+  // share snapshot is built from the RAW lines and ShareEstimate recomputes from
+  // them with no snapshot preference, so a below-detail member would publish a
+  // client-facing estimate of zeroes — and since this page now shows them the
+  // correct money, they would have no signal at all (rovno#282, audit round 2).
+  const canSubmitToClient = canPublishClientShare({
+    canManageEstimate,
+    isSubmitterRole: canSubmitByMembership,
+    financeMode: estimateFinanceMode,
+  });
   const isContractorMode = projectMode === "contractor";
+  // Which pricing SOURCE to read is a different question from who may edit, and
+  // it is keyed on the ROLE-level `canManageEstimate` on purpose: a manager
+  // holding live costs must recompute even though the line above just made them
+  // read-only. Prefer the persisted snapshot when there is nothing truthful to
+  // recompute from: the store zeroed the costs, or it hydrated through the
+  // operational RPC and returned no resource lines at all, in which case no line
+  // survives to carry `costRedacted` and the upper block is the only pricing.
+  const hasRedactedLineCosts = lines.some((line) => line.costRedacted);
   const useReadOnlySummaryPricing = estimateFinanceMode === "summary"
-    && !canEditEstimate
+    && (!canManageEstimate || hasRedactedLineCosts || (operationalUpperBlock != null && lines.length === 0))
     && !isCurrentUserLoading
     && !isProjectLoading
     && !isMembersLoading
@@ -1321,7 +1359,7 @@ export default function ProjectEstimate() {
             });
           }
         } catch (sendErr) {
-          const message = sendErr instanceof Error ? sendErr.message : t("estimate.toast.inviteSendFailedFallback");
+          const message = describeInviteSendError(sendErr, t, t("estimate.toast.inviteSendFailedFallback"));
           toast({
             title: t("estimate.toast.inviteCreatedEmailFailed.title"),
             description: message,
@@ -1335,7 +1373,7 @@ export default function ProjectEstimate() {
         });
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("estimate.toast.inviteCreateFailedFallback");
+      const message = describeInviteCreateError(err, t, t("estimate.toast.inviteCreateFailedFallback"));
       toast({
         title: t("estimate.toast.inviteFailed.title"),
         description: message,
@@ -1536,8 +1574,8 @@ export default function ProjectEstimate() {
               unit: line.unit,
               costUnitCents: line.costUnitCents,
               costTotalCents: lineTotals.costTotalCents,
-              markupBps: line.markupBps > 0 ? line.markupBps : estimateProject.markupBps,
-              discountBps: effectiveDiscountForDisplay(line, stage, estimateProject.discountBps),
+              markupBps: effectiveMarkupForDisplay(line, estimateProject.markupBps),
+              discountBps: effectiveDiscountForDisplay(line, estimateProject.discountBps),
               clientUnitCents: clientAmounts.clientUnitCents,
               clientTotalCents: clientAmounts.clientTotalCents,
               discountedClientTotalCents,
@@ -1655,14 +1693,7 @@ export default function ProjectEstimate() {
   const isInWork = estimateProject.estimateStatus === "in_work";
 
   const hasActualFinancialData = useMemo(
-    () => (
-      hrPayments.length > 0
-      || orders.some((order) => (
-        order.kind === "supplier"
-        && (order.status === "placed" || order.status === "received")
-        && order.lines.length > 0
-      ))
-    ),
+    () => hasActualFinancialDataFor({ hrPaymentCount: hrPayments.length, orders }),
     [hrPayments.length, orders],
   );
 
@@ -2013,11 +2044,26 @@ export default function ProjectEstimate() {
         };
     };
 
+    // A co_owner below detail IS the co-owner the generic string tells them to
+    // go and find, so that wording sends them after a person who does not exist.
+    const shareDenialMessage = () => (
+      canManageEstimate && canSubmitByMembership && estimateFinanceMode !== "detail"
+        ? t("estimate.export.share.needsFinanceDetail")
+        : t("estimate.export.share.cannotSubmit")
+    );
+
     const publishToBackend = async (
       shareToken: string,
       versionNumber: number,
       snapshotPayload: typeof currentVersionSnapshot,
-    ): Promise<{ ok: true } | { ok: false; error: string }> => {
+    ): Promise<{ ok: true } | { ok: false; reason: "forbidden" | "network"; error: string }> => {
+      // The gate lives here rather than at the call sites: three of the four
+      // publish paths are unreachable today because SHOW_ESTIMATE_VERSION_UI is
+      // false, and two of those had no gate of their own. Callers may ignore a
+      // network failure and still hand out the link; they may not ignore this.
+      if (!canSubmitToClient) {
+        return { ok: false, reason: "forbidden", error: shareDenialMessage() };
+      }
       const options = submitOptionsFor();
       try {
         await publishEstimateShareSnapshot({
@@ -2032,6 +2078,7 @@ export default function ProjectEstimate() {
       } catch (error) {
         return {
           ok: false,
+          reason: "network",
           error: error instanceof Error ? error.message : t("estimate.export.share.submitFailed"),
         };
       }
@@ -2051,7 +2098,8 @@ export default function ProjectEstimate() {
         // (it is idempotent — re-publishing the same approved snapshot is a
         // no-op). If the network call fails we still hand out the link so
         // same-session readers continue to work.
-        await publishToBackend(latestApproved.shareId, latestApproved.number, latestApproved.snapshot);
+        const published = await publishToBackend(latestApproved.shareId, latestApproved.number, latestApproved.snapshot);
+        if (!published.ok && published.reason === "forbidden") return { error: published.error };
         return { url: buildShareLink(latestApproved.shareId) };
       }
     }
@@ -2061,11 +2109,12 @@ export default function ProjectEstimate() {
     // re-open the link. Mirrors the prior submit-to-client resubmission flow.
     if (latestProposed?.submitted) {
       if (!hasPendingChangesSinceSubmission) {
-        await publishToBackend(latestProposed.shareId, latestProposed.number, latestProposed.snapshot);
+        const published = await publishToBackend(latestProposed.shareId, latestProposed.number, latestProposed.snapshot);
+        if (!published.ok && published.reason === "forbidden") return { error: published.error };
         return { url: buildShareLink(latestProposed.shareId) };
       }
       if (!canSubmitToClient) {
-        return { error: t("estimate.export.share.cannotSubmit") };
+        return { error: shareDenialMessage() };
       }
       try {
         const ok = refreshVersionSnapshot(pid, latestProposed.id, currentUser.id, submitOptionsFor());
@@ -2090,7 +2139,7 @@ export default function ProjectEstimate() {
 
     // No submitted version yet — create a fresh proposed one.
     if (!canSubmitToClient) {
-      return { error: t("estimate.export.share.cannotSubmit") };
+      return { error: shareDenialMessage() };
     }
     try {
       const snapshot = createVersionSnapshot(pid, currentUser.id);
@@ -2113,8 +2162,11 @@ export default function ProjectEstimate() {
   }, [
     availableParticipantSlots,
     buildShareLink,
+    canManageEstimate,
+    canSubmitByMembership,
     canSubmitToClient,
     currentUser.id,
+    estimateFinanceMode,
     currentVersionSnapshot,
     hasPendingChangesSinceSubmission,
     latestApproved,
@@ -2261,8 +2313,11 @@ export default function ProjectEstimate() {
               line.unit,
               money(line.costUnitCents, estimateProject.currency),
               money(lineTotals.costTotalCents, estimateProject.currency),
-              fromBpsToPercent(line.markupBps),
-              fromBpsToPercent(effectiveDiscountForDisplay(line, stage, estimateProject.discountBps)),
+              // Through the helper, like the on-screen cell: the raw line.markupBps
+              // skipped both the project-inheritance rule (a line at 0 shows 0%
+              // while it is actually charged the project markup) and the clamp.
+              fromBpsToPercent(effectiveMarkupForDisplay(line, estimateProject.markupBps)),
+              fromBpsToPercent(effectiveDiscountForDisplay(line, estimateProject.discountBps)),
               clientUnitStr,
               clientTotalStr,
             ]);
@@ -2278,7 +2333,7 @@ export default function ProjectEstimate() {
             line.unit,
             money(line.costUnitCents, estimateProject.currency),
             money(lineTotals.costTotalCents, estimateProject.currency),
-            fromBpsToPercent(effectiveDiscountForDisplay(line, stage, estimateProject.discountBps)),
+            fromBpsToPercent(effectiveDiscountForDisplay(line, estimateProject.discountBps)),
             clientUnitStr,
             clientTotalStr,
           ]);
@@ -2299,8 +2354,14 @@ export default function ProjectEstimate() {
     rows.push([t("estimate.csv.taxAmount"), money(uiTaxAmountCents, estimateProject.currency)]);
     rows.push([t("estimate.csv.totalIncVat"), money(uiTotalIncVatCents, estimateProject.currency)]);
 
-    const csv = buildCsv(rows);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    // Stage/work/line titles and units are unfiltered free text, so every cell
+    // goes through the shared guard rather than a local quoting rule (#195).
+    const csv = buildCsvDocument(rows);
+    // UTF-8 BOM, which the portfolio export already emits. Without it Excel reads
+    // a double-clicked .csv as the system ANSI codepage and every Cyrillic
+    // stage/work/line title garbles, which on a Russian-UI product is most of the
+    // file. Only the more exposed of the two exporters was missing it.
+    const blob = new Blob([CSV_BOM + csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -2725,7 +2786,11 @@ export default function ProjectEstimate() {
                 onChange={handleEstimateStatusChange}
               />
               {!canEditEstimate && (
-                <div className="text-caption text-muted-foreground">{t("estimate.header.ownerOnly")}</div>
+                <div className="text-caption text-muted-foreground">
+                  {canManageEstimate
+                    ? t("estimate.header.needsFinanceDetail")
+                    : t("estimate.header.ownerOnly")}
+                </div>
               )}
             </div>
           )}
@@ -3262,7 +3327,7 @@ export default function ProjectEstimate() {
                                               <TableCell className="w-[92px] py-1.5 pr-2 align-top">
                                                 {canEditEstimate ? (
                                                   <InlineEditableNumber
-                                                    value={effectiveDiscountForDisplay(line, stage, estimateProject.discountBps)}
+                                                    value={effectiveDiscountForDisplay(line, estimateProject.discountBps)}
                                                     onCommit={(nextValue) => updateLine(pid, line.id, { discountBpsOverride: nextValue > 0 ? nextValue : null })}
                                                     formatDisplay={(value) => `${fromBpsToPercent(value)}%`}
                                                     formatInput={(value) => fromBpsToPercent(value)}
@@ -3270,7 +3335,7 @@ export default function ProjectEstimate() {
                                                   />
                                                 ) : (
                                                   <div className="min-h-7 whitespace-nowrap px-1 py-0.5 text-right text-sm tabular-nums text-foreground">
-                                                    {`${fromBpsToPercent(effectiveDiscountForDisplay(line, stage, estimateProject.discountBps))}%`}
+                                                    {`${fromBpsToPercent(effectiveDiscountForDisplay(line, estimateProject.discountBps))}%`}
                                                   </div>
                                                 )}
                                               </TableCell>

@@ -65,7 +65,13 @@ function createProjectEventsMap(
   return Object.fromEntries(
     projectIds.map((projectId) => {
       const events = store.getEvents(projectId);
-      return [projectId, typeof perProjectLimit === "number" ? events.slice(0, perProjectLimit) : events];
+      // This, not the browser ActivitySource, is what actually caps demo/local.
+      // Use the same positive-integer predicate as the supabase path, or the two
+      // modes disagree: 2.5 would render 2 rows here and none in supabase mode.
+      const bounded = typeof perProjectLimit === "number"
+        && Number.isInteger(perProjectLimit)
+        && perProjectLimit > 0;
+      return [projectId, bounded ? events.slice(0, perProjectLimit) : events];
     }),
   );
 }
@@ -222,11 +228,18 @@ export function useProjectsRecentEventsMap(
     queryFn: async () => {
       const source = await getActivitySource(supabaseMode ?? undefined);
       const entries = await Promise.all(normalizedProjectIds.map(async (projectId) => (
-        [projectId, (await source.getProjectEvents(projectId)).slice(0, perProjectLimit)] as const
+        [projectId, (await source.getProjectEvents(projectId, perProjectLimit)).slice(0, perProjectLimit)] as const
       )));
       return Object.fromEntries(entries);
     },
-    enabled: Boolean(supabaseMode && normalizedProjectIds.length > 0 && perProjectLimit > 0),
+    // Integer, not merely > 0: the cap reaches the query string verbatim, so a
+    // fractional or Infinite value would be rejected and blank the whole feed.
+    enabled: Boolean(
+      supabaseMode
+      && normalizedProjectIds.length > 0
+      && Number.isInteger(perProjectLimit)
+      && perProjectLimit > 0,
+    ),
     staleTime: ACTIVITY_QUERY_STALE_TIME_MS,
   });
 

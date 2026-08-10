@@ -2,7 +2,27 @@ import * as React from "react";
 
 import type { ToastActionElement, ToastProps } from "@/components/ui/toast";
 
-const TOAST_LIMIT = 1;
+// Raised from the stock shadcn value of 1, which was too small for this app's
+// own AI proposal queue. That loop dispatches one toast per confirmed item with
+// no render between dispatches, and the reducer's
+// `[action.toast, ...state.toasts].slice(0, TOAST_LIMIT)` evicts the older entry
+// before it is ever painted — so at 1, every message but the last was lost.
+//
+// 5 is not arbitrary: createProjectProposals emits at most FOUR proposals (one
+// per intent regex), so a queue raises at most four toasts. The cliff sits above
+// the maximum reachable burst rather than inside it. If that generator ever
+// emits more types, raise this with it.
+//
+// KNOWN CONSEQUENCE: the old limit of 1 also accidentally protected `toast()`
+// calls made inside a loop, where a per-item error handler overwrote itself.
+// Two such sites now stack up to 5 identical copies instead of showing one:
+// src/components/blog/editor/RichTextEditor.tsx (per failed image upload) and
+// src/pages/catalogs/UserCatalogPage.tsx (per dirty row on a failing flush).
+// That is noise on an already-failing path, not lost information. Deduping
+// identical toasts is the real fix and is tracked separately — it must key on
+// title AND description AND variant, must only suppress toasts still `open`,
+// and must never suppress one carrying an `action`.
+export const TOAST_LIMIT = 5;
 const TOAST_REMOVE_DELAY = 1000000;
 
 type ToasterToast = ToastProps & {

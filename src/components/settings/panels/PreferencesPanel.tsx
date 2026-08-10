@@ -18,7 +18,7 @@ import type {
   ProfileWeekStart,
 } from "@/data/workspace-source";
 import { MVP_SHOW_AI_AUTOMATION_MODE_UI } from "@/lib/mvp-ai-automation-ui";
-import { type AppLanguage, getStoredLanguage, setAppLanguage } from "@/i18n";
+import { type AppLanguage, getActiveLanguage, setAppLanguage } from "@/i18n";
 
 const INTERFACE_LANGUAGES: Array<{ value: AppLanguage; labelKey: string }> = [
   { value: "ru", labelKey: "preferences.language.ru" },
@@ -54,7 +54,7 @@ export function PreferencesPanel() {
   const { t } = useTranslation();
   const { preferences, isLoading } = useWorkspaceProfilePreferencesState();
   const updatePreferences = useUpdateWorkspaceProfilePreferences();
-  const [interfaceLanguage, setInterfaceLanguage] = useState<AppLanguage>(() => getStoredLanguage());
+  const [interfaceLanguage, setInterfaceLanguage] = useState<AppLanguage>(() => getActiveLanguage());
   const [currency, setCurrency] = useState("RUB");
   const [units, setUnits] = useState("metric");
   const [dateFormat, setDateFormat] = useState("dd.MM.yyyy");

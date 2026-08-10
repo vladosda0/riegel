@@ -43,12 +43,12 @@ rovno-db/scripts/generate-backend-truth.mjs
 
 It includes:
 
-- schema tables
-- relations
-- RLS summaries
-- RPC definitions
-- slice contracts
-- generated Supabase types
+- generated Supabase types (`generated/supabase-types.ts`)
+- `README.md` and `MANIFEST.json` (bundle description + source-migration shas)
+
+(The JSON schema/relations/RLS/RPC views, slice contracts and mirrored SQL were removed in
+rovno-db#106, 2026-08-04: nothing read them and they were silently partial. The migrations in
+`rovno-db` are the only complete picture of the schema.)
 
 The folder is **read-only** in the app repo.
 
