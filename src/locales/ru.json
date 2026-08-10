@@ -1284,7 +1284,6 @@
   "participants.summary.ai": "ИИ: {{value}}.",
   "participants.summary.finance": "Финансы: {{value}}.",
   "participants.summary.internalDocs": "Внутренние документы и медиа: {{value}}.",
-  "participants.summary.creditLimit": "Лимит кредитов: {{value}}.",
   "participants.summary.viewerRegime": "Режим наблюдателя: {{value}}.",
   "participants.warning.viewerNonStandard1": "Ты открываешь участнику нестандартный доступ.",
   "participants.warning.viewerNonStandard2": "Пользователь получит доступ к важным разделам или чувствительным данным проекта.",

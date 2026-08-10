@@ -1270,7 +1270,6 @@
   "participants.summary.ai": "AI: {{value}}.",
   "participants.summary.finance": "Finance: {{value}}.",
   "participants.summary.internalDocs": "Internal docs & media: {{value}}.",
-  "participants.summary.creditLimit": "Credit limit: {{value}}.",
   "participants.summary.viewerRegime": "Viewer regime: {{value}}.",
   "participants.warning.viewerNonStandard1": "You're granting non-standard access to this member.",
   "participants.warning.viewerNonStandard2": "The user will gain access to important or sensitive parts of the project.",

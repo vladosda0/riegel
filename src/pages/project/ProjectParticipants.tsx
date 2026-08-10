@@ -55,6 +55,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -267,7 +268,6 @@ function PermissionFormSections(props: {
     financeVisibility: form.financeVisibility,
     internalDocsVisibility: form.internalDocsVisibility,
     viewerRegime: form.role === "viewer" ? form.viewerRegime : undefined,
-    creditLimit: Math.max(0, parseInt(form.creditLimit, 10) || 0),
   }, t);
   const warnings = getPermissionWarnings({
     role: form.role,
@@ -275,7 +275,6 @@ function PermissionFormSections(props: {
     financeVisibility: form.financeVisibility,
     internalDocsVisibility: form.internalDocsVisibility,
     viewerRegime: form.role === "viewer" ? form.viewerRegime : undefined,
-    creditLimit: Math.max(0, parseInt(form.creditLimit, 10) || 0),
   }, t);
 
   const financeDanger = form.financeVisibility === "detail";
@@ -480,11 +479,16 @@ function PermissionFormSections(props: {
           )}
 
           <div className="rounded-card border border-border/70 bg-background/70 p-3">
-            <label className="text-caption font-medium text-foreground">{t("participants.permission.creditLimit")}</label>
             {/* Parked like the redesign's field: nothing reads
                 project_members.credit_limit (rovno#301). The stored value is
                 still submitted unchanged, so no data is lost. */}
-            <Input type="number" disabled placeholder="—" className="mt-1" />
+            <span className="flex items-start justify-between gap-1.5 text-caption font-medium text-muted-foreground">
+              {t("participants.permission.creditLimit")}
+              <Badge variant="outline" className="shrink-0 border-border px-1.5 py-0 text-[10px] font-medium text-muted-foreground">
+                {t("participants.drawer.soon")}
+              </Badge>
+            </span>
+            <Input type="number" disabled placeholder="—" className="mt-1" aria-label={t("participants.permission.creditLimit")} />
           </div>
         </div>
       </SettingsSection>
@@ -1276,7 +1280,6 @@ function LegacyProjectParticipants() {
                     financeVisibility: record.financeVisibility,
                     internalDocsVisibility: record.internalDocsVisibility,
                     viewerRegime: record.viewerRegime,
-                    creditLimit: record.creditLimit,
                   }, t);
 
                   return (
@@ -1363,7 +1366,6 @@ function LegacyProjectParticipants() {
                     financeVisibility: record.financeVisibility,
                     internalDocsVisibility: record.internalDocsVisibility,
                     viewerRegime: record.viewerRegime,
-                    creditLimit: record.creditLimit,
                   }, t);
 
                   return (
