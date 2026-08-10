@@ -684,6 +684,15 @@ describe("ProjectParticipants", () => {
       expect(screen.queryByRole("heading", { name: "Pending invitations" })).not.toBeInTheDocument();
     });
 
+    it("shows no AI credits column, because nothing meters project_members.used_credits", () => {
+      // consume_ai_credit meters usage_counters for auth.uid(); no migration and
+      // no edge function ever increments used_credits, so the column read 0 for
+      // every member forever (rovno#301).
+      renderParticipants();
+
+      expect(screen.queryByRole("columnheader", { name: "Credits" })).not.toBeInTheDocument();
+    });
+
     it("keeps pending invites primary and invite history secondary in Invitations", async () => {
       addProjectInvite({
         id: "invite-accepted",

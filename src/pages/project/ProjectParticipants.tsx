@@ -7,7 +7,6 @@ import { showTierLimitPaywall } from "@/lib/tier-limit-error";
 import {
   AlertTriangle,
   BrainCircuit,
-  Coins,
   Crown,
   Eye,
   FileText,
@@ -152,7 +151,6 @@ type ParticipantPermissionRecord = {
   internalDocsVisibility: InternalDocsVisibility;
   viewerRegime?: ViewerRegime;
   creditLimit: number;
-  usedCredits?: number;
   inviteStatus?: WorkspaceProjectInvite["status"];
 };
 
@@ -630,7 +628,6 @@ function LegacyProjectParticipants() {
         internalDocsVisibility: readInternalDocsVisibility(member) ?? getDefaultInternalDocsVisibility(member.role),
         viewerRegime: member.viewer_regime,
         creditLimit: member.credit_limit,
-        usedCredits: member.used_credits,
       };
     })
   ), [members]);
@@ -1049,14 +1046,13 @@ function LegacyProjectParticipants() {
                     <TableHead>{t("participants.table.member")}</TableHead>
                     <TableHead>{t("participants.table.role")}</TableHead>
                     <TableHead>{t("participants.table.aiAccess")}</TableHead>
-                    <TableHead className="text-right">{t("participants.table.credits")}</TableHead>
                     {canManageAccess && <TableHead className="w-10" />}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {members.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={canManageAccess ? 5 : 4} className="text-center text-muted-foreground">
+                      <TableCell colSpan={canManageAccess ? 4 : 3} className="text-center text-muted-foreground">
                         {t("participants.empty.noActive")}
                       </TableCell>
                     </TableRow>
@@ -1106,12 +1102,6 @@ function LegacyProjectParticipants() {
                           }`}>
                             {t(aiAccessLabels[member.ai_access])}
                           </span>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {/* Only the credits actually consumed. The per-member
-                              limit is enforced by nothing (rovno#301), so the
-                              "N/M" form asserted a cap that never applied. */}
-                          <span className="text-body-sm">{member.used_credits}</span>
                         </TableCell>
                         {canManageAccess && (
                           <TableCell>
@@ -1301,12 +1291,6 @@ function LegacyProjectParticipants() {
                               <BrainCircuit className="h-3.5 w-3.5" />
                               {t(aiAccessLabels[record.aiAccess])}
                             </div>
-                            {typeof record.usedCredits === "number" && (
-                              <div className="flex items-center gap-1.5">
-                                <Coins className="h-3.5 w-3.5" />
-                                {t("participants.usedCredits", { value: record.usedCredits })}
-                              </div>
-                            )}
                             <div className="flex items-center gap-1.5">
                               <Shield className="h-3.5 w-3.5" />
                               {t(financeVisibilityLabels[record.financeVisibility])}
