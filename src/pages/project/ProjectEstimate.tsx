@@ -132,7 +132,7 @@ import {
   type EstimateLineClientDisplayMode,
 } from "@/lib/estimate-v2/pricing";
 import { SHOW_ESTIMATE_VERSION_UI } from "@/lib/estimate-v2/show-estimate-version-ui";
-import { resolveProjectEstimateCtaState } from "@/lib/estimate-v2/project-estimate-cta";
+import { canPublishClientShare, resolveProjectEstimateCtaState } from "@/lib/estimate-v2/project-estimate-cta";
 import { getDefaultFinanceVisibility } from "@/lib/participant-role-policy";
 import {
   combinePlanFact,
@@ -1016,11 +1016,35 @@ export default function ProjectEstimate() {
   const estimateFinanceMode = seamEstimateFinanceVisibilityMode(perm.seam);
   const canExportEstimateCsv = seamAllowsEstimateExportCsv(perm.seam);
   const canManageEstimate = projectDomainAllowsManage(estimateAccess);
-  const canEditEstimate = canManageEstimate;
-  const canSubmitToClient = canManageEstimate && canSubmitByMembership;
+  // Editing needs finance detail, not just the role. A co_owner below detail
+  // could reach every edit control, and every edit cleared the persisted snapshot
+  // that was the sole truthful pricing source for them (rovno#282). In managed
+  // supabase mode `queueProjectDraftSync` caches the edit locally and then
+  // refuses to sync it as `blocked_permission`, so it never reached the DB. In
+  // demo/local it returns before that cache write and the edit lived only in the
+  // in-memory store. Withdrawing it there is deliberate, not a side effect.
+  const canEditEstimate = canManageEstimate && estimateFinanceMode === "detail";
+  // Publishing is strictly stronger than editing, so it takes the same gate. The
+  // share snapshot is built from the RAW lines and ShareEstimate recomputes from
+  // them with no snapshot preference, so a below-detail member would publish a
+  // client-facing estimate of zeroes — and since this page now shows them the
+  // correct money, they would have no signal at all (rovno#282, audit round 2).
+  const canSubmitToClient = canPublishClientShare({
+    canManageEstimate,
+    isSubmitterRole: canSubmitByMembership,
+    financeMode: estimateFinanceMode,
+  });
   const isContractorMode = projectMode === "contractor";
+  // Which pricing SOURCE to read is a different question from who may edit, and
+  // it is keyed on the ROLE-level `canManageEstimate` on purpose: a manager
+  // holding live costs must recompute even though the line above just made them
+  // read-only. Prefer the persisted snapshot when there is nothing truthful to
+  // recompute from: the store zeroed the costs, or it hydrated through the
+  // operational RPC and returned no resource lines at all, in which case no line
+  // survives to carry `costRedacted` and the upper block is the only pricing.
+  const hasRedactedLineCosts = lines.some((line) => line.costRedacted);
   const useReadOnlySummaryPricing = estimateFinanceMode === "summary"
-    && !canEditEstimate
+    && (!canManageEstimate || hasRedactedLineCosts || (operationalUpperBlock != null && lines.length === 0))
     && !isCurrentUserLoading
     && !isProjectLoading
     && !isMembersLoading
@@ -2020,11 +2044,26 @@ export default function ProjectEstimate() {
         };
     };
 
+    // A co_owner below detail IS the co-owner the generic string tells them to
+    // go and find, so that wording sends them after a person who does not exist.
+    const shareDenialMessage = () => (
+      canManageEstimate && canSubmitByMembership && estimateFinanceMode !== "detail"
+        ? t("estimate.export.share.needsFinanceDetail")
+        : t("estimate.export.share.cannotSubmit")
+    );
+
     const publishToBackend = async (
       shareToken: string,
       versionNumber: number,
       snapshotPayload: typeof currentVersionSnapshot,
-    ): Promise<{ ok: true } | { ok: false; error: string }> => {
+    ): Promise<{ ok: true } | { ok: false; reason: "forbidden" | "network"; error: string }> => {
+      // The gate lives here rather than at the call sites: three of the four
+      // publish paths are unreachable today because SHOW_ESTIMATE_VERSION_UI is
+      // false, and two of those had no gate of their own. Callers may ignore a
+      // network failure and still hand out the link; they may not ignore this.
+      if (!canSubmitToClient) {
+        return { ok: false, reason: "forbidden", error: shareDenialMessage() };
+      }
       const options = submitOptionsFor();
       try {
         await publishEstimateShareSnapshot({
@@ -2039,6 +2078,7 @@ export default function ProjectEstimate() {
       } catch (error) {
         return {
           ok: false,
+          reason: "network",
           error: error instanceof Error ? error.message : t("estimate.export.share.submitFailed"),
         };
       }
@@ -2058,7 +2098,8 @@ export default function ProjectEstimate() {
         // (it is idempotent — re-publishing the same approved snapshot is a
         // no-op). If the network call fails we still hand out the link so
         // same-session readers continue to work.
-        await publishToBackend(latestApproved.shareId, latestApproved.number, latestApproved.snapshot);
+        const published = await publishToBackend(latestApproved.shareId, latestApproved.number, latestApproved.snapshot);
+        if (!published.ok && published.reason === "forbidden") return { error: published.error };
         return { url: buildShareLink(latestApproved.shareId) };
       }
     }
@@ -2068,11 +2109,12 @@ export default function ProjectEstimate() {
     // re-open the link. Mirrors the prior submit-to-client resubmission flow.
     if (latestProposed?.submitted) {
       if (!hasPendingChangesSinceSubmission) {
-        await publishToBackend(latestProposed.shareId, latestProposed.number, latestProposed.snapshot);
+        const published = await publishToBackend(latestProposed.shareId, latestProposed.number, latestProposed.snapshot);
+        if (!published.ok && published.reason === "forbidden") return { error: published.error };
         return { url: buildShareLink(latestProposed.shareId) };
       }
       if (!canSubmitToClient) {
-        return { error: t("estimate.export.share.cannotSubmit") };
+        return { error: shareDenialMessage() };
       }
       try {
         const ok = refreshVersionSnapshot(pid, latestProposed.id, currentUser.id, submitOptionsFor());
@@ -2097,7 +2139,7 @@ export default function ProjectEstimate() {
 
     // No submitted version yet — create a fresh proposed one.
     if (!canSubmitToClient) {
-      return { error: t("estimate.export.share.cannotSubmit") };
+      return { error: shareDenialMessage() };
     }
     try {
       const snapshot = createVersionSnapshot(pid, currentUser.id);
@@ -2120,8 +2162,11 @@ export default function ProjectEstimate() {
   }, [
     availableParticipantSlots,
     buildShareLink,
+    canManageEstimate,
+    canSubmitByMembership,
     canSubmitToClient,
     currentUser.id,
+    estimateFinanceMode,
     currentVersionSnapshot,
     hasPendingChangesSinceSubmission,
     latestApproved,
@@ -2741,7 +2786,11 @@ export default function ProjectEstimate() {
                 onChange={handleEstimateStatusChange}
               />
               {!canEditEstimate && (
-                <div className="text-caption text-muted-foreground">{t("estimate.header.ownerOnly")}</div>
+                <div className="text-caption text-muted-foreground">
+                  {canManageEstimate
+                    ? t("estimate.header.needsFinanceDetail")
+                    : t("estimate.header.ownerOnly")}
+                </div>
               )}
             </div>
           )}

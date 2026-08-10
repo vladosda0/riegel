@@ -735,7 +735,7 @@ describe("ProjectEstimate", () => {
     expect(screen.getByText("Client total")).toBeInTheDocument();
   });
 
-  it("uses fresh computed client pricing for editable build_myself summary managers even when stale summary cents are zero", async () => {
+  it("uses fresh computed client pricing for build_myself summary managers holding live costs, even when stale summary cents are zero", async () => {
     const projectId = "project-estimate-build-myself-summary-editable-line";
     const profile = setStoredAuthProfile({
       email: `${projectId}@example.com`,
@@ -812,7 +812,7 @@ describe("ProjectEstimate", () => {
     expect(within(footer).getByText(byNormalizedText(formatMoney(computedTotals.totalCents, state.project.currency)))).toBeInTheDocument();
   });
 
-  it("uses fresh computed total for editable build_myself summary managers even when cached summary total is zero", async () => {
+  it("uses fresh computed total for build_myself summary managers holding live costs even when cached summary total is zero", async () => {
     const projectId = "project-estimate-build-myself-summary-editable-total";
     const profile = setStoredAuthProfile({
       email: `${projectId}@example.com`,
@@ -882,6 +882,195 @@ describe("ProjectEstimate", () => {
     if (!(footer instanceof HTMLElement)) return;
 
     expect(within(footer).getByText(byNormalizedText(formatMoney(computedTotals.totalCents, state.project.currency)))).toBeInTheDocument();
+    expect(within(footer).queryByText(byNormalizedText(formatMoney(0, state.project.currency)))).not.toBeInTheDocument();
+  });
+
+  it("keeps persisted summary pricing for an EDITABLE summary co_owner whose line costs are redacted", async () => {
+    // Same actor as the two tests above — co_owner, summary, build_myself, and
+    // able to edit. The single difference is that the store hydrated through the
+    // operational RPC and zeroed the cost fields, which is what happens in
+    // Supabase mode. Recomputing client pricing from those zeros is the ₽0.00
+    // defect (rovno#301 is unrelated; this is rovno#282).
+    const projectId = "project-estimate-summary-editable-redacted-costs";
+    const profile = setStoredAuthProfile({
+      email: `${projectId}@example.com`,
+      name: "Co Owner User",
+    });
+
+    addProject({
+      id: projectId,
+      owner_id: "other-owner-id",
+      title: "Workspace Project",
+      type: "residential",
+      project_mode: "build_myself",
+      automation_level: "assisted",
+      current_stage_id: "",
+      progress_pct: 0,
+    });
+
+    addMember({
+      project_id: projectId,
+      user_id: profile.id,
+      role: "co_owner",
+      ai_access: "project_pool",
+      credit_limit: 500,
+      used_credits: 0,
+      finance_visibility: "summary",
+    });
+    setAuthRole("co_owner");
+
+    const seeded = seedEstimateLine(projectId);
+    expect(seeded).not.toBeNull();
+    if (!seeded?.line) return;
+
+    updateEstimateV2Project(projectId, { projectMode: "build_myself" });
+    updateLine(projectId, seeded.line.id, { qtyMilli: 2_000, discountBpsOverride: 0 });
+    // What estimate-v2-store writes for a redacted line. Set before the snapshot:
+    // changing a pricing-driving field clears cached summary cents.
+    updateLine(projectId, seeded.line.id, { costUnitCents: 0, costRedacted: true, markupBps: 0 });
+    // The snapshot is the only truthful pricing source for such a user.
+    updateLine(projectId, seeded.line.id, {
+      summaryClientUnitCents: 19_999,
+      summaryClientTotalCents: 39_998,
+    });
+
+    const state = getEstimateV2ProjectState(projectId);
+    const redactedLine = state.lines.find((item) => item.id === seeded.line.id);
+    expect(redactedLine?.costRedacted).toBe(true);
+    expect(redactedLine?.summaryClientUnitCents).toBe(19_999);
+    const zero = formatMoney(0, state.project.currency);
+
+    await act(async () => {
+      renderProjectEstimate(projectId);
+      await flushUi();
+    });
+
+    const lineRow = screen.getByText("Concrete").closest("tr");
+    expect(lineRow).not.toBeNull();
+    if (!lineRow) return;
+
+    expect(within(lineRow).getByText(byNormalizedText(formatMoney(19_999, state.project.currency)))).toBeInTheDocument();
+    expect(within(lineRow).getByText(byNormalizedText(formatMoney(39_998, state.project.currency)))).toBeInTheDocument();
+
+    // The header/footer block is the sharp edge: it fell to the recompute branch
+    // and rendered ₽0.00 under per-line prices that were correct.
+    const footer = screen.getByText("Total across all stages").closest("div.rounded-lg");
+    expect(footer).not.toBeNull();
+    if (!(footer instanceof HTMLElement)) return;
+    expect(within(footer).queryByText(byNormalizedText(zero))).not.toBeInTheDocument();
+  });
+
+  it("makes the estimate read-only for a co_owner below detail finance visibility", async () => {
+    // Their writes are refused by queueProjectDraftSync with blocked_permission,
+    // and every edit cleared the persisted snapshot that was their only truthful
+    // pricing source, so the affordance only ever destroyed data they could see.
+    const projectId = "project-estimate-summary-co-owner-read-only";
+    const profile = setStoredAuthProfile({
+      email: `${projectId}@example.com`,
+      name: "Co Owner User",
+    });
+
+    addProject({
+      id: projectId,
+      owner_id: "other-owner-id",
+      title: "Workspace Project",
+      type: "residential",
+      project_mode: "build_myself",
+      automation_level: "assisted",
+      current_stage_id: "",
+      progress_pct: 0,
+    });
+
+    addMember({
+      project_id: projectId,
+      user_id: profile.id,
+      role: "co_owner",
+      ai_access: "project_pool",
+      credit_limit: 500,
+      used_credits: 0,
+      finance_visibility: "summary",
+    });
+    setAuthRole("co_owner");
+
+    const seeded = seedEstimateLine(projectId);
+    expect(seeded).not.toBeNull();
+    if (!seeded?.line) return;
+
+    await act(async () => {
+      renderProjectEstimate(projectId);
+      await flushUi();
+    });
+
+    // Not "Owner only": they ARE a co-owner, and saying so would send the owner
+    // hunting for a role fix that does not exist instead of raising finance
+    // visibility to detail.
+    expect(screen.getByText("Read-only: needs full finance access")).toBeInTheDocument();
+    expect(screen.queryByText("Owner only")).not.toBeInTheDocument();
+  });
+
+  it("prices from the operational upper block when the RPC returned no resource lines at all", async () => {
+    // With zero lines nothing survives to carry costRedacted, so a guard keyed
+    // only on the lines is vacuously false and the footer printed 0 over a real
+    // upper-block total.
+    const projectId = "project-estimate-summary-upper-block-no-lines";
+    const profile = setStoredAuthProfile({
+      email: `${projectId}@example.com`,
+      name: "Co Owner User",
+    });
+
+    addProject({
+      id: projectId,
+      owner_id: "other-owner-id",
+      title: "Workspace Project",
+      type: "residential",
+      project_mode: "build_myself",
+      automation_level: "assisted",
+      current_stage_id: "",
+      progress_pct: 0,
+    });
+
+    addMember({
+      project_id: projectId,
+      user_id: profile.id,
+      role: "co_owner",
+      ai_access: "project_pool",
+      credit_limit: 500,
+      used_credits: 0,
+      finance_visibility: "summary",
+    });
+    setAuthRole("co_owner");
+
+    const stage = createStage(projectId, { title: "Shell" });
+    expect(stage).not.toBeNull();
+    if (!stage) return;
+    expect(createWork(projectId, { stageId: stage.id, title: "Framing" })).not.toBeNull();
+
+    __unsafeSetEstimateOperationalUpperBlockForTests(projectId, {
+      effectiveFinanceVisibility: "summary",
+      timing: {
+        estimate_version_id: null,
+        estimate_version_number: null,
+        estimate_version_created_at: null,
+      },
+      clientTotalCents: 1_000_000,
+      vatBps: 2200,
+      discountBps: 0,
+      resourceCostBreakdownClientSafeOnly: null,
+    });
+
+    const state = getEstimateV2ProjectState(projectId);
+    expect(state.lines).toHaveLength(0);
+
+    await act(async () => {
+      renderProjectEstimate(projectId);
+      await flushUi();
+    });
+
+    const footer = screen.getByText("Total across all stages").closest("div.rounded-lg");
+    expect(footer).not.toBeNull();
+    if (!(footer instanceof HTMLElement)) return;
+    // 1 000 000 + 22% VAT. Keyed on the lines alone this printed 0,00 ₽.
+    expect(within(footer).getByText(byNormalizedText(formatMoney(1_220_000, state.project.currency)))).toBeInTheDocument();
     expect(within(footer).queryByText(byNormalizedText(formatMoney(0, state.project.currency)))).not.toBeInTheDocument();
   });
 

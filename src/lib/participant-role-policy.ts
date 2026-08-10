@@ -64,7 +64,6 @@ export type PermissionSummaryInput = {
   financeVisibility?: FinanceVisibility;
   internalDocsVisibility?: InternalDocsVisibility;
   viewerRegime?: ViewerRegime | null;
-  creditLimit: number;
 };
 
 export type NonStandardAccessSummary = {
@@ -127,7 +126,6 @@ export function describePermissionSummary(input: PermissionSummaryInput, t: Tran
     t("participants.summary.ai", { value: t(aiAccessLabels[input.aiAccess]) }),
     t("participants.summary.finance", { value: t(financeVisibilityLabels[input.financeVisibility ?? "none"]) }),
     t("participants.summary.internalDocs", { value: t(internalDocsVisibilityLabels[input.internalDocsVisibility ?? "none"]) }),
-    t("participants.summary.creditLimit", { value: input.creditLimit }),
   ];
 
   if (input.role === "viewer") {

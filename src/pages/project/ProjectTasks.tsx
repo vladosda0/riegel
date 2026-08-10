@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useParams, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useProject, usePermission, useMedia, useWorkspaceMode } from "@/hooks/use-mock-data";
@@ -205,6 +205,11 @@ export default function ProjectTasks() {
   const [donePrompt, setDonePrompt] = useState<{ taskId: string; expectedStatus: TaskStatus } | null>(null);
   const [doneFiles, setDoneFiles] = useState<File[]>([]);
   const [doneUploading, setDoneUploading] = useState(false);
+  const [doneFilesResetKey, setDoneFilesResetKey] = useState(0);
+  // Bumped by every confirm run and by Cancel. A run whose id no longer matches
+  // has been abandoned: it stops issuing uploads and must never touch prompt
+  // state, or a finishing loop tears down whatever prompt is open by then.
+  const doneRunIdRef = useRef(0);
   const [doneComment, setDoneComment] = useState("");
 
   // --- Blocked prompt --- (same capture-at-open rule as the Done prompt above)
@@ -331,6 +336,18 @@ export default function ProjectTasks() {
   }, [invalidateProjectTasks, toast, t]);
 
   // Confirm Done
+  // Leaving must stay possible while photos upload: storage-js exposes no way to
+  // abort the request in flight, and nothing in the chain has a timeout, so a
+  // stalled network would otherwise trap the user in a full-screen prompt with no
+  // Escape handler. Abandoning the run is what makes that safe.
+  const cancelDonePrompt = useCallback(() => {
+    doneRunIdRef.current += 1;
+    setDonePrompt(null);
+    setDoneFiles([]);
+    setDoneComment("");
+    setDoneUploading(false);
+  }, []);
+
   const handleConfirmDone = useCallback(async () => {
     if (!donePrompt) return;
     const task = tasks.find((entry) => entry.id === donePrompt.taskId);
@@ -363,9 +380,16 @@ export default function ProjectTasks() {
       return;
     }
 
+    const runId = doneRunIdRef.current + 1;
+    doneRunIdRef.current = runId;
+    const isCurrentRun = () => doneRunIdRef.current === runId;
+
     setDoneUploading(true);
     try {
       for (const file of doneFiles) {
+        // Cancel cannot abort the request already in flight: storage-js `upload()`
+        // takes no AbortSignal. It does stop every file after this one.
+        if (!isCurrentRun()) return;
         const intent = await prepareUpload({
           mediaType: "photo",
           clientFilename: file.name,
@@ -384,11 +408,17 @@ export default function ProjectTasks() {
       );
       // The RPC inserts the acceptance comment once (server-side) alongside the
       // status change; the same text also rode along as the photo caption above.
+      if (!isCurrentRun()) return;
       await source.changeTaskStatus(donePrompt.taskId, "done", {
         expectedStatus: donePrompt.expectedStatus,
         commentBody: doneComment.trim() || undefined,
       });
+      // Invalidate even for an abandoned run: the write landed, so skipping the
+      // refresh would leave the board showing the old status and let the next
+      // Done attempt re-upload the same photos as is_final. Guarding AFTER the
+      // await is what keeps the abandoned run from touching prompt state.
       await invalidateProjectTasks();
+      if (!isCurrentRun()) return;
       trackEvent("task_marked_done", {
         project_id: pid,
         task_id: donePrompt.taskId,
@@ -408,7 +438,11 @@ export default function ProjectTasks() {
         // loop completed, so the acceptance photos are already attached and
         // final. Say so plainly instead of the generic "the list refreshed",
         // which would leave the user guessing where their photos went.
+        // Refresh before checking the run: losing the CAS means the local list
+        // is stale by definition, and an abandoned run that skipped this left a
+        // retry free to re-upload the same photos against a stale status.
         await invalidateProjectTasks();
+        if (!isCurrentRun()) return;
         setDonePrompt(null);
         toast({
           title: t("tasks.toast.donePhotosKept.title"),
@@ -416,13 +450,22 @@ export default function ProjectTasks() {
         });
         return;
       }
+      if (!isCurrentRun()) return;
+      // Files the loop got through are attached as is_final and cannot be told
+      // apart from here, so a second click over the same selection would
+      // re-upload them. Drop it: the retry has to be a deliberate re-pick.
+      // FileInput keeps its own filename state and its own native value, so it
+      // is remounted too, or the row would keep showing the old file next to
+      // "no files selected" and re-picking that file would fire no change event.
+      setDoneFiles([]);
+      setDoneFilesResetKey((key) => key + 1);
       toast({
         title: t("tasks.toast.cannotComplete.title"),
         description: error instanceof Error ? error.message : t("tasks.toast.cannotComplete.fallback"),
         variant: "destructive",
       });
     } finally {
-      setDoneUploading(false);
+      if (isCurrentRun()) setDoneUploading(false);
     }
   }, [
     donePrompt,
@@ -1158,6 +1201,7 @@ export default function ProjectTasks() {
 
             <div className="space-y-2">
               <FileInput
+                key={doneFilesResetKey}
                 accept="image/*"
                 multiple
                 disabled={doneUploading}
@@ -1179,7 +1223,7 @@ export default function ProjectTasks() {
             </div>
 
             <div className="flex justify-end gap-2 pt-sp-1">
-              <Button variant="outline" onClick={() => setDonePrompt(null)}>{t("common.back")}</Button>
+              <Button variant="outline" onClick={cancelDonePrompt}>{t("common.back")}</Button>
               <Button
                 className="bg-success text-success-foreground hover:bg-success/90"
                 onClick={() => void handleConfirmDone()}
@@ -1189,7 +1233,7 @@ export default function ProjectTasks() {
               </Button>
             </div>
           </div>
-          <div className="fixed inset-0 z-[61] bg-black/40" onClick={() => setDonePrompt(null)} />
+          <div className="fixed inset-0 z-[61] bg-black/40" onClick={cancelDonePrompt} />
         </div>
       )}
 

@@ -124,10 +124,20 @@ describe("participant-role-policy", () => {
         role: "contractor",
         aiAccess: "none",
         internalDocsVisibility: "view",
-        creditLimit: 0,
       }, t);
       const docsLine = summary.find((l) => l.startsWith("participants.summary.internalDocs"));
       expect(docsLine).toContain("participants.internalDocs.view");
+    });
+
+    it("permission summary states no per-member AI request limit", () => {
+      // Nothing reads project_members.credit_limit (rovno#301), so the summary
+      // must not assert one: the field it described is parked behind «Скоро».
+      const summary = describePermissionSummary({
+        role: "contractor",
+        aiAccess: "project_pool",
+        internalDocsVisibility: "view",
+      }, t);
+      expect(summary.some((line) => line.includes("creditLimit"))).toBe(false);
     });
 
     it("edit warning produces the docs-edit key", () => {
@@ -135,7 +145,6 @@ describe("participant-role-policy", () => {
         role: "contractor",
         aiAccess: "none",
         internalDocsVisibility: "edit",
-        creditLimit: 0,
       }, t);
       expect(warnings).toContain("participants.warning.docsEdit");
     });

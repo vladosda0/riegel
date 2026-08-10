@@ -273,7 +273,6 @@ export default function ParticipantsScreen() {
       viewersPending,
       editorsLimit: limits ? limits.editors_per_project : null,
       viewersLimit: limits ? limits.viewers_per_project : null,
-      aiMonthlyLimit: limits ? limits.ai_chat_per_month : null,
     };
   }, [members, pendingInvites, actorRole, workspaceMode.kind, subscription.subscription, subscription.isLoading, subscription.isError, runtimeAuth.status, currentUser.plan]);
 

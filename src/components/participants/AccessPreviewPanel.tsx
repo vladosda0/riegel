@@ -16,7 +16,6 @@ type AccessPreviewPanelProps = {
   name?: string;
   role: MemberRole;
   axes: ParticipantAxes;
-  creditLimit?: number;
   className?: string;
 };
 
@@ -24,9 +23,9 @@ type AccessPreviewPanelProps = {
  * Live "what will this person see" summary (PRD P0-3). Recomputes on every
  * role/axis change — no save required.
  */
-export function AccessPreviewPanel({ name, role, axes, creditLimit, className }: AccessPreviewPanelProps) {
+export function AccessPreviewPanel({ name, role, axes, className }: AccessPreviewPanelProps) {
   const { t } = useTranslation();
-  const items = computeAccessPreview({ role, axes, creditLimit });
+  const items = computeAccessPreview({ role, axes });
 
   return (
     <div className={className}>

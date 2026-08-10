@@ -91,7 +91,6 @@ describe("participant-access-preview", () => {
       const items = computeAccessPreview({
         role: "owner",
         axes: axes({ aiAccess: "project_pool", financeVisibility: "detail", internalDocsVisibility: "edit" }),
-        creditLimit: 500,
       });
       expect(previewItem(items, "estimate").state).toBe("edits");
       expect(previewItem(items, "hr").state).toBe("edits");
@@ -104,9 +103,11 @@ describe("participant-access-preview", () => {
       expect(previewItem(items, "ai")).toMatchObject({
         state: "edits",
         stateLabelKey: "participants.preview.aiState.full",
-        detailKey: "participants.preview.aiLimit",
-        detailParams: { limit: 500 },
       });
+      // Nothing enforces the per-member limit, so the preview must not promise
+      // one alongside a drawer field that now reads «Скоро» (rovno#301, option B).
+      expect(previewItem(items, "ai")).not.toHaveProperty("detailKey");
+      expect(previewItem(items, "ai")).not.toHaveProperty("detailParams");
     });
 
     it("co_owner with finance=none previews the SQL summary floor, not hidden", () => {
