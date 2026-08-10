@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ProjectTasks from "@/pages/project/ProjectTasks";
+import { TaskNoLongerAvailableError } from "@/data/planning-source";
 import type { ContractAction, ContractDomain } from "@/lib/permission-contract-actions";
 import { seamResolveActionState } from "@/lib/permissions";
 import type { ProjectAuthoritySeam } from "@/lib/project-authority-seam";
@@ -690,6 +691,61 @@ describe("ProjectTasks", () => {
       expect(invalidateSpy).toHaveBeenCalled();
       expect(mocks.toast).not.toHaveBeenCalledWith(
         expect.objectContaining({ title: "Task marked as Done" }),
+      );
+    } finally {
+      invalidateSpy.mockRestore();
+    }
+  });
+
+  it("still refreshes the board when a cancelled run loses the status race", async () => {
+    // Losing the CAS means another session already moved the task, so the local
+    // list is stale by definition. Skipping the refresh here left a retry free
+    // to compare a stale status against a stale expectedStatus and re-upload.
+    let rejectStatusWrite: (reason: unknown) => void = () => {};
+    const invalidateSpy = vi
+      .spyOn(QueryClient.prototype, "invalidateQueries")
+      .mockResolvedValue(undefined);
+
+    try {
+      const prepareUpload = vi.fn().mockResolvedValue({
+        bucket: "media",
+        objectPath: "project-1/photo.jpg",
+        uploadIntentId: "intent-1",
+      });
+      const uploadBytes = vi.fn().mockResolvedValue(undefined);
+      const finalizeUpload = vi.fn().mockResolvedValue(undefined);
+      mocks.useMediaUploadMutations.mockReturnValue({ prepareUpload, uploadBytes, finalizeUpload });
+      mocks.usePermission.mockReturnValue(buildPermission("contractor"));
+      mocks.useTasks.mockReturnValue([buildTask({ status: "in_progress" })]);
+      mocks.changeTaskStatus.mockImplementation(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectStatusWrite = reject;
+          }),
+      );
+
+      const { container } = renderProjectTasks();
+
+      fireEvent.click(screen.getByText("Estimate task"));
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Done" }));
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+      fireEvent.change(fileInput, {
+        target: { files: [new File(["photo"], "photo.jpg", { type: "image/jpeg" })] },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
+
+      await waitFor(() => expect(mocks.changeTaskStatus).toHaveBeenCalled());
+      invalidateSpy.mockClear();
+
+      fireEvent.click(screen.getByRole("button", { name: "Back" }));
+      rejectStatusWrite(new TaskNoLongerAvailableError());
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(invalidateSpy).toHaveBeenCalled();
+      expect(mocks.toast).not.toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Photos saved, task not completed" }),
       );
     } finally {
       invalidateSpy.mockRestore();

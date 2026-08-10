@@ -433,12 +433,14 @@ export default function ProjectTasks() {
       setDoneComment("");
       toast({ title: t("tasks.toast.markedDone") });
     } catch (error) {
-      if (!isCurrentRun()) return;
       if (error instanceof TaskNoLongerAvailableError) {
         // Reaching here means the status write lost the race AFTER the upload
         // loop completed, so the acceptance photos are already attached and
         // final. Say so plainly instead of the generic "the list refreshed",
         // which would leave the user guessing where their photos went.
+        // Refresh before checking the run: losing the CAS means the local list
+        // is stale by definition, and an abandoned run that skipped this left a
+        // retry free to re-upload the same photos against a stale status.
         await invalidateProjectTasks();
         if (!isCurrentRun()) return;
         setDonePrompt(null);
@@ -448,6 +450,7 @@ export default function ProjectTasks() {
         });
         return;
       }
+      if (!isCurrentRun()) return;
       // Files the loop got through are attached as is_final and cannot be told
       // apart from here, so a second click over the same selection would
       // re-upload them. Drop it: the retry has to be a deliberate re-pick.
