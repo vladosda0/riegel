@@ -77,88 +77,98 @@ export function LandingLanguagePrompt() {
   };
 
   return (
-    <div
-      role="region"
-      className="rv-lang-prompt"
-      // The copy is English in BOTH locales on purpose: the only person who
-      // sees this cannot read the Russian page it is sitting on. That includes
-      // the accessible name: labelling an English region with the Russian
-      // "Язык интерфейса" would hand a screen reader Cyrillic to voice with an
-      // English synthesiser, which is the failure DocumentLanguage exists to
-      // prevent. It also needs to differ from the switcher's own group label,
-      // or the page carries two identically named regions.
-      lang="en"
-      aria-label={t("landing.languagePrompt.regionLabel")}
-      style={{
-        // The strip is blue, so the focus ring must be cream. currentColor here
-        // resolved to blue on the primary button and painted an invisible ring
-        // on the only action this prompt has.
-        "--rv-focus-ring": "var(--rv-cream)",
-        position: "fixed",
-        left: 16,
-        right: 16,
-        bottom: 16,
-        zIndex: 90,
-        margin: "0 auto",
-        maxWidth: 560,
-        boxSizing: "border-box",
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        flexWrap: "wrap",
-        padding: "12px 14px",
-        borderRadius: 14,
-        background: "var(--rv-blue)",
-        color: "var(--rv-cream)",
-        boxShadow: "var(--shadow-3)",
-        fontFamily: "var(--font-body)",
-        fontSize: 14,
-        lineHeight: "20px",
-      } as CSSProperties}
-    >
-      <span style={{ flex: 1, minWidth: 180 }}>{t("landing.languagePrompt.text")}</span>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-        <button
-          type="button"
-          onClick={switchToEnglish}
-          style={{
-            all: "unset",
-            cursor: "pointer",
-            boxSizing: "border-box",
-            minHeight: 32,
-            display: "inline-flex",
-            alignItems: "center",
-            padding: "6px 14px",
-            borderRadius: 999,
-            background: "var(--rv-cream)",
-            color: "var(--rv-blue)",
-            fontWeight: 600,
-          }}
-        >
-          {t("landing.languagePrompt.action")}
-        </button>
-        <button
-          type="button"
-          onClick={dismiss}
-          aria-label={t("landing.languagePrompt.dismiss")}
-          style={{
-            all: "unset",
-            cursor: "pointer",
-            boxSizing: "border-box",
-            minHeight: 32,
-            minWidth: 32,
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            borderRadius: 999,
-            border: "1px solid rgba(237,235,215,0.4)",
-            fontSize: 16,
-            lineHeight: 1,
-          }}
-        >
-          ✕
-        </button>
+    <>
+      {/* The strip below is position:fixed, so it sits outside the flow and
+          covers whatever the page ends with. This component is the last child
+          of the landing tree, so an in-flow spacer here lands at the end of the
+          document and restores that much scrollable height. Measured on staging
+          at a 375px viewport: the strip is 88px tall and sits 16px off the
+          bottom, and without this it covered four footer links (privacy,
+          refund, requisites, contacts). */}
+      <div aria-hidden="true" style={{ height: 104 }} />
+      <div
+        role="region"
+        className="rv-lang-prompt"
+        // The copy is English in BOTH locales on purpose: the only person who
+        // sees this cannot read the Russian page it is sitting on. That includes
+        // the accessible name: labelling an English region with the Russian
+        // "Язык интерфейса" would hand a screen reader Cyrillic to voice with an
+        // English synthesiser, which is the failure DocumentLanguage exists to
+        // prevent. It also needs to differ from the switcher's own group label,
+        // or the page carries two identically named regions.
+        lang="en"
+        aria-label={t("landing.languagePrompt.regionLabel")}
+        style={{
+          // The strip is blue, so the focus ring must be cream. currentColor here
+          // resolved to blue on the primary button and painted an invisible ring
+          // on the only action this prompt has.
+          "--rv-focus-ring": "var(--rv-cream)",
+          position: "fixed",
+          left: 16,
+          right: 16,
+          bottom: 16,
+          zIndex: 90,
+          margin: "0 auto",
+          maxWidth: 560,
+          boxSizing: "border-box",
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+          padding: "12px 14px",
+          borderRadius: 14,
+          background: "var(--rv-blue)",
+          color: "var(--rv-cream)",
+          boxShadow: "var(--shadow-3)",
+          fontFamily: "var(--font-body)",
+          fontSize: 14,
+          lineHeight: "20px",
+        } as CSSProperties}
+      >
+        <span style={{ flex: 1, minWidth: 180 }}>{t("landing.languagePrompt.text")}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <button
+            type="button"
+            onClick={switchToEnglish}
+            style={{
+              all: "unset",
+              cursor: "pointer",
+              boxSizing: "border-box",
+              minHeight: 32,
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "6px 14px",
+              borderRadius: 999,
+              background: "var(--rv-cream)",
+              color: "var(--rv-blue)",
+              fontWeight: 600,
+            }}
+          >
+            {t("landing.languagePrompt.action")}
+          </button>
+          <button
+            type="button"
+            onClick={dismiss}
+            aria-label={t("landing.languagePrompt.dismiss")}
+            style={{
+              all: "unset",
+              cursor: "pointer",
+              boxSizing: "border-box",
+              minHeight: 32,
+              minWidth: 32,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 999,
+              border: "1px solid rgba(237,235,215,0.4)",
+              fontSize: 16,
+              lineHeight: 1,
+            }}
+          >
+            ✕
+          </button>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
