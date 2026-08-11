@@ -105,8 +105,13 @@ function PostRow({ post }: { post: BlogPostWithAuthor }) {
 export default function BlogAdminList() {
   // robots.txt disallows /blog/admin, but its path matching is octet-exact while the
   // router resolves the route case-insensitively, so /blog/ADMIN reaches this page
-  // uncovered. A disallow also suppresses crawling, not indexing. This meta covers
-  // every spelling and is the control that actually keeps the surface out of results.
+  // uncovered. A disallow also suppresses crawling, not indexing.
+  //
+  // This tag covers a SIGNED-IN session only. A guest never keeps it: BlogAdminGuard
+  // returns <Navigate to="/auth/login">, this page unmounts, and the cleanup removes
+  // the tag (robots is in PRERENDER_ONLY_TAGS, so unmount always removes it). Since a
+  // crawler is always a guest, the tag a crawler actually sees is the one AuthLayout
+  // sets on the redirect target.
   useDocumentHead({ title: ADMIN_TITLE, robots: "noindex, nofollow" });
 
   const { isAuthor } = useMyBlogAuthor();

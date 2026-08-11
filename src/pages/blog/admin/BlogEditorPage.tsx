@@ -106,9 +106,9 @@ function useAutoResize(): (el: HTMLTextAreaElement | null) => void {
 }
 
 export default function BlogEditorPage() {
-  // Same reason as BlogAdminList: robots.txt covers only the lowercase spelling and
-  // suppresses crawling rather than indexing. Set before the early returns below so
-  // the loading and not-found branches carry it too.
+  // Same as BlogAdminList, including the caveat: this holds for a signed-in session,
+  // while a guest is redirected away and AuthLayout's tag is what a crawler sees.
+  // Set before the early returns below so the loading and not-found branches carry it.
   useDocumentHead({ title: EDITOR_TITLE, robots: "noindex, nofollow" });
 
   const { id: routeId } = useParams<{ id: string }>();
