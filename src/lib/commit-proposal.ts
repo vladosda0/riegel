@@ -8,7 +8,7 @@ import {
   seamAllowsAction,
   seamResolveActionState,
 } from "@/lib/permissions";
-import type { AIAccess, MemberRole } from "@/types/entities";
+import type { AIAccess, MemberRole, Task } from "@/types/entities";
 import {
   getCurrentUser, getMembers, getProject, getStages, getTask,
   addTask, addEvent, addDocument, addComment,
@@ -157,6 +157,12 @@ export function commitPhotoConsultActions(
     return { success: false, error: "You don't have permission to use AI generation.", eventIds: [], created: [], updated: [] };
   }
 
+  // Linked tasks resolve here, alongside scope and permission, so the batch keeps
+  // its all-or-nothing contract: a create_task earlier in the list must not stay
+  // applied when a later lookup fails (rovno #177). The skip conditions mirror the
+  // mutation loop below — an action it would pass over is not validated here either.
+  const resolvedTasks = new Map<string, Task>();
+
   for (const action of actions) {
     if (action.projectId !== authoritySeam.projectId) {
       return { success: false, error: "Project scope mismatch for photo consult actions.", eventIds: [], created: [], updated: [] };
@@ -169,6 +175,17 @@ export function commitPhotoConsultActions(
         created: [],
         updated: [],
       };
+    }
+    if (action.kind === "task_comment" || action.kind === "task_status_done") {
+      const taskId = action.taskId;
+      const skipped = action.kind === "task_comment" && !action.commentText?.trim();
+      if (taskId && !skipped) {
+        const task = getTask(taskId);
+        if (!task || task.project_id !== action.projectId) {
+          return { success: false, error: "Task not found in this project.", eventIds: [], created: [], updated: [] };
+        }
+        resolvedTasks.set(taskId, task);
+      }
     }
   }
 
@@ -205,19 +222,13 @@ export function commitPhotoConsultActions(
       const taskId = action.taskId;
       const text = action.commentText?.trim();
       if (!taskId || !text) continue;
-      const task = getTask(taskId);
-      if (!task || task.project_id !== action.projectId) {
-        return { success: false, error: "Task not found in this project.", eventIds: [], created: [], updated: [] };
-      }
       addComment(taskId, text);
       count++;
     } else if (action.kind === "task_status_done") {
       const taskId = action.taskId;
       if (!taskId) continue;
-      const task = getTask(taskId);
-      if (!task || task.project_id !== action.projectId) {
-        return { success: false, error: "Task not found in this project.", eventIds: [], created: [], updated: [] };
-      }
+      const task = resolvedTasks.get(taskId);
+      if (!task) continue;
       updateTask(taskId, { status: "done" });
       updated.push({ type: "task", id: taskId, label: task.title, route: `/project/${action.projectId}/tasks` });
       count++;
