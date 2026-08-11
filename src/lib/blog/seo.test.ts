@@ -130,9 +130,10 @@ describe("prerendered head tags do not leak across a client-side navigation", ()
   });
 
   // The half-closed version of this fix only removed a prerendered tag when the NEXT page
-  // also called useDocumentHead. Only BlogIndex / BlogPostPage / BlogTagPage do. Navigate
-  // from a prerendered thin hub to the landing page and nothing ran to clear it, so `/`
-  // carried `noindex` in the live DOM for the rest of the session.
+  // also called useDocumentHead. No public route outside the blog does — the landing page
+  // in particular does not. Navigate from a prerendered thin hub to the landing page and
+  // nothing ran to clear it, so `/` carried `noindex` in the live DOM for the rest of the
+  // session.
 
   it("UNMOUNTING to a page that never calls the hook still removes robots", () => {
     seedPrerenderedHead("noindex, follow", null);

@@ -17,8 +17,9 @@ export default function AuthLayout() {
   // SITE_NAME is index.html's own <title>, so this changes nothing a visitor sees.
   //
   // This layout is the first PERSISTENT caller of the hook; the others are leaf
-  // pages. If an /auth/* child page ever calls it too, the child wins and this tag
-  // goes away for the rest of the session — AuthLayout.test.tsx pins that.
+  // pages. So do not add useDocumentHead to an /auth/* child page: on the first
+  // child route change its effect clears this tag (seo.ts, the robots else-branch),
+  // and this effect never re-runs to restore it. No test catches that today.
   useDocumentHead({ title: SITE_NAME, robots: "noindex, nofollow" });
 
   return (

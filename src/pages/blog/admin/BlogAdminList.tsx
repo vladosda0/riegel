@@ -111,10 +111,10 @@ export default function BlogAdminList() {
   // it: BlogAdminGuard returns <Navigate to="/auth/login">, this page unmounts, and
   // the cleanup removes the tag (robots is in PRERENDER_ONLY_TAGS). A crawler is
   // always a guest, so what a crawler sees is AuthLayout's tag on the redirect
-  // target — and only if it runs JS, since the served HTML carries no robots
-  // directive on any route. For a crawler that does not render, /blog/ADMIN is still
-  // uncovered; closing that needs an X-Robots-Tag header or a case-normalising
-  // redirect, neither of which this SPA can express on Timeweb.
+  // target — and only if it runs JS, since /blog/ADMIN is served from index.html,
+  // which carries no robots directive. For a crawler that does not render, that URL
+  // is still uncovered; closing it needs an X-Robots-Tag header or a case-
+  // normalising redirect at the edge rather than in this SPA.
   useDocumentHead({ title: ADMIN_TITLE, robots: "noindex, nofollow" });
 
   const { isAuthor } = useMyBlogAuthor();

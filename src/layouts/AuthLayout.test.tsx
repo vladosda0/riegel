@@ -42,8 +42,8 @@ describe("AuthLayout", () => {
   });
 
   // Navigating for real inside the router, so the layout stays mounted and only the
-  // child swaps. A rerender with a fresh MemoryRouter would tear the tree down and
-  // test nothing.
+  // child swaps. A rerender with different initialEntries would be ignored:
+  // MemoryRouter captures them once in a ref, so the route would never change.
   it("keeps the tag across a child route change, because the layout stays mounted", () => {
     render(
       <MemoryRouter initialEntries={["/auth/login"]}>
@@ -77,8 +77,10 @@ describe("AuthLayout", () => {
   });
 
   it("writes exactly one robots tag, not one per auth route visited", () => {
-    renderAt("/auth/login");
+    const first = renderAt("/auth/login");
+    first.unmount();
     renderAt("/auth/signup");
+    expect(readRobots()).toBe("noindex, nofollow");
     expect(document.head.querySelectorAll('meta[name="robots"]')).toHaveLength(1);
   });
 });
