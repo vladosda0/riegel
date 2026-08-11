@@ -8,7 +8,7 @@ import {
 import type { AIProposal, ProposalChange } from "@/types/ai";
 import type { ProjectAuthoritySeam } from "@/lib/project-authority-seam";
 import type { FinanceVisibility, MemberRole } from "@/types/entities";
-import { __unsafeResetStoreForTests, getCurrentUser, getEvents } from "@/data/store";
+import { __unsafeResetStoreForTests, getCurrentUser, getEvents, getTask, getTasks } from "@/data/store";
 import { clearDemoSession, enterDemoSession, setAuthRole } from "@/lib/auth-state";
 
 // ---------------------------------------------------------------------------
@@ -334,5 +334,81 @@ describe("commitPhotoConsultActions", () => {
     );
     expect(result.success).toBe(true);
     expect(result.count).toBe(1);
+  });
+
+  it("creates no task when a later comment action names a task that does not exist", () => {
+    const before = getTasks("project-1").length;
+    const result = commitPhotoConsultActions(
+      [
+        { kind: "create_task", projectId: "project-1", title: "Fix leak", stageId: "stage-1-1", photoIds: ["m1"] },
+        { kind: "task_comment", projectId: "project-1", taskId: "task-does-not-exist", commentText: "Analysis" },
+      ],
+      { authoritySeam: seamForRole("owner", "detail"), eventSource: "ai" },
+    );
+    expect(result.success).toBe(false);
+    expect(getTasks("project-1")).toHaveLength(before);
+  });
+
+  it("creates no task when a later comment action names a task in another project", () => {
+    const before = getTasks("project-1").length;
+    const result = commitPhotoConsultActions(
+      [
+        { kind: "create_task", projectId: "project-1", title: "Fix leak", stageId: "stage-1-1", photoIds: ["m1"] },
+        { kind: "task_comment", projectId: "project-1", taskId: "task-2-1", commentText: "Analysis" },
+      ],
+      { authoritySeam: seamForRole("owner", "detail"), eventSource: "ai" },
+    );
+    expect(result.success).toBe(false);
+    expect(getTasks("project-1")).toHaveLength(before);
+  });
+
+  it("creates no task and changes no status when a later mark-done action names a missing task", () => {
+    const before = getTasks("project-1").length;
+    const result = commitPhotoConsultActions(
+      [
+        { kind: "create_task", projectId: "project-1", title: "Fix leak", stageId: "stage-1-1", photoIds: ["m1"] },
+        { kind: "task_status_done", projectId: "project-1", taskId: "task-does-not-exist" },
+      ],
+      { authoritySeam: seamForRole("owner", "detail"), eventSource: "ai" },
+    );
+    expect(result.success).toBe(false);
+    expect(getTasks("project-1")).toHaveLength(before);
+  });
+
+  it("skips a comment action with blank text instead of failing the batch", () => {
+    const result = commitPhotoConsultActions(
+      [
+        { kind: "create_task", projectId: "project-1", title: "Fix leak", stageId: "stage-1-1", photoIds: ["m1"] },
+        { kind: "task_comment", projectId: "project-1", taskId: "task-does-not-exist", commentText: "   " },
+      ],
+      { authoritySeam: seamForRole("owner", "detail"), eventSource: "ai" },
+    );
+    expect(result.success).toBe(true);
+    expect(result.count).toBe(1);
+  });
+
+  it("skips a mark-done action with no task id instead of failing the batch", () => {
+    const result = commitPhotoConsultActions(
+      [
+        { kind: "create_task", projectId: "project-1", title: "Fix leak", stageId: "stage-1-1", photoIds: ["m1"] },
+        { kind: "task_status_done", projectId: "project-1" },
+      ],
+      { authoritySeam: seamForRole("owner", "detail"), eventSource: "ai" },
+    );
+    expect(result.success).toBe(true);
+    expect(result.count).toBe(1);
+  });
+
+  it("applies a comment and a mark-done together on a resolvable task", () => {
+    const result = commitPhotoConsultActions(
+      [
+        { kind: "task_comment", projectId: "project-1", taskId: "task-1-1", commentText: "Analysis" },
+        { kind: "task_status_done", projectId: "project-1", taskId: "task-1-1" },
+      ],
+      { authoritySeam: seamForRole("owner", "detail"), eventSource: "ai" },
+    );
+    expect(result.success).toBe(true);
+    expect(result.count).toBe(2);
+    expect(getTask("task-1-1")?.status).toBe("done");
   });
 });
