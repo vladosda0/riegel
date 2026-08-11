@@ -1,35 +1,46 @@
+# A crawler obeys exactly one group - the most specific one matching its name -
+# and ignores every other, so each named group below must repeat the shared
+# Disallow rules. Omitting them from a named group grants that crawler access.
+#
+# No group carries "Allow: /". Everything is allowed by default, so that line
+# adds nothing, and placing it above a Disallow makes the file's meaning depend
+# on the parser: under longest-match (RFC 9309 2.2.2, what Google/Bing/Yandex
+# do) the Disallow still wins, but under first-match-in-order it does not, and
+# python3 urllib.robotparser then reports /blog/admin as ALLOWED for every
+# agent here. The AI crawlers' parsers are undocumented, so the file must not
+# depend on which family they belong to.
+
 User-agent: Googlebot
-Allow: /
+Disallow: /blog/admin
 
 User-agent: Bingbot
-Allow: /
+Disallow: /blog/admin
 
 User-agent: Twitterbot
-Allow: /
+Disallow: /blog/admin
 
 User-agent: facebookexternalhit
-Allow: /
+Disallow: /blog/admin
 
 User-agent: GPTBot
-Allow: /
+Disallow: /blog/admin
 
 User-agent: OAI-SearchBot
-Allow: /
+Disallow: /blog/admin
 
 User-agent: ChatGPT-User
-Allow: /
+Disallow: /blog/admin
 
 User-agent: ClaudeBot
-Allow: /
+Disallow: /blog/admin
 
 User-agent: PerplexityBot
-Allow: /
+Disallow: /blog/admin
 
 User-agent: YandexBot
-Allow: /
+Disallow: /blog/admin
 
 User-agent: *
-Allow: /
 Disallow: /blog/admin
 
 Sitemap: https://rovno.ai/sitemap.xml

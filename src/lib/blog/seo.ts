@@ -242,8 +242,9 @@ export function useDocumentHead(options: DocumentHeadOptions | null): void {
         // so restoring it walks one article's canonical and noindex onto the next route.
         //
         // Removing them only when the NEXT page sets none (above) half-closed this: that
-        // branch lives in the next page's effect, and only BlogIndex / BlogPostPage /
-        // BlogTagPage call this hook at all. Navigate to the landing page and nothing ran.
+        // branch lives in the next page's effect, and no public route outside the blog
+        // calls this hook — the landing page in particular does not, so navigating there
+        // ran nothing.
         if (tag.prerenderOnly || tag.created) {
           tag.element.remove();
         } else if (tag.originalContent !== null) {

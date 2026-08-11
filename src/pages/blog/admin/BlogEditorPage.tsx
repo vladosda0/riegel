@@ -37,11 +37,14 @@ import { slugifyTitle, validateSlug, type SlugIssue } from "@/lib/blog/slug";
 import { countWords, formatReadingTime, readingTimeMinutes } from "@/lib/blog/reading-time";
 import { blogPostPath } from "@/lib/blog/jsonld";
 import { sanitizeArticleHtml } from "@/lib/blog/sanitize";
+import { useDocumentHead } from "@/lib/blog/seo";
 import type { BlogPostPatch, BlogPostStatus } from "@/lib/blog/types";
 import { BlogAdminGuard } from "@/components/blog/admin/BlogAdminGuard";
 import { RichTextEditor } from "@/components/blog/editor/RichTextEditor";
 import "@/components/landing/landing.css";
 import "@/components/blog/blog.css";
+
+const EDITOR_TITLE = "Блог — редактор статьи";
 
 const AUTOSAVE_DELAY_MS = 1500;
 
@@ -103,6 +106,11 @@ function useAutoResize(): (el: HTMLTextAreaElement | null) => void {
 }
 
 export default function BlogEditorPage() {
+  // Same as BlogAdminList, including the caveat: this holds for a signed-in session,
+  // while a guest is redirected away and AuthLayout's tag is what a crawler sees.
+  // Set before the early returns below so the loading and not-found branches carry it.
+  useDocumentHead({ title: EDITOR_TITLE, robots: "noindex, nofollow" });
+
   const { id: routeId } = useParams<{ id: string }>();
   const isNew = !routeId;
   const navigate = useNavigate();
