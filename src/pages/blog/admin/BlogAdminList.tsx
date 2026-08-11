@@ -104,14 +104,17 @@ function PostRow({ post }: { post: BlogPostWithAuthor }) {
 
 export default function BlogAdminList() {
   // robots.txt disallows /blog/admin, but its path matching is octet-exact while the
-  // router resolves the route case-insensitively, so /blog/ADMIN reaches this page
-  // uncovered. A disallow also suppresses crawling, not indexing.
+  // router resolves the route case-insensitively, so /blog/ADMIN is not covered.
   //
-  // This tag covers a SIGNED-IN session only. A guest never keeps it: BlogAdminGuard
-  // returns <Navigate to="/auth/login">, this page unmounts, and the cleanup removes
-  // the tag (robots is in PRERENDER_ONLY_TAGS, so unmount always removes it). Since a
-  // crawler is always a guest, the tag a crawler actually sees is the one AuthLayout
-  // sets on the redirect target.
+  // Be precise about what this tag does and does not buy, because two rounds of
+  // review were spent on the gap. It covers a SIGNED-IN session. A guest never keeps
+  // it: BlogAdminGuard returns <Navigate to="/auth/login">, this page unmounts, and
+  // the cleanup removes the tag (robots is in PRERENDER_ONLY_TAGS). A crawler is
+  // always a guest, so what a crawler sees is AuthLayout's tag on the redirect
+  // target — and only if it runs JS, since the served HTML carries no robots
+  // directive on any route. For a crawler that does not render, /blog/ADMIN is still
+  // uncovered; closing that needs an X-Robots-Tag header or a case-normalising
+  // redirect, neither of which this SPA can express on Timeweb.
   useDocumentHead({ title: ADMIN_TITLE, robots: "noindex, nofollow" });
 
   const { isAuthor } = useMyBlogAuthor();

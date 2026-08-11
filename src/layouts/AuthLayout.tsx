@@ -1,11 +1,7 @@
 import { Outlet } from "react-router-dom";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useDocumentHead } from "@/lib/blog/seo";
-
-// Matches index.html's own <title>/og:title/twitter:title, so wiring the head hook
-// here changes nothing a visitor can see. The point is the robots tag below.
-const SHELL_TITLE = "Ровно ИИ";
+import { SITE_NAME, useDocumentHead } from "@/lib/blog/seo";
 
 export default function AuthLayout() {
   const { t } = useTranslation();
@@ -17,7 +13,13 @@ export default function AuthLayout() {
   // the guard redirects, they unmount, and useDocumentHead's cleanup removes the
   // tag. Since a crawler is always a guest, this layout is where the tag has to
   // live to be seen by one.
-  useDocumentHead({ title: SHELL_TITLE, robots: "noindex, nofollow" });
+  //
+  // SITE_NAME is index.html's own <title>, so this changes nothing a visitor sees.
+  //
+  // This layout is the first PERSISTENT caller of the hook; the others are leaf
+  // pages. If an /auth/* child page ever calls it too, the child wins and this tag
+  // goes away for the rest of the session — AuthLayout.test.tsx pins that.
+  useDocumentHead({ title: SITE_NAME, robots: "noindex, nofollow" });
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-sp-2">
