@@ -1,32 +1,46 @@
+# A crawler obeys exactly one group - the most specific one matching its name -
+# and ignores every other, so each named group below must repeat the shared
+# Disallow rules. Omitting them from a named group grants that crawler access.
+
 User-agent: Googlebot
 Allow: /
+Disallow: /blog/admin
 
 User-agent: Bingbot
 Allow: /
+Disallow: /blog/admin
 
 User-agent: Twitterbot
 Allow: /
+Disallow: /blog/admin
 
 User-agent: facebookexternalhit
 Allow: /
+Disallow: /blog/admin
 
 User-agent: GPTBot
 Allow: /
+Disallow: /blog/admin
 
 User-agent: OAI-SearchBot
 Allow: /
+Disallow: /blog/admin
 
 User-agent: ChatGPT-User
 Allow: /
+Disallow: /blog/admin
 
 User-agent: ClaudeBot
 Allow: /
+Disallow: /blog/admin
 
 User-agent: PerplexityBot
 Allow: /
+Disallow: /blog/admin
 
 User-agent: YandexBot
 Allow: /
+Disallow: /blog/admin
 
 User-agent: *
 Allow: /
