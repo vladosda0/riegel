@@ -119,6 +119,9 @@ Catalog upload: `catalog_tab_visit` → `catalog_template_downloaded` →
 `catalog_uploaded` → `catalog_editor_opened` → `catalog_saved`.
 Constructor: `estimate_constructor_opened` → `library_searched` →
 `work_applied_via_constructor`.
+AI proposal funnel: `ai_proposal_confirmed` → `ai_proposal_applied` /
+`ai_proposal_unavailable`. Registered on the PROD counter `109644835` on
+2026-08-06 (IDs 593641404 / 593641665 / 593642426), match type **Совпадает**.
 
 Notes:
 - Every event carries a `user_id` param for segmentation.
@@ -128,6 +131,15 @@ Notes:
 - **Retention (R-7):** Metrika → Reports → Retention (cohorts by signup week).
   DAU/WAU/MAU: add the "Attendance" widgets to a dashboard. Bookmark that
   dashboard URL for the weekly ritual.
+- **AI proposal funnel (rovno#227):** `ai_proposal_confirmed` is the confirm
+  click; `ai_proposal_applied` means the change actually landed;
+  `ai_proposal_unavailable` is a proposal type that failed closed without being
+  attempted, and carries `reason` plus `attempts: 0`. The fourth outcome,
+  retries exhausted, is deliberately NOT an event: it is
+  `confirmed - applied - unavailable` by subtraction, so it needs no goal.
+  Note `ai_proposal_applied` CHANGED MEANING on 2026-08-06 — before that release
+  it fired at confirm time, so any earlier figures are inflated. These goals live
+  on the prod counter only, so this funnel is not observable on staging.
 - **Verify:** Metrika real-time / "проверка счётчика" shows the goals firing;
   the funnel report shows per-step conversion.
 

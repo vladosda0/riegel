@@ -110,7 +110,11 @@ import {
   filterPhotoConsultProposalChangesBySeam,
   type PhotoConsultApplyAction,
 } from "@/lib/commit-proposal";
-import { proposalFailureReasonKey, resolveProposalFastFail } from "@/lib/ai-proposal-execution";
+import {
+  proposalFailureReasonKey,
+  resolveProposalExecutionAnalytics,
+  resolveProposalFastFail,
+} from "@/lib/ai-proposal-execution";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { SaveLearnTargetDialog } from "@/components/ai/SaveLearnTargetDialog";
@@ -817,6 +821,12 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
   const highlightTimersRef = useRef<Map<string, number>>(new Map());
   const dragRef = useRef<{ startX: number; startW: number } | null>(null);
   const executingQueueRef = useRef(false);
+  // The scope currently on screen, readable from the async run without re-running it.
+  const activeScopeKeyRef = useRef<string>("home");
+  // NOT part of ScopedAISidebarState on purpose: a run belongs to the sidebar,
+  // not to a project, so this survives navigation and locks the composer in
+  // every scope while a proposal queue is executing.
+  const [queueRunInFlight, setQueueRunInFlight] = useState(false);
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
   const regenerateTimersRef = useRef<number[]>([]);
   const photoAnalysisTimerRef = useRef<number | null>(null);
@@ -970,6 +980,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       scopedSidebarStateByKey.set(previousScopeKey, latestScopedStateRef.current);
     }
     previousScopeKeyRef.current = scopeKey;
+    activeScopeKeyRef.current = scopeKey;
 
     clearRegenerateTimers();
     clearPhotoAnalysisTimer();
@@ -1115,7 +1126,11 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
           ? "photo_consult"
           : "none";
   const showPhotoConsultCard = Boolean(photoConsult) && activeWindow !== "worklog" && activeWindow !== "proposal_queue";
-  const isInputLocked = activeWindow !== "none";
+  // queueRunInFlight covers the OTHER scopes: activeWindow is derived from
+  // workLogs/proposalQueue, which are scoped, so in a different project they are
+  // empty and the composer would otherwise be open while a run is still going.
+  const isInputLocked = activeWindow !== "none" || queueRunInFlight;
+  const isLockedByForeignRun = queueRunInFlight && activeWindow === "none";
   const showNearLimitIndicator = events.length >= 100;
   const automationLevel = AUTOMATION_MODE_TO_LEVEL[automationMode];
   const allowDirectEdit = automationLevel >= 3;
@@ -1201,15 +1216,70 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
     });
   }
 
-  const runQueueExecution = useCallback(async (queueSnapshot: ProposalQueueState) => {
+  // rovno#227 audit. The run is async and the user can navigate away mid-flight,
+  // which changes scopeKey. These route every write the loop makes to the scope
+  // the run STARTED under: live setState while that scope is still on screen,
+  // otherwise straight into the saved snapshot for it. Without this the tail
+  // writes (`setProposalQueue(null)`, `setWorkLogs`) landed in whatever scope
+  // was showing and wiped another project's queue mid-review.
+  const writeRunProposalQueue = useCallback((
+    runScopeKey: string,
+    next: ProposalQueueState | null | ((prev: ProposalQueueState | null) => ProposalQueueState | null),
+  ) => {
+    if (activeScopeKeyRef.current === runScopeKey) {
+      setProposalQueue(next as Parameters<typeof setProposalQueue>[0]);
+      return;
+    }
+    const saved = scopedSidebarStateByKey.get(runScopeKey) ?? createEmptyScopedSidebarState();
+    const resolved = typeof next === "function"
+      ? (next as (prev: ProposalQueueState | null) => ProposalQueueState | null)(saved.proposalQueue)
+      : next;
+    scopedSidebarStateByKey.set(runScopeKey, { ...saved, proposalQueue: resolved });
+  }, []);
+
+  const writeRunProposalExecutionLinks = useCallback((
+    runScopeKey: string,
+    next: (prev: Record<string, ProposalExecutionGroupMeta>) => Record<string, ProposalExecutionGroupMeta>,
+  ) => {
+    if (activeScopeKeyRef.current === runScopeKey) {
+      setProposalExecutionLinks(next);
+      return;
+    }
+    const saved = scopedSidebarStateByKey.get(runScopeKey) ?? createEmptyScopedSidebarState();
+    scopedSidebarStateByKey.set(runScopeKey, {
+      ...saved,
+      proposalExecutionLinks: next(saved.proposalExecutionLinks),
+    });
+  }, []);
+
+  const writeRunWorkLogs = useCallback((runScopeKey: string, next: Map<string, WorkLogEntry>) => {
+    if (activeScopeKeyRef.current === runScopeKey) {
+      setWorkLogs(next);
+      return;
+    }
+    const saved = scopedSidebarStateByKey.get(runScopeKey) ?? createEmptyScopedSidebarState();
+    scopedSidebarStateByKey.set(runScopeKey, { ...saved, workLogs: [...next.values()] });
+  }, []);
+
+  const runQueueExecution = useCallback(async (
+    queueSnapshot: ProposalQueueState,
+    runScopeKey: string,
+  ) => {
     const confirmedItems = queueSnapshot.items.filter((item) => item.decision === "confirmed");
     if (confirmedItems.length === 0) {
-      setProposalQueue(null);
+      writeRunProposalQueue(runScopeKey, null);
       executingQueueRef.current = false;
+      setQueueRunInFlight(false);
       return;
     }
 
-    setProposalQueue((prev) => (prev
+    // The handoff is in a `finally` because the caller launches this with
+    // `void`: an escaping rejection would otherwise leave executingQueueRef set
+    // for the component's life, and since rovno#227 that flag gates every FUTURE
+    // run, so pending snapshots would pile up and none of them would ever start.
+    try {
+
+    writeRunProposalQueue(runScopeKey, (prev) => (prev
       ? {
           ...prev,
           phase: "executing",
@@ -1222,7 +1292,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
     for (let cursor = 0; cursor < confirmedItems.length; cursor++) {
       const queueItem = confirmedItems[cursor];
 
-      setProposalQueue((prev) => (prev
+      writeRunProposalQueue(runScopeKey, (prev) => (prev
         ? {
             ...prev,
             phase: "executing",
@@ -1249,7 +1319,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
         const fastFail = resolveProposalFastFail(queueItem.proposal.type, workspaceMode.kind);
         if (fastFail) {
           lastError = t(fastFail.descriptionKey);
-          setProposalQueue((prev) => (prev
+          writeRunProposalQueue(runScopeKey, (prev) => (prev
             ? {
                 ...prev,
                 // 0, not 1: nothing was attempted, matching the `attempts: 0` the
@@ -1274,7 +1344,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
 
         attempt += 1;
         const workLogId = `wl-execute-${queueItem.id}-${attempt}-${Date.now()}`;
-        setWorkLogs(new Map([
+        writeRunWorkLogs(runScopeKey, new Map([
           [workLogId, { id: workLogId, steps: WORK_STEPS_COMMIT, phase: "commit" }],
         ]));
 
@@ -1296,7 +1366,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
           if (proposalEventId) {
             const childEventIds = result.eventIds.filter((eventId) => eventId !== proposalEventId);
             if (childEventIds.length > 0) {
-              setProposalExecutionLinks((prev) => ({
+              writeRunProposalExecutionLinks(runScopeKey, (prev) => ({
                 ...prev,
                 [proposalEventId]: {
                   summary: queueItem.proposal.summary,
@@ -1314,7 +1384,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
         }
 
         lastError = result.error ?? t("ai.sidebar.toast.executionFailed.title");
-        setProposalQueue((prev) => (prev
+        writeRunProposalQueue(runScopeKey, (prev) => (prev
           ? {
               ...prev,
               retryByItemId: { ...prev.retryByItemId, [queueItem.id]: attempt },
@@ -1330,7 +1400,32 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
         }
       }
 
-      setWorkLogs(new Map());
+      writeRunWorkLogs(runScopeKey, new Map());
+
+      // rovno#227: ONE emission point for the whole item, so the three outcomes
+      // cannot drift apart the way they did when the only event fired at confirm
+      // time. Which event (or none) is a pure decision, unit-tested in
+      // @/lib/ai-proposal-execution — this loop has no direct coverage and is
+      // where four blocking defects hid during the #224 rounds.
+      const executionAnalytics = resolveProposalExecutionAnalytics({
+        success,
+        unavailableReason,
+        attempts: attempt,
+      });
+      if (executionAnalytics) {
+        trackEvent(executionAnalytics.event, {
+          // The proposal's own project, matching ai_proposal_confirmed above.
+          project_id: queueItem.proposal.project_id,
+          surface: "ai",
+          proposal_id: queueItem.proposal.id,
+          proposal_type: queueItem.proposal.type,
+          // Zero for a fast-fail, which never entered the retry loop.
+          attempts: executionAnalytics.attempts,
+          ...(executionAnalytics.event === "ai_proposal_unavailable"
+            ? { reason: executionAnalytics.reason }
+            : {}),
+        });
+      }
 
       if (!success) {
         addEvent({
@@ -1371,15 +1466,37 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       }
     }
 
-    setWorkLogs(new Map());
-    setProposalQueue(null);
-    executingQueueRef.current = false;
-  }, [workspaceMode.kind, seamForProjectCommit, t, WORK_STEPS_COMMIT]);
+    writeRunWorkLogs(runScopeKey, new Map());
+    writeRunProposalQueue(runScopeKey, null);
+    } finally {
+      // Both: the ref is the synchronous guard, the state is what unlocks the
+      // composer. A `finally` because the caller launches this with `void`, so
+      // an escaping rejection would otherwise leave the lock set and no future
+      // run could ever start.
+      executingQueueRef.current = false;
+      setQueueRunInFlight(false);
+    }
+  }, [workspaceMode.kind, seamForProjectCommit, t, WORK_STEPS_COMMIT, writeRunProposalQueue, writeRunWorkLogs, writeRunProposalExecutionLinks]);
 
+  // rovno#227 audit. Only ONE proposal run may execute at a time. Dropping the
+  // second one is deliberate: an earlier attempt QUEUED it instead, and that was
+  // worse than the bug it fixed -- the card stayed in review with Confirm live,
+  // so each further click enqueued a duplicate run that then really executed,
+  // applying the same proposal repeatedly with a deductCredit each.
+  //
+  // The composer lock (queueRunInFlight) is meant to make this branch
+  // unreachable, and it does NOT yet: the third audit round reached it three
+  // ways -- the sidebar unmounts on collapse and off /project/*, which discards
+  // the flag; a queue restored in another scope still renders a live Confirm;
+  // and handleRegenerateLearnMessage guards only on scoped state. Until those
+  // are closed this early return still fires, and every click that reaches it
+  // emits a phantom ai_proposal_confirmed with no terminal event -- the exact
+  // corruption rovno#227 exists to fix.
   const beginQueueExecution = useCallback((queueSnapshot: ProposalQueueState) => {
     if (executingQueueRef.current) return;
     executingQueueRef.current = true;
-    void runQueueExecution(queueSnapshot);
+    setQueueRunInFlight(true);
+    void runQueueExecution(queueSnapshot, activeScopeKeyRef.current);
   }, [runQueueExecution]);
 
   /** Latest `runAssistantForContent` for `/home` pending-project flow after `flushSync` (avoids stale seam/context). */
@@ -1873,6 +1990,17 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
 
   function updateQueueDecision(decision: ProposalDecision) {
     let nextQueueSnapshot: ProposalQueueState | null = null;
+    // Captured inside the updater, emitted AFTER it returns. React may invoke an
+    // updater more than once (a replayed concurrent render, or a future
+    // StrictMode wrap), and an analytics call inside one would double-count.
+    // That matters more since rovno#227 made ai_proposal_confirmed the
+    // denominator of `confirmed - applied - unavailable`. Same shape the
+    // function already uses for nextQueueSnapshot.
+    type QueueDecisionEvent = {
+      name: "ai_proposal_confirmed" | "ai_proposal_rejected";
+      proposal: AIProposal;
+    };
+    let decisionEvent: QueueDecisionEvent | null = null;
     setProposalQueue((prev) => {
       if (!prev || prev.phase !== "review") return prev;
       const current = prev.items[prev.activeIndex];
@@ -1896,25 +2024,39 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       // on these two goals as of this release. Proposals raised from /home used
       // to report "" and now report the real id, so a report or funnel grouped
       // on it shows a step at the deploy boundary. On /project/* nothing changes.
+      //
+      // rovno#227: this is the CONFIRM click, so it is `ai_proposal_confirmed`.
+      // It used to be sent as `ai_proposal_applied`, before the queue had
+      // attempted anything and with no counter-event on failure, which reported
+      // a 100% apply rate for types that fail closed on every path. The real
+      // `ai_proposal_applied` is now emitted by runQueueExecution on success.
       if (decision === "confirmed") {
-        trackEvent("ai_proposal_applied", {
-          project_id: current.proposal.project_id,
-          surface: "ai",
-          proposal_id: current.proposal.id,
-          proposal_type: current.proposal.type,
-        });
+        decisionEvent = { name: "ai_proposal_confirmed", proposal: current.proposal };
       } else if (decision === "declined") {
-        trackEvent("ai_proposal_rejected", {
-          project_id: current.proposal.project_id,
-          surface: "ai",
-          proposal_id: current.proposal.id,
-        });
+        decisionEvent = { name: "ai_proposal_rejected", proposal: current.proposal };
       }
       if (nextQueue.items.every((item) => item.decision !== "unresolved")) {
         nextQueueSnapshot = nextQueue;
       }
       return nextQueue;
     });
+    // Read through an explicitly typed local: TypeScript does not track the
+    // assignment above because it happens inside the updater callback, so a
+    // bare `if (decisionEvent)` narrows it to `never`. The sibling
+    // `nextQueueSnapshot` has the same narrowing and only compiles because
+    // `never` is assignable to its parameter; reading a property off it, as
+    // here, is what makes the narrowing visible.
+    const emittedDecision = decisionEvent as QueueDecisionEvent | null;
+    if (emittedDecision) {
+      const { name, proposal } = emittedDecision;
+      trackEvent(name, {
+        project_id: proposal.project_id,
+        surface: "ai",
+        proposal_id: proposal.id,
+        // Only the confirm event carries the type; the rejected event never did.
+        ...(name === "ai_proposal_confirmed" ? { proposal_type: proposal.type } : {}),
+      });
+    }
     if (nextQueueSnapshot) {
       beginQueueExecution(nextQueueSnapshot);
     }
@@ -3696,6 +3838,25 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
                           />
                         </div>
                       )}
+                    </div>
+                  )}
+
+                  {/*
+                    rovno#227 audit. The composer is hidden in EVERY scope while a
+                    proposal run is in flight, with a note saying why. Without it
+                    the run's own scope shows the work-log window but any other
+                    project shows an open composer, and confirming a second queue
+                    there either dropped it (phantom analytics) or, in an earlier
+                    attempt, queued a duplicate that really executed.
+                  */}
+                  {isLockedByForeignRun && (
+                    <div className="rounded-lg border border-sidebar-border bg-sidebar-accent/40 px-3 py-2">
+                      <p className="text-xs font-medium text-sidebar-foreground">
+                        {t("ai.sidebar.queueRunInFlight.title")}
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {t("ai.sidebar.queueRunInFlight.description")}
+                      </p>
                     </div>
                   )}
 

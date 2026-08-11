@@ -2623,6 +2623,8 @@
   "ai.sidebar.proposal.failureReason.unsupportedProposalType": "пока не поддерживается",
   "ai.sidebar.proposal.failureReason.unsupportedInSupabaseMode": "недоступно в этом режиме",
   "ai.sidebar.toast.changesApplied.title": "Изменения применены",
+  "ai.sidebar.queueRunInFlight.title": "Предложение применяется",
+  "ai.sidebar.queueRunInFlight.description": "Дождись, пока текущее предложение применится, и только потом отправляй новый запрос. Оно может выполняться в другом проекте.",
   "ai.sidebar.toast.changesApplied.description": "{{summary}} выполнено.",
   "ai.sidebar.toast.changesApplied.consultDescription_one": "Применено {{count}} действие.",
   "ai.sidebar.toast.changesApplied.consultDescription_few": "Применено {{count}} действия.",

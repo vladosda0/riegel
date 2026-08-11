@@ -2593,6 +2593,8 @@
   "ai.sidebar.proposal.failureReason.unsupportedProposalType": "not supported yet",
   "ai.sidebar.proposal.failureReason.unsupportedInSupabaseMode": "unavailable in this mode",
   "ai.sidebar.toast.changesApplied.title": "Changes applied",
+  "ai.sidebar.queueRunInFlight.title": "A proposal is being applied",
+  "ai.sidebar.queueRunInFlight.description": "Wait for the current proposal to finish applying before sending a new request. It may be running in another project.",
   "ai.sidebar.toast.changesApplied.description": "{{summary}} completed.",
   "ai.sidebar.toast.changesApplied.consultDescription_one": "{{count}} action committed.",
   "ai.sidebar.toast.changesApplied.consultDescription_other": "{{count}} actions committed.",

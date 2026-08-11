@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { proposalFailureReasonKey, resolveProposalFastFail } from "@/lib/ai-proposal-execution";
+import {
+  proposalFailureReasonKey,
+  resolveProposalExecutionAnalytics,
+  resolveProposalFastFail,
+} from "@/lib/ai-proposal-execution";
 import type { AIProposalType } from "@/types/ai";
 
 // The complete AIProposalType union.
@@ -154,5 +158,72 @@ describe("proposalFailureReasonKey", () => {
     // entry. "toString" is included because a plain-object lookup would
     // otherwise resolve it off the prototype and print a function.
     expect(proposalFailureReasonKey(reason)).toBeNull();
+  });
+});
+
+describe("resolveProposalExecutionAnalytics", () => {
+  // rovno#227. `ai_proposal_applied` used to fire at CONFIRM time, before the
+  // queue attempted anything, with no counter-event on failure. Types that fail
+  // closed on every path therefore reported a 100% apply rate, and the figure
+  // got WORSE as more dead paths were correctly closed. The emission decision
+  // now lives here so it is pinned by tests rather than by a component loop
+  // nothing touches — the same reason resolveProposalFastFail was extracted.
+
+  // The COMPLETE input domain: success x unavailableReason in {null, "", token}.
+  // All SIX cells, including the two that success short-circuits.
+  it("reports applied when the item succeeded", () => {
+    expect(resolveProposalExecutionAnalytics({ success: true, unavailableReason: null, attempts: 1 }))
+      .toEqual({ event: "ai_proposal_applied", attempts: 1 });
+  });
+
+  it("reports applied even if a reason is somehow present, because success wins", () => {
+    // Not reachable in the current loop (the fast-fail breaks before any
+    // attempt), but the function must be total rather than rely on the caller.
+    expect(resolveProposalExecutionAnalytics({ success: true, unavailableReason: "x", attempts: 2 }))
+      .toEqual({ event: "ai_proposal_applied", attempts: 2 });
+  });
+
+  it("reports applied for an empty reason too, since success is read first", () => {
+    // The sixth cell. No behavioural weight (success short-circuits before the
+    // reason is looked at), but the suite claims a complete enumeration and an
+    // untested cell makes that claim false.
+    expect(resolveProposalExecutionAnalytics({ success: true, unavailableReason: "", attempts: 1 }))
+      .toEqual({ event: "ai_proposal_applied", attempts: 1 });
+  });
+
+  it("reports unavailable, carrying the reason, when a fast-fail stopped it", () => {
+    expect(resolveProposalExecutionAnalytics({
+      success: false, unavailableReason: "unsupported_in_supabase_mode", attempts: 0,
+    })).toEqual({
+      event: "ai_proposal_unavailable", reason: "unsupported_in_supabase_mode", attempts: 0,
+    });
+  });
+
+  it("reports NOTHING when the retries were exhausted", () => {
+    // Deliberate: a fourth goal would have to be created in Yandex Metrika by
+    // hand for it to be counted at all. This case is derivable by subtraction,
+    // confirmed - applied - unavailable, so it costs no goal and loses nothing.
+    expect(resolveProposalExecutionAnalytics({ success: false, unavailableReason: null, attempts: 5 }))
+      .toBeNull();
+  });
+
+  it("passes the real attempt count through, which is 0 for a fast-fail", () => {
+    // The attempts figure is the whole point of separating these two: a
+    // fast-fail never entered the loop, and the old event recorded five.
+    const fastFail = resolveProposalExecutionAnalytics({
+      success: false, unavailableReason: "unsupported_proposal_type", attempts: 0,
+    });
+    expect(fastFail).not.toBeNull();
+    expect(fastFail!.attempts).toBe(0);
+    expect(resolveProposalExecutionAnalytics({ success: true, unavailableReason: null, attempts: 4 })!.attempts)
+      .toBe(4);
+  });
+
+  it("treats an empty reason string as no reason, not as a fast-fail", () => {
+    // "" is falsy but is still a string; a truthiness check and an
+    // `!== null` check disagree here, and the wrong one invents an
+    // unavailable event with a blank reason dimension.
+    expect(resolveProposalExecutionAnalytics({ success: false, unavailableReason: "", attempts: 3 }))
+      .toBeNull();
   });
 });

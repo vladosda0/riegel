@@ -100,3 +100,49 @@ export function proposalFailureReasonKey(reason: unknown): string | null {
   if (typeof reason !== "string") return null;
   return PROPOSAL_FAILURE_REASON_KEYS.get(reason) ?? null;
 }
+
+/**
+ * Which analytics event, if any, the queue loop should emit for a finished item.
+ *
+ * rovno#227. `ai_proposal_applied` used to be emitted at CONFIRM time, before
+ * the loop attempted anything, and nothing was emitted on failure. Proposal
+ * types that fail closed on every path (`update_estimate` since #175,
+ * `add_procurement` since #224, `generate_document` in supabase mode) therefore
+ * reported a 100% apply rate against zero applications — and the number got
+ * worse as more dead paths were correctly closed, which is precisely backwards
+ * for a metric meant to say whether the AI features earn their cost.
+ *
+ * Returning null is a real answer, not an omission: the retries-exhausted case
+ * is `confirmed - applied - unavailable` by subtraction, so measuring it needs
+ * no fourth Yandex Metrika goal to be created by hand.
+ */
+export type ProposalExecutionAnalytics =
+  | { event: "ai_proposal_applied"; attempts: number }
+  | { event: "ai_proposal_unavailable"; reason: string; attempts: number };
+
+export function resolveProposalExecutionAnalytics(input: {
+  success: boolean;
+  /** The fast-fail token, or null when the loop was actually entered. */
+  unavailableReason: string | null;
+  /** Attempts actually made. Zero for a fast-fail, which never enters the loop. */
+  attempts: number;
+}): ProposalExecutionAnalytics | null {
+  if (input.success) {
+    // Success wins over a reason. The current loop cannot produce both, but a
+    // total function is cheaper than a caller-side invariant nobody re-checks.
+    return { event: "ai_proposal_applied", attempts: input.attempts };
+  }
+
+  // `!== null` and not a truthiness check: an empty string is a string, and
+  // treating it as a fast-fail would invent an unavailable event whose reason
+  // dimension is blank. An empty reason means the loop ran and lost.
+  if (input.unavailableReason !== null && input.unavailableReason !== "") {
+    return {
+      event: "ai_proposal_unavailable",
+      reason: input.unavailableReason,
+      attempts: input.attempts,
+    };
+  }
+
+  return null;
+}
