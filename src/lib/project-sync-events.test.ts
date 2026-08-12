@@ -220,7 +220,7 @@ describe("subscribeToProjectSyncEvents", () => {
     expect(batches).toEqual([]); // pending coalesce flush was cancelled
   });
 
-  it("uses a distinct channel topic per subscription, so a resubscribe cannot land on the old one", async () => {
+  it("gives every subscription a distinct channel topic", async () => {
     harness.state.selectResponses.push({ data: [], error: null }); // baseline
     const dispose = subscribeToProjectSyncEvents({
       projectId: "project-1",

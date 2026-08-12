@@ -75,7 +75,6 @@ function TasksIdentityProbe({
   onRender,
 }: {
   projectId: string;
-  tick: number;
   onRender: (tasks: Task[]) => void;
 }) {
   const { tasks } = usePlanningProjectTasksState(projectId);
@@ -322,9 +321,8 @@ describe("usePlanningProjectStages/usePlanningProjectTasks", () => {
   });
 
   // Regression: the derived-tasks memo must survive a re-render that changes no
-  // planning data. Consumers in ProjectTasks.tsx key useMemo/useCallback on the
-  // returned array, so a fresh identity per render rebuilds the estimate line
-  // map and remaps every task on every keystroke.
+  // planning data. An unstable dependency rebuilds the estimate line map and
+  // remaps every task on every render, and hands consumers a new array identity.
   it("keeps the derived tasks array identity stable across a re-render with no data change", async () => {
     vi.stubEnv("VITE_WORKSPACE_SOURCE", "supabase");
 
@@ -340,7 +338,7 @@ describe("usePlanningProjectStages/usePlanningProjectTasks", () => {
     const rendered: Task[][] = [];
     const { rerender } = render(
       <QueryClientProvider client={queryClient}>
-        <TasksIdentityProbe projectId="project-1" tick={1} onRender={(tasks) => rendered.push(tasks)} />
+        <TasksIdentityProbe projectId="project-1" onRender={(tasks) => rendered.push(tasks)} />
       </QueryClientProvider>,
     );
 
@@ -351,7 +349,7 @@ describe("usePlanningProjectStages/usePlanningProjectTasks", () => {
     const settled = rendered[rendered.length - 1];
     rerender(
       <QueryClientProvider client={queryClient}>
-        <TasksIdentityProbe projectId="project-1" tick={2} onRender={(tasks) => rendered.push(tasks)} />
+        <TasksIdentityProbe projectId="project-1" onRender={(tasks) => rendered.push(tasks)} />
       </QueryClientProvider>,
     );
 

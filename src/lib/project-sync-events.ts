@@ -51,7 +51,9 @@ const POLL_BATCH_LIMIT = 100;
 
 // realtime-js keys its channel registry by topic and hands back the channel it
 // already holds for one, so a reused topic can give a resubscribe the previous,
-// still-registered channel instead of a fresh one (rovno#188).
+// still-registered channel instead of a fresh one (rovno#188). Removal from that
+// registry is best-effort, so a unique topic can leave an inert entry behind:
+// accepted deliberately over the reuse it replaces (rovno#331).
 let subscriptionSeq = 0;
 
 function isMissingTableError(error: unknown): boolean {
