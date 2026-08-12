@@ -4,7 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as planningSource from "@/data/planning-source";
 import * as store from "@/data/store";
 import * as estimateV2Data from "@/hooks/use-estimate-v2-data";
-import { usePlanningProjectStages, usePlanningProjectTasks } from "@/hooks/use-planning-source";
+import {
+  usePlanningProjectStages,
+  usePlanningProjectTasks,
+  usePlanningProjectTasksState,
+} from "@/hooks/use-planning-source";
 import { authenticateRuntimeAuth } from "@/test/runtime-auth";
 import type { Stage, Task } from "@/types/entities";
 
@@ -64,6 +68,19 @@ function PlanningProbe({ projectId }: { projectId: string }) {
       </span>
     </div>
   );
+}
+
+function TasksIdentityProbe({
+  projectId,
+  onRender,
+}: {
+  projectId: string;
+  onRender: (tasks: Task[]) => void;
+}) {
+  const { tasks } = usePlanningProjectTasksState(projectId);
+  onRender(tasks);
+
+  return <span data-testid="task-count">{tasks.length}</span>;
 }
 
 function mockEstimateProject(lines: Array<Record<string, unknown>> = []) {
@@ -301,5 +318,42 @@ describe("usePlanningProjectStages/usePlanningProjectTasks", () => {
       </QueryClientProvider>,
     );
     await waitFor(() => expect(getProjectTasks).toHaveBeenCalledTimes(2));
+  });
+
+  // Regression: the derived-tasks memo must survive a re-render that changes no
+  // planning data. An unstable dependency rebuilds the estimate line map and
+  // remaps every task on every render, and hands consumers a new array identity.
+  it("keeps the derived tasks array identity stable across a re-render with no data change", async () => {
+    vi.stubEnv("VITE_WORKSPACE_SOURCE", "supabase");
+
+    const queryClient = createQueryClient();
+    authenticateRuntimeAuth();
+    mockEstimateProject();
+    vi.spyOn(planningSource, "getPlanningSource").mockResolvedValue({
+      mode: "supabase",
+      getProjectStages: vi.fn().mockResolvedValue([]),
+      getProjectTasks: vi.fn().mockResolvedValue([task({ title: "Supabase Task" })]),
+    } as never);
+
+    const rendered: Task[][] = [];
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <TasksIdentityProbe projectId="project-1" onRender={(tasks) => rendered.push(tasks)} />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("task-count")).toHaveTextContent("1");
+    });
+
+    const settled = rendered[rendered.length - 1];
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <TasksIdentityProbe projectId="project-1" onRender={(tasks) => rendered.push(tasks)} />
+      </QueryClientProvider>,
+    );
+
+    expect(rendered.length).toBeGreaterThan(1);
+    expect(rendered[rendered.length - 1]).toBe(settled);
   });
 });

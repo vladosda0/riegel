@@ -113,7 +113,7 @@ describe("subscribeToProjectSyncEvents", () => {
       onEvents: (events) => batches.push(events),
     });
     await flushAsync();
-    expect(harness.state.channelName).toBe("project-sync:project-1");
+    expect(harness.state.channelName).toMatch(/^project-sync:project-1:\d+$/);
     harness.state.statusCallback?.("SUBSCRIBED");
     await flushAsync();
 
@@ -218,5 +218,27 @@ describe("subscribeToProjectSyncEvents", () => {
     expect(harness.state.unsubscribe).toHaveBeenCalledTimes(1);
     await flushAsync(30_000);
     expect(batches).toEqual([]); // pending coalesce flush was cancelled
+  });
+
+  it("gives every subscription a distinct channel topic", async () => {
+    harness.state.selectResponses.push({ data: [], error: null }); // baseline
+    const dispose = subscribeToProjectSyncEvents({
+      projectId: "project-1",
+      onEvents: () => {},
+    });
+    await flushAsync();
+    dispose();
+
+    harness.state.selectResponses.push({ data: [], error: null }); // baseline
+    const disposeAgain = subscribeToProjectSyncEvents({
+      projectId: "project-1",
+      onEvents: () => {},
+    });
+    await flushAsync();
+
+    const topics = harness.supabase.channel.mock.calls.map(([name]) => name);
+    expect(topics).toHaveLength(2);
+    expect(topics[0]).not.toBe(topics[1]);
+    disposeAgain();
   });
 });
