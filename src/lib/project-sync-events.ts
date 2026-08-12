@@ -49,6 +49,11 @@ const DEFAULT_COALESCE_MS = 250;
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
 const POLL_BATCH_LIMIT = 100;
 
+// realtime-js keys its channel registry by topic and hands back the channel it
+// already holds for one, so a reused topic can give a resubscribe the previous,
+// still-registered channel instead of a fresh one (rovno#188).
+let subscriptionSeq = 0;
+
 function isMissingTableError(error: unknown): boolean {
   const code = (error as { code?: string } | null)?.code;
   return code === "42P01" || code === "PGRST205";
@@ -183,7 +188,7 @@ export function subscribeToProjectSyncEvents(options: ProjectSyncFeedOptions): (
     if (disposed) return;
 
     channel = client
-      .channel(`project-sync:${options.projectId}`)
+      .channel(`project-sync:${options.projectId}:${++subscriptionSeq}`)
       .on(
         "postgres_changes",
         {
