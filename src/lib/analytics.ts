@@ -287,6 +287,39 @@ export function trackEventOncePerSession(
 }
 
 /**
+ * The pageview URL handed to Metrika: origin + path + query, never the
+ * fragment. Supabase's implicit grant parks `access_token` / `refresh_token`
+ * in the fragment, and Metrika transmits the URL it is given verbatim.
+ */
+export function analyticsPageUrl(): string {
+  const { origin, pathname, search } = window.location;
+  return `${origin}${pathname}${search}`;
+}
+
+/** The implicit grant's fragment keys (`@supabase/auth-js` 2.97.0, `GoTrueClient.js:1506`). */
+const AUTH_FRAGMENT_TOKEN_KEYS = [
+  "access_token",
+  "refresh_token",
+  "provider_token",
+  "provider_refresh_token",
+] as const;
+
+function hasAuthTokenFragment(): boolean {
+  const raw = window.location.hash.replace(/^#/, "");
+  if (raw === "") return false;
+  const params = new URLSearchParams(raw);
+  return AUTH_FRAGMENT_TOKEN_KEYS.some((key) => (params.get(key) ?? "") !== "");
+}
+
+const AUTH_FRAGMENT_POLL_INTERVAL_MS = 100;
+/**
+ * auth-js only clears the fragment after `_getUser()` resolves
+ * (`GoTrueClient.js:1529-1542`), so a failed landing never clears it. Giving up
+ * loses analytics for that one page load, which is the cheap side of the trade.
+ */
+const AUTH_FRAGMENT_POLL_TIMEOUT_MS = 10_000;
+
+/**
  * Bootstrap the Yandex Metrika tag. Call exactly once at app startup
  * (`main.tsx`), before the first render.
  *
@@ -294,14 +327,44 @@ export function trackEventOncePerSession(
  * build time, so when no counter is configured esbuild dead-code-eliminates
  * this whole loader from the bundle — no `mc.yandex.ru` request, no init.
  *
- * Session replay is deliberately disabled below: it records PII and is gated
- * behind a separate consent + field-masking workstream (152-ФЗ). Only
- * clickmap / accurateTrackBounce / trackLinks remain on.
+ * Passing a fragment-free `url` is not enough on its own while the tokens are
+ * still in the address bar: `tag.js` reads `location.href` itself for clickmap
+ * beacons (v2610, module `clm.p`: `p = kd(a).href`, sent as `page-url` to
+ * `mc.yandex.ru/clmap/<id>`), and that value is not derived from the `url` we
+ * pass. So the tag is not loaded at all until the fragment is gone. Polling
+ * rather than a `hashchange` listener, because the fragment can also be removed
+ * with `history.replaceState`, which emits no event (`GoTrueClient.js:1504`).
  */
 export function initMetrika(): void {
   if (!import.meta.env.VITE_METRIKA_COUNTER_ID) return;
   if (METRIKA_COUNTER_ID === null) return;
   if (typeof window === "undefined" || typeof document === "undefined") return;
+
+  if (!hasAuthTokenFragment()) {
+    bootstrapMetrika();
+    return;
+  }
+
+  const startedAt = Date.now();
+  const timer = window.setInterval(() => {
+    if (!hasAuthTokenFragment()) {
+      window.clearInterval(timer);
+      bootstrapMetrika();
+      return;
+    }
+    if (Date.now() - startedAt >= AUTH_FRAGMENT_POLL_TIMEOUT_MS) {
+      window.clearInterval(timer);
+    }
+  }, AUTH_FRAGMENT_POLL_INTERVAL_MS);
+}
+
+/**
+ * Session replay is deliberately disabled below: it records PII and is gated
+ * behind a separate consent + field-masking workstream (152-ФЗ). Only
+ * clickmap / accurateTrackBounce / trackLinks remain on.
+ */
+function bootstrapMetrika(): void {
+  if (METRIKA_COUNTER_ID === null) return;
 
   const counterId = METRIKA_COUNTER_ID;
   const src = `https://mc.yandex.ru/metrika/tag.js?id=${counterId}`;
@@ -338,6 +401,6 @@ export function initMetrika(): void {
     accurateTrackBounce: true,
     trackLinks: true,
     referrer: document.referrer,
-    url: location.href,
+    url: analyticsPageUrl(),
   });
 }
