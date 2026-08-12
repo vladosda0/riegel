@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
-import { METRIKA_COUNTER_ID } from "@/lib/analytics";
+import { analyticsPageUrl, METRIKA_COUNTER_ID } from "@/lib/analytics";
 
 /**
  * Fires a Yandex Metrika SPA pageview hit on every react-router navigation.
@@ -26,7 +26,7 @@ export function MetrikaPageviewTracker(): null {
     if (METRIKA_COUNTER_ID === null) return;
     if (typeof window === "undefined" || typeof window.ym !== "function") return;
 
-    window.ym(METRIKA_COUNTER_ID, "hit", window.location.href, {
+    window.ym(METRIKA_COUNTER_ID, "hit", analyticsPageUrl(), {
       referer: document.referrer,
       title: document.title,
     });
