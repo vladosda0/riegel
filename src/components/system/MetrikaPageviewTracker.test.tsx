@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { MemoryRouter, useNavigate } from "react-router-dom";
+import { BrowserRouter, useNavigate } from "react-router-dom";
 import { render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -32,22 +32,26 @@ describe("MetrikaPageviewTracker", () => {
     window.history.replaceState({}, "", "/");
   });
 
-  it("sends a pageview whose url carries no auth fragment", async () => {
+  // BrowserRouter, not MemoryRouter: the tracker reads window.location, so the
+  // router has to drive it or the assertion pins the pre-navigation URL.
+  it("sends a pageview whose url carries neither the auth fragment nor private query params", async () => {
     window.history.replaceState({}, "", `/auth/reset-password?lang=ru${AUTH_FRAGMENT}`);
     const { MetrikaPageviewTracker } = await import("./MetrikaPageviewTracker");
 
     render(
-      <MemoryRouter initialEntries={["/auth/reset-password"]}>
+      <BrowserRouter>
         <MetrikaPageviewTracker />
-        <Navigate to="/home" />
-      </MemoryRouter>,
+        <Navigate to="/auth/email-sent?lang=ru&email=user%40example.com" />
+      </BrowserRouter>,
     );
 
-    await waitFor(() => expect(ym).toHaveBeenCalled());
+    await waitFor(() => expect(ym.mock.calls.some((call) => call[1] === "hit")).toBe(true));
 
     const hits = ym.mock.calls.filter((call) => call[1] === "hit");
     expect(hits).toHaveLength(1);
-    expect(hits[0][2]).toBe(`${window.location.origin}/auth/reset-password?lang=ru`);
+    expect(window.location.pathname).toBe("/auth/email-sent");
+    expect(hits[0][2]).toBe(`${window.location.origin}/auth/email-sent?lang=ru`);
     expect(hits[0][2]).not.toContain("access_token");
+    expect(hits[0][2]).not.toContain("example.com");
   });
 });

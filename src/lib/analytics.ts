@@ -287,37 +287,69 @@ export function trackEventOncePerSession(
 }
 
 /**
- * The pageview URL handed to Metrika: origin + path + query, never the
- * fragment. Supabase's implicit grant parks `access_token` / `refresh_token`
- * in the fragment, and Metrika transmits the URL it is given verbatim.
+ * Query parameters allowed through to Metrika, by exact name or by prefix.
+ * An allowlist rather than a denylist: this app puts one-time credentials,
+ * e-mail addresses and promo codes in the query string, and a denylist would
+ * leak the next such parameter by default.
+ */
+const ANALYTICS_QUERY_ALLOWED_KEYS = new Set(["lang", "from", "yclid", "ymclid", "gclid", "_openstat"]);
+const ANALYTICS_QUERY_ALLOWED_PREFIXES = ["utm_"];
+
+/**
+ * The pageview URL handed to Metrika: origin + path + allowlisted query, never
+ * the fragment. Metrika transmits the URL it is given verbatim.
  */
 export function analyticsPageUrl(): string {
   const { origin, pathname, search } = window.location;
-  return `${origin}${pathname}${search}`;
+  const kept = new URLSearchParams();
+  for (const [key, value] of new URLSearchParams(search)) {
+    const allowed =
+      ANALYTICS_QUERY_ALLOWED_KEYS.has(key) ||
+      ANALYTICS_QUERY_ALLOWED_PREFIXES.some((prefix) => key.startsWith(prefix));
+    if (allowed) kept.append(key, value);
+  }
+  const query = kept.toString();
+  return `${origin}${pathname}${query === "" ? "" : `?${query}`}`;
 }
 
-/** The implicit grant's fragment keys (`@supabase/auth-js` 2.97.0, `GoTrueClient.js:1506`). */
-const AUTH_FRAGMENT_TOKEN_KEYS = [
+/**
+ * Parameter names that can establish a session. Supabase carries them in the
+ * fragment (implicit grant) or in the query (`/auth/confirm?token_hash=…`, the
+ * fallback link in the confirmation e-mail template), and `parseParametersFromURL`
+ * reads both.
+ *
+ * `code` is deliberately absent: PKCE is not in use, and `code` is also the
+ * promo-redeem parameter, which must not stall analytics forever.
+ */
+const AUTH_CREDENTIAL_KEYS = [
   "access_token",
   "refresh_token",
   "provider_token",
   "provider_refresh_token",
+  "token_hash",
+  "token",
 ] as const;
 
-function hasAuthTokenFragment(): boolean {
-  const raw = window.location.hash.replace(/^#/, "");
-  if (raw === "") return false;
-  const params = new URLSearchParams(raw);
-  return AUTH_FRAGMENT_TOKEN_KEYS.some((key) => (params.get(key) ?? "") !== "");
+function carriesCredential(params: URLSearchParams): boolean {
+  return AUTH_CREDENTIAL_KEYS.some((key) => (params.get(key) ?? "") !== "");
 }
 
-const AUTH_FRAGMENT_POLL_INTERVAL_MS = 100;
+function urlCarriesAuthCredential(): boolean {
+  const { hash, search } = window.location;
+  return (
+    carriesCredential(new URLSearchParams(hash.replace(/^#/, ""))) ||
+    carriesCredential(new URLSearchParams(search))
+  );
+}
+
+const AUTH_CREDENTIAL_POLL_INTERVAL_MS = 100;
 /**
- * auth-js only clears the fragment after `_getUser()` resolves
- * (`GoTrueClient.js:1529-1542`), so a failed landing never clears it. Giving up
- * loses analytics for that one page load, which is the cheap side of the trade.
+ * When to stop waiting for the credential to leave the address bar. A failed
+ * landing never clears it, so the wait needs an end. `ensureMetrikaStarted()`
+ * is what recovers from here, so giving up costs the current page view rather
+ * than the whole session.
  */
-const AUTH_FRAGMENT_POLL_TIMEOUT_MS = 10_000;
+const AUTH_CREDENTIAL_POLL_TIMEOUT_MS = 10_000;
 
 /**
  * Bootstrap the Yandex Metrika tag. Call exactly once at app startup
@@ -327,36 +359,70 @@ const AUTH_FRAGMENT_POLL_TIMEOUT_MS = 10_000;
  * build time, so when no counter is configured esbuild dead-code-eliminates
  * this whole loader from the bundle — no `mc.yandex.ru` request, no init.
  *
- * Passing a fragment-free `url` is not enough on its own while the tokens are
+ * Sanitising the `url` we pass is not enough on its own while the credential is
  * still in the address bar: `tag.js` reads `location.href` itself for clickmap
  * beacons (v2610, module `clm.p`: `p = kd(a).href`, sent as `page-url` to
- * `mc.yandex.ru/clmap/<id>`), and that value is not derived from the `url` we
- * pass. So the tag is not loaded at all until the fragment is gone. Polling
- * rather than a `hashchange` listener, because the fragment can also be removed
- * with `history.replaceState`, which emits no event (`GoTrueClient.js:1504`).
+ * `mc.yandex.ru/clmap/<id>`), a value the `url` option does not feed. So the tag
+ * is not loaded at all until the credential is gone.
+ *
+ * Polled rather than driven by `hashchange`, so that the check does not depend
+ * on how the credential is removed or on which part of the URL holds it.
  */
 export function initMetrika(): void {
   if (!import.meta.env.VITE_METRIKA_COUNTER_ID) return;
   if (METRIKA_COUNTER_ID === null) return;
   if (typeof window === "undefined" || typeof document === "undefined") return;
 
-  if (!hasAuthTokenFragment()) {
+  // Install the command queue immediately, even while waiting: it makes no
+  // network call, and without it trackEvent() drops every event fired before
+  // the tag loads (AuthCallback fires email_verified in exactly that window).
+  ensureYmQueue();
+
+  if (!urlCarriesAuthCredential()) {
     bootstrapMetrika();
     return;
   }
 
   const startedAt = Date.now();
   const timer = window.setInterval(() => {
-    if (!hasAuthTokenFragment()) {
+    if (!urlCarriesAuthCredential()) {
       window.clearInterval(timer);
       bootstrapMetrika();
       return;
     }
-    if (Date.now() - startedAt >= AUTH_FRAGMENT_POLL_TIMEOUT_MS) {
+    if (Date.now() - startedAt >= AUTH_CREDENTIAL_POLL_TIMEOUT_MS) {
       window.clearInterval(timer);
     }
-  }, AUTH_FRAGMENT_POLL_INTERVAL_MS);
+  }, AUTH_CREDENTIAL_POLL_INTERVAL_MS);
 }
+
+/**
+ * Start Metrika if it is not running yet and the address bar is clean. Called on
+ * every SPA navigation, so a landing whose credential never cleared costs that
+ * page view rather than the rest of the session.
+ */
+export function ensureMetrikaStarted(): void {
+  if (!import.meta.env.VITE_METRIKA_COUNTER_ID) return;
+  if (METRIKA_COUNTER_ID === null) return;
+  if (typeof window === "undefined" || typeof document === "undefined") return;
+  if (metrikaStarted) return;
+  if (urlCarriesAuthCredential()) return;
+
+  bootstrapMetrika();
+}
+
+function ensureYmQueue(): YandexMetrikaFn {
+  const w = window;
+  // The official snippet's queue, so calls issued before tag.js finishes
+  // loading are buffered rather than dropped.
+  return (w.ym =
+    w.ym ||
+    function (...args: unknown[]) {
+      (w.ym!.a = w.ym!.a || []).push(args);
+    });
+}
+
+let metrikaStarted = false;
 
 /**
  * Session replay is deliberately disabled below: it records PII and is gated
@@ -365,25 +431,25 @@ export function initMetrika(): void {
  */
 function bootstrapMetrika(): void {
   if (METRIKA_COUNTER_ID === null) return;
+  if (metrikaStarted) return;
 
   const counterId = METRIKA_COUNTER_ID;
   const src = `https://mc.yandex.ru/metrika/tag.js?id=${counterId}`;
 
-  // Don't bootstrap twice (HMR / an accidental second call).
+  // The module-scope flag resets on an HMR reload, so still check the DOM.
   const existingScripts = document.getElementsByTagName("script");
   for (let i = 0; i < existingScripts.length; i++) {
     if (existingScripts[i].src === src) return;
   }
+  metrikaStarted = true;
 
-  // Define the ym() command queue exactly as the official snippet does, so
-  // calls issued before tag.js finishes loading are buffered, not dropped.
-  const w = window;
-  const ym: YandexMetrikaFn = (w.ym =
-    w.ym ||
-    function (...args: unknown[]) {
-      (w.ym!.a = w.ym!.a || []).push(args);
-    });
+  const ym = ensureYmQueue();
   ym.l = Date.now();
+
+  // tag.js replays the queue in order, so anything buffered while we waited has
+  // to be re-queued behind init or it lands on a counter that does not exist.
+  const buffered = (ym.a ?? []) as unknown[][];
+  ym.a = [];
 
   const script = document.createElement("script");
   script.async = true;
@@ -403,4 +469,8 @@ function bootstrapMetrika(): void {
     referrer: document.referrer,
     url: analyticsPageUrl(),
   });
+
+  for (const args of buffered) {
+    (ym as (...a: unknown[]) => void)(...args);
+  }
 }

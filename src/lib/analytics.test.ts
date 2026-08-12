@@ -119,4 +119,98 @@ describe("initMetrika and the Supabase auth fragment", () => {
     expect(initCalls(ym)).toHaveLength(1);
     expect((initCalls(ym)[0][2] as { url: string }).url).not.toContain("error");
   });
+
+  it("does not load the tag while a one-time credential sits in the query string", async () => {
+    vi.useFakeTimers();
+    setUrl("/auth/confirm?token_hash=FAKEQATOKENHASH&type=signup");
+    const initMetrika = await loadInitMetrika();
+
+    initMetrika();
+    vi.advanceTimersByTime(1_000);
+
+    expect(ym.mock.calls.filter((call) => call[1] === "init")).toHaveLength(0);
+    expect(document.querySelector(`script[src="${TAG_SRC}"]`)).toBeNull();
+  });
+
+  it("keeps allowlisted attribution params and drops everything else", async () => {
+    setUrl("/auth/email-sent?utm_source=vk&utm_campaign=aug&lang=ru&email=user%40example.com&code=PROMO2026");
+    const initMetrika = await loadInitMetrika();
+
+    initMetrika();
+
+    const url = (initCalls(ym)[0][2] as { url: string }).url;
+    expect(url).toContain("utm_source=vk");
+    expect(url).toContain("utm_campaign=aug");
+    expect(url).toContain("lang=ru");
+    expect(url).not.toContain("email=");
+    expect(url).not.toContain("example.com");
+    expect(url).not.toContain("code=");
+    expect(url).not.toContain("PROMO2026");
+  });
+
+  it("emits no question mark when nothing survives the allowlist", async () => {
+    setUrl("/promo/redeem?code=PROMO2026");
+    const initMetrika = await loadInitMetrika();
+
+    initMetrika();
+
+    expect((initCalls(ym)[0][2] as { url: string }).url).toBe(`${window.location.origin}/promo/redeem`);
+  });
+
+  it("buffers events tracked while waiting, and replays them after init", async () => {
+    vi.useFakeTimers();
+    setUrl(`/auth/reset-password?lang=ru${AUTH_FRAGMENT}`);
+    vi.resetModules();
+    vi.stubEnv("VITE_METRIKA_COUNTER_ID", COUNTER_ID);
+    delete (window as unknown as { ym?: unknown }).ym;
+    const analytics = await import("./analytics");
+
+    analytics.initMetrika();
+    analytics.trackEvent("email_verified");
+
+    setUrl("/auth/reset-password?lang=ru");
+    vi.advanceTimersByTime(200);
+
+    // The real queue is an array on window.ym; tag.js replays it in order, so
+    // init has to be ahead of the goal or the goal lands on no counter.
+    const queue = ((window as unknown as { ym?: { a?: unknown[][] } }).ym?.a ?? []) as unknown[][];
+    const actions = queue.map((args) => args[1]);
+    expect(actions).toContain("init");
+    expect(actions).toContain("reachGoal");
+    expect(actions.indexOf("init")).toBeLessThan(actions.indexOf("reachGoal"));
+  });
+
+  it("starts later when a navigation leaves the credential behind, after the wait gave up", async () => {
+    vi.useFakeTimers();
+    setUrl(`/auth/reset-password${AUTH_FRAGMENT}`);
+    vi.resetModules();
+    vi.stubEnv("VITE_METRIKA_COUNTER_ID", COUNTER_ID);
+    const analytics = await import("./analytics");
+
+    analytics.initMetrika();
+    vi.advanceTimersByTime(30_000);
+    expect(ym.mock.calls.filter((call) => call[1] === "init")).toHaveLength(0);
+
+    setUrl("/home");
+    analytics.ensureMetrikaStarted();
+
+    const calls = ym.mock.calls.filter((call) => call[1] === "init");
+    expect(calls).toHaveLength(1);
+    expect((calls[0][2] as { url: string }).url).toBe(`${window.location.origin}/home`);
+  });
+
+  it("ensureMetrikaStarted does not start while the credential is still there", async () => {
+    vi.useFakeTimers();
+    setUrl(`/auth/confirm?token_hash=FAKEQATOKENHASH&type=signup`);
+    vi.resetModules();
+    vi.stubEnv("VITE_METRIKA_COUNTER_ID", COUNTER_ID);
+    const analytics = await import("./analytics");
+
+    analytics.initMetrika();
+    vi.advanceTimersByTime(30_000);
+    analytics.ensureMetrikaStarted();
+
+    expect(ym.mock.calls.filter((call) => call[1] === "init")).toHaveLength(0);
+    expect(document.querySelector(`script[src="${TAG_SRC}"]`)).toBeNull();
+  });
 });
