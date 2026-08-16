@@ -69,6 +69,12 @@ export default defineConfig(({ mode }) => ({
       ),
     },
   },
+  build: {
+    // CI (forgejo-dind) runs the whole job inside a 1.5 GiB cgroup; the
+    // gzip-size pass holds every chunk + gzip buffers at peak RSS and was the
+    // exact point of repeated OOM kills (exit 137). The sizes are cosmetic.
+    reportCompressedSize: false,
+  },
   // NOTE: deliberately NO manualChunks for @sentry. Forcing all
   // node_modules/@sentry into one named chunk promoted it to a STATIC/eager
   // dependency of the entry (a shared binding leaked into the forced chunk),
