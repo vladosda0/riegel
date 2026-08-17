@@ -137,7 +137,13 @@ export type AnalyticsEventName =
   // bridge (feeds the landing_view → registration_start composite funnel).
   | "demo_entered"
   | "demo_exited"
-  | "demo_signup_cta_clicked";
+  | "demo_signup_cta_clicked"
+  // ─── Grounded sidebar opener, phase 0 baseline (2026-08). Fires once per AI
+  // thread, on the message that starts it, carrying whether that message came
+  // from a suggestion chip or was typed. Collected for two weeks BEFORE the
+  // opener ships so its own click-through has a comparison point; see
+  // rovno-docs/specs/rovno-ai-sidebar-opener-prd.md requirement 6.10.
+  | "ai_thread_first_move";
 
 export type AnalyticsEventPayload = Record<string, unknown>;
 

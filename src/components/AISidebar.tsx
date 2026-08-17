@@ -3,6 +3,7 @@ import { flushSync } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { trackEvent } from "@/lib/analytics";
+import { resolveFirstMoveEntry, type ChipSeed } from "@/lib/ai-chip-attribution";
 import { getEventGroupTimestampMs } from "@/lib/event-activity-timestamp";
 import {
   Bot,
@@ -1802,6 +1803,16 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
     if (activeWindow !== "none" || proposalQueue) return;
     const content = (text ?? inputValue).trim();
     if (!content) return;
+    // Read before the append below: this is what makes the send the thread's
+    // first move. `setMessages([])` on "new dialog" resets it, so a second
+    // conversation in the same mount counts again, which is what the baseline
+    // wants to measure.
+    const isThreadFirstMove = messages.length === 0;
+    // Taken together with the composer's contents and dies with them, so the
+    // permission and quota returns below cannot leave it pointing at a chip the
+    // user can no longer see.
+    const chipSeed = chipSeedRef.current;
+    chipSeedRef.current = null;
     setInputValue("");
 
     // Clear photo consult when sending (prompt was used)
@@ -1867,6 +1878,17 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
       prompt_length: content.length,
       has_attachments: !!photoConsult,
     });
+
+    if (isThreadFirstMove) {
+      const attribution = resolveFirstMoveEntry(content, chipSeed);
+      trackEvent("ai_thread_first_move", {
+        project_id: targetProjectId,
+        surface: "ai",
+        entry: attribution.entry,
+        chip_key: attribution.chipKey ?? null,
+        prompt_length: content.length,
+      });
+    }
 
     runAssistantForContent(content, userMsg.id, targetProjectId || undefined, userMsg.mode);
   }
@@ -2178,12 +2200,20 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
     });
   }
 
-  const suggestions = useMemo(() => {
-    const keys = (isProjectContext || (isHomeContext && homeProjectMode !== GENERAL_MODE_VALUE))
+  const suggestionKeys = useMemo(
+    () => ((isProjectContext || (isHomeContext && homeProjectMode !== GENERAL_MODE_VALUE))
       ? PROJECT_SUGGESTION_KEYS
-      : GLOBAL_SUGGESTION_KEYS;
-    return keys.map((k) => t(k));
-  }, [isProjectContext, isHomeContext, homeProjectMode, t]);
+      : GLOBAL_SUGGESTION_KEYS),
+    [isProjectContext, isHomeContext, homeProjectMode],
+  );
+  const suggestions = useMemo(() => suggestionKeys.map((k) => t(k)), [suggestionKeys, t]);
+
+  /**
+   * Which suggestion chip last wrote into the composer, for the phase-0 baseline
+   * (see `ai-chip-attribution.ts`). A ref rather than state: nothing renders from
+   * it.
+   */
+  const chipSeedRef = useRef<ChipSeed | null>(null);
   const panelWidth = collapsed ? COLLAPSED_WIDTH : (isMobile ? "100%" : width);
 
   const appendToInput = (value: string) => {
@@ -2898,7 +2928,12 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
                   </p>
                   <SuggestionChips
                     suggestions={message.liveTextAssistantV1.followUps.map((f) => f.prompt)}
-                    onSelect={(text) => setInputValue(text)}
+                    onSelect={(text) => {
+                      // A model-generated follow-up, not a suggestion chip: it must
+                      // not be attributed to one.
+                      chipSeedRef.current = null;
+                      setInputValue(text);
+                    }}
                     singleLineScrollable
                   />
                 </div>
@@ -3704,7 +3739,11 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
                       <AIQuotaWarning usageType={currentUsageType} />
                       <SuggestionChips
                         suggestions={suggestions}
-                        onSelect={(text) => setInputValue(text)}
+                        onSelect={(text, index) => {
+                          const chipKey = suggestionKeys[index];
+                          chipSeedRef.current = chipKey ? { chipKey, text } : null;
+                          setInputValue(text);
+                        }}
                         singleLineScrollable
                       />
 

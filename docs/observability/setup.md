@@ -120,6 +120,11 @@ Catalog upload: `catalog_tab_visit` → `catalog_template_downloaded` →
 Constructor: `estimate_constructor_opened` → `library_searched` →
 `work_applied_via_constructor`.
 
+AI sidebar baseline: `ai_thread_first_move`, one per started thread, params
+`entry` (`chip` | `manual`), `chip_key`, `project_id`, `prompt_length`. Register
+it BEFORE the collection window opens: goals are not retroactive, so a goal
+created late reports nothing for the days already elapsed.
+
 Notes:
 - Every event carries a `user_id` param for segmentation.
 - Once-only guards: `estimate_saved_first_time` and `first_login` are guarded
