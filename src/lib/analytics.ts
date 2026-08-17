@@ -143,7 +143,13 @@ export type AnalyticsEventName =
   // from a suggestion chip or was typed. Collected for two weeks BEFORE the
   // opener ships so its own click-through has a comparison point; see
   // rovno-docs/specs/rovno-ai-sidebar-opener-prd.md requirement 6.10.
-  | "ai_thread_first_move";
+  | "ai_thread_first_move"
+  // ─── Grounded sidebar opener (2026-08). One per appearance of the block, so
+  // `ai_thread_first_move` divided by this is its click-through. The first-move
+  // event carries the same `opener_shown_id`, which is what links the two; it is
+  // deliberately the SAME event the phase-0 baseline collected, so before and
+  // after are one series rather than two.
+  | "ai_opener_shown";
 
 export type AnalyticsEventPayload = Record<string, unknown>;
 

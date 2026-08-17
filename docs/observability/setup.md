@@ -121,9 +121,16 @@ Constructor: `estimate_constructor_opened` → `library_searched` →
 `work_applied_via_constructor`.
 
 AI sidebar baseline: `ai_thread_first_move`, one per started thread, params
-`entry` (`chip` | `manual`), `chip_key`, `project_id`, `prompt_length`. Register
-it BEFORE the collection window opens: goals are not retroactive, so a goal
-created late reports nothing for the days already elapsed.
+`entry` (`chip` | `manual`), `chip_key`, `project_id`, `prompt_length`, plus
+`opener_shown_id` and `opener_level` once the opener ships (null when the block
+was not on screen). Register it BEFORE the collection window opens: goals are not
+retroactive, so a goal created late reports nothing for the days already elapsed.
+
+AI sidebar opener: `ai_opener_shown`, one per appearance of the block, params
+`opener_shown_id`, `opener_level`, `signals`, `role`, `project_id`. This is the
+DENOMINATOR of the opener's click-through: `ai_thread_first_move` carrying an
+`opener_shown_id` divided by this. Without it registered the numerator has nothing
+to divide by, and the same non-retroactive rule applies.
 
 Notes:
 - Every event carries a `user_id` param for segmentation.

@@ -9,6 +9,8 @@ declare const __APP_RELEASE__: string;
 interface ImportMetaEnv {
   /** Set to `1` or `true` to enable Wave 1 live text assistant (mock client until backend). */
   readonly VITE_AI_LIVE_TEXT_ASSISTANT?: string;
+  /** Set to `0`, `false`, `no` or `off` to disable the grounded AI sidebar opener. */
+  readonly VITE_AI_SIDEBAR_OPENER?: string;
   /** Sentry DSN for error tracking. Empty/unset disables Sentry entirely. */
   readonly VITE_SENTRY_DSN?: string;
   /** Set to `"true"` to show Settings → Интеграции (Telegram linking). Also

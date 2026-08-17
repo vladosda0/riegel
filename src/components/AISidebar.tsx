@@ -4,6 +4,20 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { trackEvent } from "@/lib/analytics";
 import { resolveFirstMoveEntry, type ChipSeed } from "@/lib/ai-chip-attribution";
+import {
+  buildSidebarOpener,
+  isSidebarOpenerKillSwitchEnabled,
+  type OpenerLevel,
+} from "@/lib/ai-sidebar-opener";
+import {
+  localDayKey,
+  readOpenerState,
+  resolveOpenerLevel,
+  withFirstMove,
+  withShown,
+  writeOpenerState,
+} from "@/lib/ai-sidebar-opener-state";
+import { SidebarOpener, SidebarOpenerSkeleton } from "@/components/ai/SidebarOpener";
 import { getEventGroupTimestampMs } from "@/lib/event-activity-timestamp";
 import {
   Bot,
@@ -64,13 +78,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useCurrentUser, useEvents, useProject, useProjects, useTasks, useWorkspaceMode } from "@/hooks/use-mock-data";
-import { useWorkspaceProfilePreferences } from "@/hooks/use-workspace-source";
+import { useWorkspaceProfilePreferences, useWorkspaceProjectState } from "@/hooks/use-workspace-source";
+import { usePlanningProjectTasksState } from "@/hooks/use-planning-source";
 import { supabase } from "@/integrations/supabase/client";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { useEstimateV2FinanceProjectSummaryFromWorkspace } from "@/hooks/use-estimate-v2-data";
 import { useProcurementReadProjectSummary } from "@/hooks/use-procurement-read-model";
 import {
   getProjectDomainAccess,
+  getProjectRole,
   projectDomainAllowsView,
   usePermission,
 } from "@/lib/permissions";
@@ -782,7 +798,11 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
   const { project, members } = useProject(projectId || "");
   const tasks = useTasks(projectId || "");
   const { project: ctxProject, members: ctxMembers, stages: ctxStages } = useProject(resolvedPermissionProjectId);
-  const ctxTasks = useTasks(resolvedPermissionProjectId);
+  // The state variants, not the plain ones: the opener must not read a pending
+  // query as a fact about the project (audit finding 2).
+  const ctxTasksState = usePlanningProjectTasksState(resolvedPermissionProjectId);
+  const ctxTasks = ctxTasksState.tasks;
+  const ctxProjectState = useWorkspaceProjectState(resolvedPermissionProjectId);
   const ctxEventsFull = useEvents(resolvedPermissionProjectId);
   const ctxHrReadsEnabled = resolvedPermissionProjectId
     ? projectDomainAllowsView(getProjectDomainAccess(permResult.seam, "hr"))
@@ -795,6 +815,8 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
   const ctxProcurementSummary = useProcurementReadProjectSummary(resolvedPermissionProjectId);
 
   const [messages, setMessages] = useState<AIMessage[]>([]);
+  /** Which project's transcript restore has finished; `null` before the first one. */
+  const [transcriptSettledFor, setTranscriptSettledFor] = useState<string | null>(null);
   const [workLogs, setWorkLogs] = useState<Map<string, WorkLogEntry>>(new Map());
   const [proposalQueue, setProposalQueue] = useState<ProposalQueueState | null>(null);
   const [inputValue, setInputValue] = useState("");
@@ -1004,9 +1026,13 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
   ]);
 
   useEffect(() => {
-    if (isGuest) return;
+    if (isGuest) {
+      setTranscriptSettledFor(resolvedPermissionProjectId);
+      return;
+    }
     if (!isPersistableAiProjectId(resolvedPermissionProjectId)) {
       setChatArchives([]);
+      setTranscriptSettledFor(resolvedPermissionProjectId);
       return;
     }
     const loaded = loadProjectTranscript(resolvedPermissionProjectId);
@@ -1015,6 +1041,10 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
     }
     setChatArchives(loadProjectChatArchives(resolvedPermissionProjectId));
     setExpandedArchiveChatId(null);
+    // The opener must not treat "no messages yet" as "empty thread" while this
+    // effect is still pending: on a project with a saved transcript both run in
+    // the same commit, and the opener would count a show nobody saw.
+    setTranscriptSettledFor(resolvedPermissionProjectId);
   }, [resolvedPermissionProjectId, isGuest]);
 
   useEffect(() => {
@@ -1887,7 +1917,17 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
         entry: attribution.entry,
         chip_key: attribution.chipKey ?? null,
         prompt_length: content.length,
+        // Null before the opener shipped and whenever it was not on screen, which
+        // is what keeps this one series comparable across the release boundary.
+        opener_shown_id: openerShow?.id ?? null,
+        opener_level: openerShow?.level ?? null,
       });
+      if (openerShow) {
+        // Any first move counts, typed or clicked: the fade measures whether the
+        // block is useless, not whether its chips are (PRD section 5.2).
+        const userId = workspaceProfileId ?? "anonymous";
+        writeOpenerState(userId, withFirstMove(readOpenerState(userId)));
+      }
     }
 
     runAssistantForContent(content, userMsg.id, targetProjectId || undefined, userMsg.mode);
@@ -2262,6 +2302,150 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
     () => selectMessagesForActivityFilter(activityFilter, messages, learnMessages),
     [activityFilter, messages, learnMessages],
   );
+
+  // ── Grounded opener (PRD rovno-ai-sidebar-opener-prd.md) ────────────────────
+  // The same permission-aware pack the send path builds, but at render time: the
+  // opener has to know what it may say before the user has said anything.
+  const openerContext = useMemo(() => {
+    if (!seamForProjectCommit || !ctxProject) return null;
+    return buildAIProjectContext(seamForProjectCommit, {
+      project: {
+        title: ctxProject.title,
+        type: ctxProject.type,
+        progress_pct: ctxProject.progress_pct,
+      },
+      stages: ctxStages,
+      tasks: ctxTasks,
+      financeSummary: ctxFinanceSummary,
+      procurementSummary: ctxProcurementSummary,
+      events: ctxEventsFull.slice(0, 5),
+      memberCount: ctxMembers.length,
+    });
+  }, [
+    seamForProjectCommit,
+    ctxProject,
+    ctxStages,
+    ctxTasks,
+    ctxFinanceSummary,
+    ctxProcurementSummary,
+    ctxEventsFull,
+    ctxMembers,
+  ]);
+
+  const openerQuotaExhausted = useMemo(() => {
+    if (!tierQuota) return false;
+    const { used, limit } = selectAiUsage(tierQuota, currentUsageType);
+    return limit > 0 && used >= limit;
+  }, [tierQuota, currentUsageType]);
+
+  /**
+   * Eligibility is about the CONVERSATION being empty, not about the filtered view
+   * being empty. `activeThreadMessages` is the activity filter's subset, so keying
+   * on it made the block appear over a thread that already had messages, and the
+   * first move there could never be counted (audit finding 5).
+   */
+  const openerEligible =
+    !isSidebarOpenerKillSwitchEnabled() &&
+    isProjectContext &&
+    activeWindow === "none" &&
+    !proposalQueue &&
+    !photoConsult &&
+    messages.length === 0;
+
+  /**
+   * One entry per appearance, carrying the project it belongs to: the level cannot
+   * change under the user mid-read, `ai_opener_shown` cannot fire twice for one
+   * appearance, and switching to another empty project mints a new one instead of
+   * reusing the previous project's id (audit finding 6).
+   */
+  const [openerShow, setOpenerShow] = useState<{ id: string; level: OpenerLevel; projectId: string } | null>(null);
+
+  /**
+   * True only while something is genuinely in flight. The skeleton is tied to THIS,
+   * not to the absence of a result: a project that never resolves (archived, access
+   * removed, RLS-denied, a stale id) is not loading, and holding a pulsing
+   * placeholder there forever would take away the suggestion row the user had
+   * before this feature existed.
+   */
+  const openerDataLoading =
+    openerEligible &&
+    (transcriptSettledFor !== resolvedPermissionProjectId ||
+      permResult.isLoading ||
+      ctxProjectState.isLoading ||
+      ctxTasksState.isLoading);
+
+  /**
+   * Nothing is asserted, recorded or reported until the data behind the signals has
+   * loaded. Only the task counts are gated because only task signals ship in v1
+   * (`V1_ENABLED_DOMAINS`); the estimate and procurement sources cannot yet say
+   * whether they have loaded, which is why their signals are out.
+   */
+  const openerReady = openerEligible && !openerDataLoading && openerContext !== null;
+
+  /**
+   * The show is minted in an effect, so the block is one commit behind the data.
+   * Without covering that gap the legacy chip row is committed for a frame between
+   * the skeleton and the block. Deliberately NOT part of `openerReady`: the mint
+   * depends on that, and folding this in would make it wait on itself.
+   */
+  const openerSkeleton = openerDataLoading || (openerReady && !openerShow);
+
+
+  useEffect(() => {
+    if (!openerReady) {
+      setOpenerShow((prev) => (prev ? null : prev));
+      return;
+    }
+    if (openerShow?.projectId === resolvedPermissionProjectId) return;
+    const userId = workspaceProfileId ?? "anonymous";
+    const stored = readOpenerState(userId);
+    // Level is read BEFORE this show is recorded, so the very first appearance is
+    // still L0 rather than being aged by itself.
+    setOpenerShow({
+      id: `opener-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      level: resolveOpenerLevel(stored),
+      projectId: resolvedPermissionProjectId,
+    });
+    writeOpenerState(userId, withShown(stored, localDayKey(new Date())));
+  }, [openerReady, openerShow, resolvedPermissionProjectId, workspaceProfileId]);
+
+  /**
+   * From the seam rather than from `ctx.user.role`, which is typed as a plain
+   * string: the role decides which signals may exist at all, so it should not
+   * reach the catalogue through a cast.
+   */
+  const openerRole = useMemo(
+    () => (seamForProjectCommit ? getProjectRole(seamForProjectCommit) : "viewer"),
+    [seamForProjectCommit],
+  );
+
+  const opener = useMemo(() => {
+    if (!openerShow) return null;
+    return buildSidebarOpener({
+      ctx: openerContext,
+      role: openerRole,
+      level: openerShow.level,
+      compact: isMobile,
+      quotaExhausted: openerQuotaExhausted,
+      t,
+    });
+  }, [openerShow, openerContext, openerRole, isMobile, openerQuotaExhausted, t]);
+
+  const openerReportedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!openerShow || !opener) return;
+    if (openerReportedRef.current === openerShow.id) return;
+    openerReportedRef.current = openerShow.id;
+    trackEvent("ai_opener_shown", {
+      project_id: resolvedPermissionProjectId,
+      surface: "ai",
+      opener_shown_id: openerShow.id,
+      opener_level: openerShow.level,
+      signals: opener.signals.join(","),
+      role: openerRole,
+    });
+  }, [openerShow, opener, openerRole, resolvedPermissionProjectId]);
+  // ────────────────────────────────────────────────────────────────────────────
 
   const streamRows = useMemo<StreamRow[]>(() => {
     const visibleEventIds = new Set(chronologicalFilteredEvents.map((event) => event.id));
@@ -3737,15 +3921,30 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
                   {!isInputLocked && (
                     <>
                       <AIQuotaWarning usageType={currentUsageType} />
-                      <SuggestionChips
-                        suggestions={suggestions}
-                        onSelect={(text, index) => {
-                          const chipKey = suggestionKeys[index];
-                          chipSeedRef.current = chipKey ? { chipKey, text } : null;
-                          setInputValue(text);
-                        }}
-                        singleLineScrollable
-                      />
+                      {/* Requirement 6.7: two competing groups of suggestions on one
+                          screen is worse than either, so only one of these renders. */}
+                      {openerSkeleton ? (
+                        <SidebarOpenerSkeleton />
+                      ) : openerReady && opener ? (
+                        <SidebarOpener
+                          opener={opener}
+                          chipsDisabled={openerQuotaExhausted}
+                          onSelect={(text, chipKey) => {
+                            chipSeedRef.current = { chipKey, text };
+                            setInputValue(text);
+                          }}
+                        />
+                      ) : (
+                        <SuggestionChips
+                          suggestions={suggestions}
+                          onSelect={(text, index) => {
+                            const chipKey = suggestionKeys[index];
+                            chipSeedRef.current = chipKey ? { chipKey, text } : null;
+                            setInputValue(text);
+                          }}
+                          singleLineScrollable
+                        />
+                      )}
 
                       <AIQuotaGate usageType={currentUsageType}>
                       <div
