@@ -109,9 +109,24 @@ export async function updateBlogPost(id: string, patch: BlogPostPatch): Promise<
   return data as BlogPost;
 }
 
-export async function deleteBlogPost(id: string): Promise<void> {
-  const { error } = await rawSupabase.from("blog_posts").delete().eq("id", id);
+/** Deletes the post and returns the rows the server actually removed, so the
+ * caller can tell from server truth (not from a cached list row) whether it had
+ * ever been published and therefore left static artefacts behind. Empty when the
+ * DELETE affected no rows: the post was already gone, or RLS refused the delete.
+ * PostgREST answers that case 200/no-rows, not an error, so an empty list is a
+ * normal result and not a failure the caller can distinguish from a race. */
+export async function deleteBlogPost(id: string): Promise<DeletedBlogPost[]> {
+  const { data, error } = await rawSupabase
+    .from("blog_posts")
+    .delete()
+    .eq("id", id)
+    .select("published_at");
   if (error) throw error;
+  return (data ?? []) as DeletedBlogPost[];
+}
+
+export interface DeletedBlogPost {
+  published_at: string | null;
 }
 
 export type RebuildResult =

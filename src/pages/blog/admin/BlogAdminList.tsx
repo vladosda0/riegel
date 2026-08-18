@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ExternalLink, Loader2, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { triggerFrontendRebuild } from "@/lib/blog/api";
+import { needsRebuildAfterDelete, rebuildAfterTakedown } from "@/lib/blog/rebuild-toast";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -82,7 +83,17 @@ function PostRow({ post }: { post: BlogPostWithAuthor }) {
               <AlertDialogAction
                 onClick={() =>
                   deleteMutation.mutate(post.id, {
-                    onSuccess: () => toast({ title: "Статья удалена" }),
+                    onSuccess: (deleted) => {
+                      // A post that was never published has no static page, sitemap
+                      // entry or RSS item to clear, so it needs no rebuild. The rows
+                      // the delete returned decide that, not this list's copy of
+                      // them, which another tab can have published since.
+                      if (!needsRebuildAfterDelete(deleted)) {
+                        toast({ title: "Статья удалена" });
+                        return;
+                      }
+                      void rebuildAfterTakedown("delete", toast);
+                    },
                     onError: (error) =>
                       toast({
                         title: "Не удалось удалить",

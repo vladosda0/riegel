@@ -33,6 +33,7 @@ import {
   useBlogPostById, useCreateBlogPost, useDeleteBlogPost, useMyBlogAuthor, useUpdateBlogPost,
 } from "@/hooks/use-blog";
 import { triggerFrontendRebuild, uploadBlogImage } from "@/lib/blog/api";
+import { needsRebuildAfterDelete, rebuildAfterTakedown } from "@/lib/blog/rebuild-toast";
 import { slugifyTitle, validateSlug, type SlugIssue } from "@/lib/blog/slug";
 import { countWords, formatReadingTime, readingTimeMinutes } from "@/lib/blog/reading-time";
 import { blogPostPath } from "@/lib/blog/jsonld";
@@ -463,27 +464,7 @@ export default function BlogEditorPage() {
       // the result: the article's static page, its sitemap entry and its RSS item
       // stay crawler-visible until a build runs, and the admin would show only the
       // reassuring "снята с публикации".
-      void triggerFrontendRebuild().then((rebuild) => {
-        if (rebuild.ok) {
-          toast({ title: "Статья снята с публикации", description: "Пересборка запущена." });
-        } else if (rebuild.notConfigured) {
-          toast({
-            title: "Статья снята с публикации",
-            description: "Автопересборка не настроена: страница исчезнет из поиска после следующего деплоя.",
-          });
-        } else if (rebuild.inProgress) {
-          toast({
-            title: "Статья снята с публикации",
-            description: "Пересборка уже идёт. Нажмите «Обновить сайт» после её завершения.",
-          });
-        } else {
-          toast({
-            title: "Снята с публикации, но страница ещё в поиске",
-            description: "Пересборка не запустилась. Повторите кнопкой «Обновить сайт».",
-            variant: "destructive",
-          });
-        }
-      });
+      void rebuildAfterTakedown("unpublish", toast);
     } catch (error) {
       toast({
         title: "Не удалось снять с публикации",
@@ -594,10 +575,25 @@ export default function BlogEditorPage() {
                       onClick={() => {
                         if (!postIdRef.current) return;
                         deleteMutation.mutate(postIdRef.current, {
-                          onSuccess: () => {
+                          onSuccess: (deleted) => {
                             dirtyRef.current = false;
+                            // Same rule as unpublish above, and the same exception as
+                            // the list: only a post that has ever been published left
+                            // anything on the site to clear, decided from the rows the
+                            // delete returned rather than from this form.
+                            if (needsRebuildAfterDelete(deleted)) {
+                              void rebuildAfterTakedown("delete", toast);
+                            } else {
+                              toast({ title: "Статья удалена" });
+                            }
                             navigate("/blog/admin");
                           },
+                          onError: (error) =>
+                            toast({
+                              title: "Не удалось удалить",
+                              description: error instanceof Error ? error.message : String(error),
+                              variant: "destructive",
+                            }),
                         });
                       }}
                     >
