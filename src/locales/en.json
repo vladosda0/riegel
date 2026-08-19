@@ -150,6 +150,8 @@
   "onboarding.estimate.removeStage": "Remove stage",
   "onboarding.estimate.skip": "Skip",
   "onboarding.estimate.creating": "Creating…",
+  "onboarding.estimate.saveFailedToast": "Failed to save stages",
+  "onboarding.estimate.saveFailedDescription": "The project was created. Check its stages in the Estimate tab and add the missing ones.",
   "onboarding.done.title": "You're all set!",
   "onboarding.done.subtitle": "You can create a project anytime from the home screen",
   "onboarding.done.goToApp": "Go to app",

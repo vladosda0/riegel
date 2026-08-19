@@ -702,11 +702,15 @@ export function removeProjectInvite(id: string, mode?: BrowserWorkspaceKind) {
   }, mode);
 }
 
+// Onboarding creates several stages in one loop, so Date.now() repeats across them and
+// every event would share an id; ProjectActivity keys the feed on it.
+let stageEventSeq = 0;
+
 export function addStage(stage: Stage) {
   updateWorkspaceState((state) => {
     state.stages = [...state.stages, stage];
     addEventToState(state, {
-      id: `evt-auto-${Date.now()}`,
+      id: `evt-auto-${Date.now()}-${(stageEventSeq += 1)}`,
       project_id: stage.project_id,
       actor_id: state.user.id,
       type: "stage_created",

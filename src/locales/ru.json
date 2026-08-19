@@ -150,6 +150,8 @@
   "onboarding.estimate.removeStage": "Удалить этап",
   "onboarding.estimate.skip": "Пропустить",
   "onboarding.estimate.creating": "Создаём…",
+  "onboarding.estimate.saveFailedToast": "Не удалось сохранить этапы",
+  "onboarding.estimate.saveFailedDescription": "Проект создан. Проверьте этапы во вкладке «Смета» и добавьте недостающие.",
   "onboarding.done.title": "Всё готово!",
   "onboarding.done.subtitle": "Вы можете создать проект в любой момент из главного экрана",
   "onboarding.done.goToApp": "Перейти в приложение",

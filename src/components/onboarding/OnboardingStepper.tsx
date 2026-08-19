@@ -15,6 +15,7 @@ import { useCreateOrganization, useSetActiveOrg } from "@/hooks/use-orgs";
 import { suggestOrgSlug } from "@/data/org-source";
 import { toast } from "@/hooks/use-toast";
 import { trackEvent } from "@/lib/analytics";
+import { captureException } from "@/lib/observability/sentry";
 import { type AppLanguage, getActiveLanguage, setAppLanguage } from "@/i18n";
 
 const MAX_ONBOARDING_STAGES = 5;
@@ -184,6 +185,21 @@ export function OnboardingStepper({ onComplete, onProjectCreated }: OnboardingSt
     }
   }
 
+  // Persist the stages before advancing, but never block onboarding on it, the same way
+  // handleContinueFromPreferences treats the units choice. Onboarding.tsx renders no
+  // navigation, so a write that keeps failing would otherwise leave the user with no way
+  // off this screen. Stages are editable later in the Estimate tab.
+  function reportStagesNotSaved(error: unknown) {
+    // Swallowing the failure is the point of the fix, so report it or the write that
+    // moved the user on has no trace at all (same reason as use-apply-template-stages).
+    captureException(error, { tags: { source: "onboarding", step: "stages" } });
+    toast({
+      title: t("onboarding.estimate.saveFailedToast"),
+      description: t("onboarding.estimate.saveFailedDescription"),
+      variant: "destructive",
+    });
+  }
+
   async function handleSaveStages() {
     if (!createdProjectId || savingStages) return;
     setSavingStages(true);
@@ -193,15 +209,13 @@ export function OnboardingStepper({ onComplete, onProjectCreated }: OnboardingSt
         return trimmed || t("onboarding.estimate.defaultStageLabel", { n: i + 1 });
       });
       await persistProjectStages(resolvedTitles);
-      finishOrAdvanceToOrgStep();
     } catch (error) {
-      toast({
-        title: t("projectsTab.projectCreationFailed"),
-        description: error instanceof Error ? error.message : t("projectsTab.projectCreationFailedGeneric"),
-        variant: "destructive",
-      });
+      reportStagesNotSaved(error);
     } finally {
       setSavingStages(false);
+      // In `finally`, not after the block: nothing in this handler may leave the user
+      // on a screen that has no other way off.
+      finishOrAdvanceToOrgStep();
     }
   }
 
@@ -210,15 +224,13 @@ export function OnboardingStepper({ onComplete, onProjectCreated }: OnboardingSt
     setSavingStages(true);
     try {
       await persistProjectStages([t("projectsTab.stage1")]);
-      finishOrAdvanceToOrgStep();
     } catch (error) {
-      toast({
-        title: t("projectsTab.projectCreationFailed"),
-        description: error instanceof Error ? error.message : t("projectsTab.projectCreationFailedGeneric"),
-        variant: "destructive",
-      });
+      reportStagesNotSaved(error);
     } finally {
       setSavingStages(false);
+      // In `finally`, not after the block: nothing in this handler may leave the user
+      // on a screen that has no other way off.
+      finishOrAdvanceToOrgStep();
     }
   }
 
@@ -489,7 +501,7 @@ export function OnboardingStepper({ onComplete, onProjectCreated }: OnboardingSt
         </div>
       )}
 
-      {step === 4 && showOrgStep && (
+      {step === 4 && (
         <div className="glass-elevated rounded-panel p-sp-4 space-y-sp-3">
           <div className="text-center space-y-sp-1">
             <Building2 className="mx-auto h-7 w-7 text-accent" />

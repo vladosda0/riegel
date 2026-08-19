@@ -318,6 +318,10 @@ export function getPrimaryEstimateTaskAssigneeId(
   return assignees.find((assignee) => Boolean(assignee.id))?.id ?? null;
 }
 
+// The onboarding stages step creates several stages back to back in one loop, and
+// Date.now() alone repeats across those iterations, so every row would share one id.
+let browserStageSeq = 0;
+
 function createBrowserPlanningSource(mode: "demo" | "local"): PlanningSource {
   return {
     mode,
@@ -330,7 +334,7 @@ function createBrowserPlanningSource(mode: "demo" | "local"): PlanningSource {
 
     async createProjectStage(input: CreateProjectStageInput) {
       const stage: Stage = {
-        id: `stage-${Date.now()}`,
+        id: `stage-${Date.now()}-${(browserStageSeq += 1)}`,
         project_id: input.projectId,
         title: input.title,
         description: input.description ?? "",
