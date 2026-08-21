@@ -13,8 +13,8 @@ import {
 import { EmptyState } from "@/components/EmptyState";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
-import { addEvent } from "@/data/store";
 import { useEstimateV2Share } from "@/hooks/use-estimate-v2-data";
+import { useRuntimeAuth } from "@/hooks/use-runtime-auth";
 import {
   approveVersion,
   findVersionByShareId,
@@ -25,7 +25,6 @@ import { computeLineTotals, computeProjectTotals } from "@/lib/estimate-v2/prici
 import { ApprovalStampCard } from "@/components/estimate-v2/ApprovalStampCard";
 import { ApprovalStampFormModal } from "@/components/estimate-v2/ApprovalStampFormModal";
 import type { ApprovalStamp } from "@/types/estimate-v2";
-import { isAuthenticated } from "@/lib/auth-state";
 import { SHOW_ESTIMATE_VERSION_UI } from "@/lib/estimate-v2/show-estimate-version-ui";
 import { useTranslation } from "react-i18next";
 
@@ -49,6 +48,7 @@ export default function ShareEstimate() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { shared, status: shareStatus } = useEstimateV2Share(shareId);
+  const { status: authStatus } = useRuntimeAuth();
 
   const [approvalModalOpen, setApprovalModalOpen] = useState(false);
 
@@ -139,10 +139,13 @@ export default function ShareEstimate() {
     && version.submitted
     && !version.archived
     && !version.approvalStamp;
-  const isGuest = !isAuthenticated();
+  // The `registered` share policy is decided by the real Supabase session, not
+  // by `isAuthenticated()`: that reads the role-simulation key in localStorage,
+  // which a first-time visitor has never set, and getAuthRole() then defaults
+  // to "owner" (src/lib/auth-state.ts).
   const approvalBlockedByPolicy = version?.shareApprovalPolicy === "disabled";
-  const canApprove = Boolean(approvalEligible && !isGuest && !approvalBlockedByPolicy);
-  const requiresRegistrationToApprove = Boolean(approvalEligible && isGuest && !approvalBlockedByPolicy);
+  const canApprove = Boolean(approvalEligible && authStatus === "authenticated" && !approvalBlockedByPolicy);
+  const requiresRegistrationToApprove = Boolean(approvalEligible && authStatus === "guest" && !approvalBlockedByPolicy);
 
   if (shareStatus === "loading") {
     return (
@@ -198,22 +201,7 @@ export default function ShareEstimate() {
   };
 
   const handleRegisterToApprove = () => {
-    navigate("/auth/signup");
-  };
-
-  const handleAskQuestion = () => {
-    addEvent({
-      id: `evt-share-estimate-question-${Date.now()}`,
-      project_id: projectId,
-      actor_id: "client",
-      type: "comment_added",
-      object_type: "estimate_version",
-      object_id: version.id,
-      timestamp: new Date().toISOString(),
-      payload: { text: t("share.estimate.questionEventText") },
-    });
-
-    toast({ title: t("share.estimate.toast.questionSent") });
+    navigate(`/auth/signup?next=${encodeURIComponent(`/share/estimate/${shareId}`)}`);
   };
 
   return (
@@ -312,7 +300,9 @@ export default function ShareEstimate() {
           {requiresRegistrationToApprove && (
             <Button onClick={handleRegisterToApprove}>{t("share.estimate.registerButton")}</Button>
           )}
-          <Button variant="outline" onClick={handleAskQuestion}>{t("share.estimate.askQuestions")}</Button>
+          {/* Disabled until a question has somewhere to go: the real channel is
+              the project-events-notifications epic (#22). */}
+          <Button variant="outline" disabled>{t("share.estimate.askQuestionsSoon")}</Button>
         </div>
       </div>
 

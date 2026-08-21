@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ShareEstimate from "@/pages/share/ShareEstimate";
 import {
@@ -11,8 +11,15 @@ import {
   updateEstimateV2Project,
 } from "@/data/estimate-v2-store";
 import { clearDemoSession, enterDemoSession, setAuthRole } from "@/lib/auth-state";
+import { __unsafeResetRuntimeAuthForTests } from "@/hooks/use-runtime-auth";
+import { authenticateRuntimeAuth, guestRuntimeAuth } from "@/test/runtime-auth";
 
 let shareScenarioCounter = 0;
+
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location">{`${location.pathname}${location.search}`}</div>;
+}
 
 function renderSharePage(shareId: string) {
   // ShareEstimate now consumes React Query (useEstimateV2Share + manual
@@ -26,6 +33,7 @@ function renderSharePage(shareId: string) {
       <MemoryRouter initialEntries={[`/share/estimate/${shareId}`]}>
         <Routes>
           <Route path="/share/estimate/:shareId" element={<ShareEstimate />} />
+          <Route path="*" element={<LocationProbe />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -84,12 +92,36 @@ beforeEach(() => {
   clearDemoSession();
   enterDemoSession("project-1");
   setAuthRole("owner");
+  guestRuntimeAuth();
 });
 
 describe("ShareEstimate approval access", () => {
   afterEach(() => {
     clearDemoSession();
     setAuthRole("owner");
+    __unsafeResetRuntimeAuthForTests();
+  });
+
+  it("follows the real session over a conflicting simulated role", () => {
+    const { shareId } = createSubmittedShareVersion();
+    // The simulated role says "owner" (beforeEach) while the real session says
+    // guest. The page must follow the session.
+
+    renderSharePage(shareId);
+
+    expect(screen.getByRole("button", { name: "Register to approve" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+  });
+
+  it("sends the guest to signup with the share link as the return path", () => {
+    const { shareId } = createSubmittedShareVersion();
+
+    renderSharePage(shareId);
+    fireEvent.click(screen.getByRole("button", { name: "Register to approve" }));
+
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      `/auth/signup?next=${encodeURIComponent(`/share/estimate/${shareId}`)}`,
+    );
   });
 
   it("shows register prompt for guests while keeping preview visible", () => {
@@ -106,6 +138,7 @@ describe("ShareEstimate approval access", () => {
   it("allows registered users to approve when policy is registered", () => {
     const { shareId } = createSubmittedShareVersion("contractor");
     setAuthRole("owner");
+    authenticateRuntimeAuth();
 
     renderSharePage(shareId);
 
@@ -118,6 +151,7 @@ describe("ShareEstimate approval access", () => {
       shareApprovalDisabledReason: "no_participant_slot",
     });
     setAuthRole("owner");
+    authenticateRuntimeAuth();
 
     renderSharePage(shareId);
 
@@ -125,6 +159,17 @@ describe("ShareEstimate approval access", () => {
       screen.getByText("Approval is unavailable until project owner upgrades plan and adds client as participant."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+  });
+
+  it("offers the question button as disabled, because nothing carries the question yet", () => {
+    const { shareId } = createSubmittedShareVersion();
+    authenticateRuntimeAuth();
+
+    renderSharePage(shareId);
+
+    const button = screen.getByRole("button", { name: "Ask questions (coming soon)" });
+    expect(button).toBeInTheDocument();
+    expect(button).toBeDisabled();
   });
 
   it("uses contractor project mode for shared estimate pricing", () => {
