@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import InviteAccept from "@/pages/invite/InviteAccept";
 
@@ -98,5 +98,71 @@ describe("InviteAccept", () => {
     renderInvitePage();
 
     expect(await screen.findByText("This invite was sent to a different email address.")).toBeInTheDocument();
+  });
+
+  it("retries acceptance when the user clicks try again", async () => {
+    useRuntimeAuthMock.mockReturnValue({
+      status: "authenticated",
+      session: null,
+      user: { id: "profile-1" },
+      profileId: "profile-1",
+    });
+    acceptProjectInviteMock.mockResolvedValue({
+      ok: false,
+      error: {
+        code: "unknown",
+        message: "Failed to fetch",
+        rawError: null,
+      },
+    });
+
+    renderInvitePage();
+
+    expect(await screen.findByText("Unable to accept invite.")).toBeInTheDocument();
+    expect(acceptProjectInviteMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
+
+    await waitFor(() => {
+      expect(acceptProjectInviteMock).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByText("Unable to accept invite.")).toBeInTheDocument();
+  });
+
+  it("completes acceptance when the retried attempt succeeds", async () => {
+    useRuntimeAuthMock.mockReturnValue({
+      status: "authenticated",
+      session: null,
+      user: { id: "profile-1" },
+      profileId: "profile-1",
+    });
+    acceptProjectInviteMock
+      .mockResolvedValueOnce({
+        ok: false,
+        error: {
+          code: "unknown",
+          message: "Failed to fetch",
+          rawError: null,
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        invite: {
+          id: "invite-1",
+          project_id: "project-1",
+          invite_token: "token-123",
+        },
+      });
+
+    renderInvitePage();
+
+    expect(await screen.findByText("Unable to accept invite.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
+
+    expect(await screen.findByText(/Invitation accepted successfully/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("Project dashboard")).toBeInTheDocument();
+    }, { timeout: 3000 });
   });
 });

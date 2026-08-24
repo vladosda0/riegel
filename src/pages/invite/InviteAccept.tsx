@@ -19,6 +19,7 @@ export default function InviteAccept() {
   const runtimeAuth = useRuntimeAuth();
   const navigate = useNavigate();
   const [acceptState, setAcceptState] = useState<AcceptState>({ status: "idle" });
+  const [attempt, setAttempt] = useState(0);
 
   const nextUrl = useMemo(
     () => `/invite/accept/${encodeURIComponent(inviteToken)}`,
@@ -50,7 +51,7 @@ export default function InviteAccept() {
     return () => {
       cancelled = true;
     };
-  }, [inviteToken, runtimeAuth.status]);
+  }, [attempt, inviteToken, runtimeAuth.status]);
 
   useEffect(() => {
     if (acceptState.status !== "accepted") {
@@ -156,7 +157,7 @@ export default function InviteAccept() {
                 <Button variant="outline" asChild>
                   <Link to="/home">{t("invite.goHome")}</Link>
                 </Button>
-                <Button variant="ghost" onClick={() => setAcceptState({ status: "idle" })}>
+                <Button variant="ghost" onClick={() => setAttempt((value) => value + 1)}>
                   {t("invite.tryAgain")}
                 </Button>
               </div>
