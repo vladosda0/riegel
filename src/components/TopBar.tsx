@@ -21,6 +21,7 @@ import {
 import { ProjectTabs } from "@/components/ProjectTabs";
 import { HomeTabs } from "@/components/HomeTabs";
 import { MobileNavSheet } from "@/components/MobileNavSheet";
+import { clearWorkspaceUserCache } from "@/data/workspace-profile-cache";
 import { AuthSimulator } from "@/components/settings/AuthSimulator";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
@@ -234,6 +235,7 @@ export function TopBar({ aiSidebarCollapsed, onToggleAiSidebar, onSetAiSidebarOp
       // cannot read the previous user's private data (e.g. personal catalogs)
       // from React Query's cache before it refetches. Keys are not user-scoped.
       queryClient.clear();
+      clearWorkspaceUserCache();
       setAuthRole("guest");
       toast({ title: t("nav.loggedOutToast") });
       navigate("/");

@@ -40,7 +40,6 @@ const ProjectProcurement = lazy(() => import("@/pages/project/ProjectProcurement
 const ProjectHR = lazy(() => import("@/pages/project/ProjectHR"));
 const ProjectGallery = lazy(() => import("@/pages/project/ProjectGallery"));
 const ProjectDocuments = lazy(() => import("@/pages/project/ProjectDocuments"));
-const ProjectActivity = lazy(() => import("@/pages/project/ProjectActivity"));
 const ProjectParticipants = lazy(() => import("@/pages/project/ProjectParticipants"));
 const ShareEstimate = lazy(() => import("@/pages/share/ShareEstimate"));
 const InviteAccept = lazy(() => import("@/pages/invite/InviteAccept"));
@@ -147,7 +146,6 @@ const App = () => (
               <Route path="hr" element={routeElement(<ProjectHR />)} />
               <Route path="gallery" element={routeElement(<ProjectGallery />)} />
               <Route path="documents" element={routeElement(<ProjectDocuments />)} />
-              <Route path="activity" element={routeElement(<ProjectActivity />)} />
               <Route path="participants" element={routeElement(<ProjectParticipants />)} />
             </Route>
           </Route>

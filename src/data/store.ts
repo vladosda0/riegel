@@ -703,7 +703,7 @@ export function removeProjectInvite(id: string, mode?: BrowserWorkspaceKind) {
 }
 
 // Onboarding creates several stages in one loop, so Date.now() repeats across them and
-// every event would share an id; ProjectActivity keys the feed on it.
+// every event would share an id; the feed is keyed on it.
 let stageEventSeq = 0;
 
 export function addStage(stage: Stage) {

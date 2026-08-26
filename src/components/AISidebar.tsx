@@ -700,7 +700,8 @@ function buildProposalSummaryLines(childEvents: Event[], t: Translator): string[
 
   childEvents.forEach((event) => {
     if (event.type === "task_created") taskCount += 1;
-    if (event.type === "document_created" || event.type === "document_uploaded") documentCount += 1;
+    if (event.type === "document_created" || event.type === "document.created"
+      || event.type === "document_uploaded") documentCount += 1;
     if (event.type === "procurement_created") procurementCount += 1;
     if (event.type === "estimate_created" || event.type === "estimate_approved") hasEstimateUpdate = true;
   });

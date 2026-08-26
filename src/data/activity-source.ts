@@ -1,7 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import * as store from "@/data/store";
 import { resolvePayloadPreferredIsoTimestamp } from "@/lib/event-activity-timestamp";
-import { resolveWorkspaceMode, type WorkspaceMode } from "@/data/workspace-source";
+import { mapProfileRowToUser, resolveWorkspaceMode, type WorkspaceMode } from "@/data/workspace-source";
+import {
+  cacheWorkspaceUsers,
+  currentWorkspaceUserEpoch,
+  getCachedWorkspaceUser,
+  isKnownMissingWorkspaceUser,
+  markWorkspaceUsersMissing,
+} from "@/data/workspace-profile-cache";
 import type { Event, Notification } from "@/types/entities";
 import type { Database as ActivityDatabase, Json } from "../../backend-truth/generated/supabase-types";
 
@@ -411,6 +418,88 @@ export async function insertHeroTransitionEvent(
   }
 }
 
+/**
+ * The feed renders the actor by name through the workspace profile cache, and
+ * that cache is filled only by screens that list members. A user who opens the
+ * sidebar without having visited participants therefore saw the system fallback
+ * where a person's name belongs, so the feed fills the cache for its own rows.
+ *
+ * profiles_select only exposes a project's owner to its members and a project's
+ * members to its owner, so a member acting on another member still resolves to
+ * the fallback; that gap is not created here and is tracked separately.
+ */
+async function cacheActorProfiles(
+  supabase: TypedSupabaseClient,
+  events: Event[],
+): Promise<void> {
+  const ids = Array.from(
+    new Set(events.map((event) => event.actor_id).filter((id): id is string => Boolean(id))),
+  ).filter((id) => !getCachedWorkspaceUser(id) && !isKnownMissingWorkspaceUser(id));
+
+  if (ids.length === 0) return;
+
+  // Keyed per id, not per id list: Home fans out one feed per project, and those
+  // feeds want overlapping-but-different actor sets, so a key built from the
+  // whole list would only ever dedup the case where two projects happen to have
+  // identical actors.
+  await Promise.all(ids.map((id) => lookupActor(supabase, id)));
+}
+
+function lookupActor(supabase: TypedSupabaseClient, id: string): Promise<void> {
+  const existing = actorLookupsInFlight.get(id);
+  if (existing) return existing;
+
+  // The entry is registered BEFORE the request can run. Building the promise
+  // first and registering it afterwards leaves a window where a synchronous
+  // throw from the query builder reaches the `finally` before the `set`, which
+  // then strands a settled promise under the key and disables the lookup for
+  // the rest of the tab's life.
+  // Captured here, synchronously, rather than inside the promise: the identity
+  // can change between deciding to fetch and the fetch starting, and this has
+  // to record the account the request BELONGS to.
+  const epoch = currentWorkspaceUserEpoch();
+
+  const lookup = Promise.resolve().then(async () => {
+    // Anything that goes wrong here costs the actor's name and nothing else, so
+    // it is swallowed rather than surfaced: a feed that fails to load is a worse
+    // outcome than a feed whose rows say "Система".
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, email, full_name, avatar_url, locale, timezone, plan, credits_free, credits_paid")
+        .in("id", [id]);
+
+      if (error || !data) return;
+      // The identity changed while this was in the air, so the answer belongs
+      // to an account that is no longer signed in.
+      if (epoch !== currentWorkspaceUserEpoch()) return;
+
+      if (data.length === 0) {
+        markWorkspaceUsersMissing([id]);
+        return;
+      }
+
+      cacheWorkspaceUsers(data.map(mapProfileRowToUser));
+    } catch {
+      return;
+    }
+  });
+
+  const tracked = lookup.finally(() => {
+    actorLookupsInFlight.delete(id);
+  });
+
+  actorLookupsInFlight.set(id, tracked);
+  return tracked;
+}
+
+const actorLookupsInFlight = new Map<string, Promise<void>>();
+
+/** Module state shared by every test in the process. */
+export function __unsafeResetActorLookupsForTests(): void {
+  actorLookupsInFlight.clear();
+}
+
 function createSupabaseActivitySource(
   supabase: TypedSupabaseClient,
   profileId: string,
@@ -438,7 +527,9 @@ function createSupabaseActivitySource(
         throw error;
       }
 
-      return (data ?? []).map(mapActivityEventRowToEvent);
+      const events = (data ?? []).map(mapActivityEventRowToEvent);
+      await cacheActorProfiles(supabase, events);
+      return events;
     },
     async getCurrentUserNotifications() {
       const { data, error } = await supabase

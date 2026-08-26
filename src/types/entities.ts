@@ -24,47 +24,51 @@ export type ChecklistItemType = "subtask" | "material" | "tool";
 export type DocMediaVisibilityClass = "shared_project" | "internal";
 export type DocumentVersionStatus = "draft" | "active" | "archived" | "awaiting_approval";
 
-export type EventType =
-  | "task_created"
-  | "task_updated"
-  | "task_completed"
-  | "task_moved"
-  | "estimate_created"
-  | "estimate_approved"
-  | "estimate_archived"
-  | "estimate_deleted"
-  | "estimate_paid_updated"
-  | "estimate.version_submitted"
-  | "estimate.version_approved"
-  | "estimate.status_changed"
-  | "estimate.tax_changed"
-  | "estimate.discount_changed"
-  | "estimate.dependency_added"
-  | "estimate.dependency_removed"
-  | "estimate.viewer_regime_set"
-  | "estimate.project_mode_set"
-  | "procurement_created"
-  | "procurement_updated"
-  | "procurement_deleted"
-  | "document_created"
-  | "document_version_created"
-  | "document_archived"
-  | "document_deleted"
-  | "document_acknowledged"
-  | "photo_deleted"
-  | "contractor_proposal_submitted"
-  | "contractor_proposal_accepted"
-  | "contractor_proposal_rejected"
-  | "document_uploaded"
-  | "member_added"
-  | "comment_added"
-  | "photo_uploaded"
-  | "stage_created"
-  | "stage_completed"
-  | "stage_deleted"
-  | "proposal_confirmed"
-  | "proposal_cancelled"
-  | "project_created";
+export const EVENT_TYPES = [
+  "task_created",
+  "task_updated",
+  "task_completed",
+  "task_moved",
+  "estimate_created",
+  "estimate_approved",
+  "estimate_archived",
+  "estimate_deleted",
+  "estimate_paid_updated",
+  "estimate.version_submitted",
+  "estimate.version_approved",
+  "estimate.status_changed",
+  "estimate.tax_changed",
+  "estimate.discount_changed",
+  "estimate.dependency_added",
+  "estimate.dependency_removed",
+  "estimate.viewer_regime_set",
+  "estimate.project_mode_set",
+  "procurement_created",
+  "procurement_updated",
+  "procurement_deleted",
+  "document_created",
+  "document.created",
+  "document_version_created",
+  "document_archived",
+  "document_deleted",
+  "document_acknowledged",
+  "photo_deleted",
+  "contractor_proposal_submitted",
+  "contractor_proposal_accepted",
+  "contractor_proposal_rejected",
+  "document_uploaded",
+  "member_added",
+  "comment_added",
+  "photo_uploaded",
+  "stage_created",
+  "stage_completed",
+  "stage_deleted",
+  "proposal_confirmed",
+  "proposal_cancelled",
+  "project_created",
+] as const;
+
+export type EventType = (typeof EVENT_TYPES)[number];
 
 export interface User {
   id: string;
