@@ -1319,6 +1319,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
               eventActorId: "ai",
               emitProposalEvent: true,
               authoritySeam: seamForProjectCommit,
+              t,
             });
 
         if (result.success) {
@@ -1521,7 +1522,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
         }
 
         const proposals = targetProjectId
-          ? generateProposalQueue(content, targetProjectId, automationMode, seamForProjectCommit)
+          ? generateProposalQueue(content, targetProjectId, automationMode, seamForProjectCommit, t)
           : [];
         const assistantContent = proposals.length > 0
           ? t("ai.sidebar.message.proposalsReady", { count: proposals.length })
@@ -2069,7 +2070,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
         if (!prev) return prev;
         const current = prev.items[prev.activeIndex];
         if (!current) return { ...prev, phase: "review" };
-        const revised = reviseProposalWithEdits(current.proposal, editPrompt);
+        const revised = reviseProposalWithEdits(current.proposal, editPrompt, t);
         const nextItems = prev.items.map((item, idx) => (
           idx === prev.activeIndex
             ? {

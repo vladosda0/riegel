@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { PROPOSAL_TYPE_TO_CONTRACT_ACTION, generateProposalQueue } from "@/lib/ai-engine";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PROPOSAL_TYPE_TO_CONTRACT_ACTION, generateProposalQueue, reviseProposalWithEdits } from "@/lib/ai-engine";
+import i18n from "@/i18n";
 import { TOAST_LIMIT } from "@/hooks/use-toast";
 import type { ProjectAuthoritySeam } from "@/lib/project-authority-seam";
 import type { FinanceVisibility, MemberRole } from "@/types/entities";
@@ -52,8 +53,10 @@ function seamForRole(
   };
 }
 
+const translate = (key: string, options?: Record<string, unknown>) => i18n.t(key, options);
+
 function proposalTypes(input: string, seam: ProjectAuthoritySeam): string[] {
-  return generateProposalQueue(input, "project-1", "assisted", seam).map((p) => p.type);
+  return generateProposalQueue(input, "project-1", "assisted", seam, translate).map((p) => p.type);
 }
 
 // ---------------------------------------------------------------------------
@@ -110,6 +113,7 @@ describe("generateProposalQueue — action filtering by role", () => {
       "project-1",
       "assisted",
       seamForRole("owner", "detail"),
+      translate,
     );
 
     // Pin that the prompt still reaches EVERY mapped type. Without this the
@@ -149,6 +153,7 @@ describe("generateProposalQueue — action filtering by role", () => {
       "project-1",
       "assisted",
       seamForRole("owner", "detail"),
+      translate,
     );
 
     expect(proposals).toHaveLength(4);
@@ -227,6 +232,7 @@ describe("generateProposalQueue — monetary copy sanitization", () => {
       "project-1",
       "assisted",
       seamForRole("co_owner", "summary"),
+      translate,
     );
     const estimateProposal = proposals.find((p) => p.type === "update_estimate");
     expect(estimateProposal).toBeDefined();
@@ -242,6 +248,7 @@ describe("generateProposalQueue — monetary copy sanitization", () => {
       "project-1",
       "assisted",
       seamForRole("co_owner", "summary"),
+      translate,
     );
     const procProposal = proposals.find((p) => p.type === "add_procurement");
     expect(procProposal).toBeDefined();
@@ -256,6 +263,7 @@ describe("generateProposalQueue — monetary copy sanitization", () => {
       "project-1",
       "assisted",
       seamForRole("owner", "detail"),
+      translate,
     );
     const procProposal = proposals.find((p) => p.type === "add_procurement");
     expect(procProposal).toBeDefined();
@@ -284,7 +292,112 @@ describe("generateProposalQueue — missing seam", () => {
       "add task, update estimate, buy materials, generate contract",
       "project-1",
       "assisted",
+      undefined,
+      translate,
     ).map((p) => p.type);
     expect(types).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The demo engine is what an unsigned visitor meets on «Посмотреть демо», so its
+// generated copy has to follow the UI language like the chrome around it.
+// ---------------------------------------------------------------------------
+
+describe("generateProposalQueue — generated copy follows the UI language", () => {
+  const CYRILLIC = /[А-Яа-яЁё]/;
+  const ALL_FOUR = "добавь задачи, обнови смету, купи материалы, сгенерируй договор";
+
+  afterEach(async () => {
+    await i18n.changeLanguage("en");
+  });
+
+  it("writes every branch in Russian when the UI is Russian", async () => {
+    await i18n.changeLanguage("ru");
+    const proposals = generateProposalQueue(
+      ALL_FOUR,
+      "project-1",
+      "assisted",
+      seamForRole("owner", "detail"),
+      translate,
+    );
+
+    expect(proposals).toHaveLength(4);
+    for (const proposal of proposals) {
+      expect(proposal.summary, proposal.type).toMatch(CYRILLIC);
+      for (const change of proposal.changes) {
+        expect(change.label, `${proposal.type}: ${change.label}`).toMatch(CYRILLIC);
+      }
+    }
+  });
+
+  // Asserted against the literal templates, not against "contains no Cyrillic":
+  // the stage title is user data and is Russian in the shipped demo project
+  // (seed.ts stage-1-2, «Электрика и сантехника»), so an absence-of-Cyrillic
+  // assertion would only be green because this file's store mock invents an
+  // English one.
+  it("resolves the same branches to the English templates when the UI is English", () => {
+    const proposals = generateProposalQueue(
+      ALL_FOUR,
+      "project-1",
+      "assisted",
+      seamForRole("owner", "detail"),
+      translate,
+    );
+
+    expect(proposals.map((proposal) => proposal.summary)).toEqual([
+      'Add 3 tasks for "Demolition"',
+      "Update estimate — adjust electrical costs",
+      "Add 2 procurement items",
+      "Generate subcontractor agreement draft",
+    ]);
+  });
+
+  it("shows the task status as its label, never the raw enum", async () => {
+    await i18n.changeLanguage("ru");
+    const [tasks] = generateProposalQueue(
+      "добавь задачи",
+      "project-1",
+      "assisted",
+      seamForRole("owner", "detail"),
+      translate,
+    );
+
+    expect(tasks.changes).toHaveLength(3);
+    for (const change of tasks.changes) {
+      expect(change.after).toBe(i18n.t("tasks.status.not_started"));
+    }
+  });
+
+  it("does not use the comma as a thousands separator in Russian", async () => {
+    await i18n.changeLanguage("ru");
+    const [estimate] = generateProposalQueue(
+      "обнови смету",
+      "project-1",
+      "assisted",
+      seamForRole("owner", "detail"),
+      translate,
+    );
+
+    // "48,000 ₽" reads as forty-eight roubles to a ru-RU reader: the comma is
+    // the decimal separator there.
+    for (const change of estimate.changes) {
+      expect(`${change.before ?? ""}${change.after}`, change.label).not.toMatch(/\d,\d/);
+      expect(change.after).toMatch(/₽/);
+    }
+  });
+
+  it("marks a revised proposal in Russian too", async () => {
+    await i18n.changeLanguage("ru");
+    const [tasks] = generateProposalQueue(
+      "добавь задачи",
+      "project-1",
+      "assisted",
+      seamForRole("owner", "detail"),
+      translate,
+    );
+
+    expect(reviseProposalWithEdits(tasks, "сделай короче", translate).summary)
+      .toBe(`${tasks.summary} (с правками)`);
   });
 });

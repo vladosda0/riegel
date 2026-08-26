@@ -10,6 +10,7 @@ import {
   type ProjectDomain,
 } from "@/lib/permissions";
 import type { ActionState, ContractDomain, ContractAction } from "@/lib/permission-contract-actions";
+import type { Translator } from "@/lib/participant-role-policy";
 
 type AutomationMode = "full" | "assisted" | "manual" | "observer";
 
@@ -85,31 +86,33 @@ function sanitizeProposalCopy(proposal: AIProposal, financeMode: EstimateFinance
 // Core proposal generation
 // ---------------------------------------------------------------------------
 
-function getStageTitle(projectId: string): string | null {
+function getStageTitle(projectId: string, t: Translator): string | null {
   const project = getProject(projectId);
   if (!project) return null;
   const stages = getStages(projectId);
   const currentStage = stages.find((s) => s.id === project.current_stage_id) ?? stages[0];
-  return currentStage?.title ?? "Current stage";
+  return currentStage?.title ?? t("ai.sidebar.proposal.demo.currentStageFallback");
 }
 
-function createProjectProposals(input: string, projectId: string): AIProposal[] {
+function createProjectProposals(input: string, projectId: string, t: Translator): AIProposal[] {
   const lower = input.toLowerCase();
-  const stageTitle = getStageTitle(projectId);
+  const stageTitle = getStageTitle(projectId, t);
   if (!stageTitle) return [];
+  const stage = { stage: stageTitle };
   const proposals: AIProposal[] = [];
 
   if (/task|add task|create task|задач/i.test(lower)) {
+    const notStarted = t("tasks.status.not_started");
     const changes: ProposalChange[] = [
-      { entity_type: "task", action: "create", label: `Install junction boxes — ${stageTitle}`, after: "not_started" },
-      { entity_type: "task", action: "create", label: `Run conduit for ${stageTitle}`, after: "not_started" },
-      { entity_type: "task", action: "create", label: `Inspection sign-off — ${stageTitle}`, after: "not_started" },
+      { entity_type: "task", action: "create", label: t("ai.sidebar.proposal.demo.tasks.junctionBoxes", stage), after: notStarted },
+      { entity_type: "task", action: "create", label: t("ai.sidebar.proposal.demo.tasks.conduit", stage), after: notStarted },
+      { entity_type: "task", action: "create", label: t("ai.sidebar.proposal.demo.tasks.inspection", stage), after: notStarted },
     ];
     proposals.push({
       id: `proposal-${Date.now()}`,
       project_id: projectId,
       type: "add_task",
-      summary: `Add 3 tasks for "${stageTitle}"`,
+      summary: t("ai.sidebar.proposal.demo.tasks.summary", stage),
       changes,
       status: "pending",
     });
@@ -117,14 +120,14 @@ function createProjectProposals(input: string, projectId: string): AIProposal[] 
 
   if (/estimate|cost|budget|смет|бюджет|стоимост/i.test(lower)) {
     const changes: ProposalChange[] = [
-      { entity_type: "estimate_item", action: "update", label: "Electrical rough-in", before: "48,000 ₽", after: "52,000 ₽" },
-      { entity_type: "estimate_item", action: "create", label: "Additional outlet points ×6", after: "12,000 ₽" },
+      { entity_type: "estimate_item", action: "update", label: t("ai.sidebar.proposal.demo.estimate.roughIn"), before: t("ai.sidebar.proposal.demo.estimate.roughInBefore"), after: t("ai.sidebar.proposal.demo.estimate.roughInAfter") },
+      { entity_type: "estimate_item", action: "create", label: t("ai.sidebar.proposal.demo.estimate.outlets"), after: t("ai.sidebar.proposal.demo.estimate.outletsPrice") },
     ];
     proposals.push({
       id: `proposal-${Date.now()}-estimate`,
       project_id: projectId,
       type: "update_estimate",
-      summary: "Update estimate — adjust electrical costs",
+      summary: t("ai.sidebar.proposal.demo.estimate.summary"),
       changes,
       status: "pending",
     });
@@ -132,14 +135,14 @@ function createProjectProposals(input: string, projectId: string): AIProposal[] 
 
   if (/procurement|buy|purchase|material|закуп|купи|материал/i.test(lower)) {
     const changes: ProposalChange[] = [
-      { entity_type: "procurement_item", action: "create", label: "LED panel lights 60×60 ×12", after: "18,000 ₽" },
-      { entity_type: "procurement_item", action: "create", label: "Cable tray 2m sections ×8", after: "6,400 ₽" },
+      { entity_type: "procurement_item", action: "create", label: t("ai.sidebar.proposal.demo.procurement.ledPanels"), after: t("ai.sidebar.proposal.demo.procurement.ledPanelsPrice") },
+      { entity_type: "procurement_item", action: "create", label: t("ai.sidebar.proposal.demo.procurement.cableTray"), after: t("ai.sidebar.proposal.demo.procurement.cableTrayPrice") },
     ];
     proposals.push({
       id: `proposal-${Date.now()}-proc`,
       project_id: projectId,
       type: "add_procurement",
-      summary: "Add 2 procurement items",
+      summary: t("ai.sidebar.proposal.demo.procurement.summary"),
       changes,
       status: "pending",
     });
@@ -147,13 +150,13 @@ function createProjectProposals(input: string, projectId: string): AIProposal[] 
 
   if (/document|contract|generate|report|документ|договор|отч[её]т/i.test(lower)) {
     const changes: ProposalChange[] = [
-      { entity_type: "document", action: "create", label: `Subcontractor Agreement — ${stageTitle}`, after: "Draft v1" },
+      { entity_type: "document", action: "create", label: t("ai.sidebar.proposal.demo.document.label", stage), after: t("ai.sidebar.proposal.demo.document.draftVersion") },
     ];
     proposals.push({
       id: `proposal-${Date.now()}-doc`,
       project_id: projectId,
       type: "generate_document",
-      summary: "Generate subcontractor agreement draft",
+      summary: t("ai.sidebar.proposal.demo.document.summary"),
       changes,
       status: "pending",
     });
@@ -166,8 +169,8 @@ function createProjectProposals(input: string, projectId: string): AIProposal[] 
 // Public API
 // ---------------------------------------------------------------------------
 
-export function generateProposal(input: string, projectId: string): AIProposal | null {
-  const proposals = createProjectProposals(input, projectId);
+export function generateProposal(input: string, projectId: string, t: Translator): AIProposal | null {
+  const proposals = createProjectProposals(input, projectId, t);
   return proposals[0] ?? null;
 }
 
@@ -175,14 +178,15 @@ export function generateProposalQueue(
   input: string,
   projectId: string,
   automationMode: string,
-  seam?: ProjectAuthoritySeam,
+  seam: ProjectAuthoritySeam | undefined,
+  t: Translator,
 ): AIProposal[] {
   const normalizedMode: AutomationMode =
     automationMode === "full" || automationMode === "manual" || automationMode === "observer"
       ? automationMode
       : "assisted";
 
-  let proposals = createProjectProposals(input, projectId);
+  let proposals = createProjectProposals(input, projectId, t);
 
   // Gate: only include proposals for actions the user's role can execute
   proposals = proposals.filter((p) => proposalAllowedForSeam(p.type, seam));
@@ -202,7 +206,7 @@ export function generateProposalQueue(
   return proposals;
 }
 
-export function reviseProposalWithEdits(proposal: AIProposal, edits: string): AIProposal {
+export function reviseProposalWithEdits(proposal: AIProposal, edits: string, t: Translator): AIProposal {
   const trimmedEdits = edits.trim();
   if (!trimmedEdits) {
     return {
@@ -216,7 +220,7 @@ export function reviseProposalWithEdits(proposal: AIProposal, edits: string): AI
     ...proposal,
     id: `proposal-${Date.now()}-rev`,
     status: "pending",
-    summary: `${proposal.summary} (revised)`,
+    summary: t("ai.sidebar.proposal.demo.revised", { summary: proposal.summary }),
     changes: proposal.changes.map((change, idx) => ({
       ...change,
       label: idx === 0 ? `${change.label} — ${trimmedEdits}` : change.label,
