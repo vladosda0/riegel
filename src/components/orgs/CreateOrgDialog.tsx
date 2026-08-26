@@ -74,11 +74,15 @@ export function CreateOrgDialog({
         }
       }
 
-      let inviteToast: { added: number; notFound: number } | null = null;
+      let inviteToast: { added: number; notFound: number; notFoundList: string } | null = null;
       if (emails.length > 0) {
         try {
           const result = await addOrgMembersByEmail(created.id, emails);
-          inviteToast = { added: result.added.length, notFound: result.notFound.length };
+          inviteToast = {
+            added: result.added.length,
+            notFound: result.notFound.length,
+            notFoundList: result.notFound.join(", "),
+          };
         } catch (error) {
           toast({
             title: t("createOrgDialog.inviteFailed"),
@@ -91,7 +95,12 @@ export function CreateOrgDialog({
       toast({
         title: t("onboarding.org.createSuccess"),
         description: inviteToast
-          ? t("createOrgDialog.inviteSummary", inviteToast)
+          ? t(
+              inviteToast.notFound > 0
+                ? "createOrgDialog.inviteSummaryPartial"
+                : "createOrgDialog.inviteSummary",
+              inviteToast,
+            )
           : undefined,
       });
       onCreated?.(created.id);
