@@ -171,6 +171,8 @@ It is an allowlist-specific extractor for the source migrations below, not a gen
 - `supabase/migrations/20260727120000_drop_out_of_band_debug_rpcs.sql`
 - `supabase/migrations/20260729130000_project_invites_expires_at.sql`
 - `supabase/migrations/20260806070000_can_access_storage_object_archived_documents.sql`
+- `supabase/migrations/20260825150000_profiles_column_scoped_write_grants.sql`
+- `supabase/migrations/20260825150100_harden_append_tutorial_completed.sql`
 
 ## Exclusions
 

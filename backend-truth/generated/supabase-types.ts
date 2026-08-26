@@ -2594,6 +2594,13 @@ export type Database = {
           }
           Returns: unknown
         }
+        "append_tutorial_completed": {
+          Args: {
+          "p_profile_id": string
+          "p_key": string
+          }
+          Returns: unknown
+        }
         "apply_template_stage_to_estimate": {
           Args: {
           "p_estimate_version_id": string
