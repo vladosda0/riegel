@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { ANALYTICS_ROUTES } from "./analytics";
 
 const COUNTER_ID = "99999";
 const TAG_SRC = `https://mc.yandex.ru/metrika/tag.js?id=${COUNTER_ID}`;
@@ -18,6 +21,12 @@ function removeInjectedTags(): void {
 
 function initCalls(ym: YmMock): unknown[][] {
   return ym.mock.calls.filter((call) => call[1] === "init");
+}
+
+async function loadAnalytics() {
+  vi.resetModules();
+  vi.stubEnv("VITE_METRIKA_COUNTER_ID", COUNTER_ID);
+  return import("./analytics");
 }
 
 async function loadInitMetrika() {
@@ -101,13 +110,13 @@ describe("initMetrika and the Supabase auth fragment", () => {
   });
 
   it("treats an ordinary anchor fragment as safe", async () => {
-    setUrl("/pricing#tariffs");
+    setUrl("/offer#tariffs");
     const initMetrika = await loadInitMetrika();
 
     initMetrika();
 
     expect(initCalls(ym)).toHaveLength(1);
-    expect((initCalls(ym)[0][2] as { url: string }).url).toBe(`${window.location.origin}/pricing`);
+    expect((initCalls(ym)[0][2] as { url: string }).url).toBe(`${window.location.origin}/offer`);
   });
 
   it("treats a GoTrue error fragment as safe: it carries no tokens", async () => {
@@ -118,6 +127,42 @@ describe("initMetrika and the Supabase auth fragment", () => {
 
     expect(initCalls(ym)).toHaveLength(1);
     expect((initCalls(ym)[0][2] as { url: string }).url).not.toContain("error");
+  });
+
+  it("does not load the tag while a share token sits in the path", async () => {
+    vi.useFakeTimers();
+    setUrl("/share/estimate/QA-SHARE-TOKEN");
+    const initMetrika = await loadInitMetrika();
+
+    initMetrika();
+    vi.advanceTimersByTime(1_000);
+
+    expect(initCalls(ym)).toHaveLength(0);
+    expect(document.querySelector(`script[src="${TAG_SRC}"]`)).toBeNull();
+  });
+
+  it("does not load the tag when the share path differs only in case", async () => {
+    vi.useFakeTimers();
+    setUrl("/SHARE/ESTIMATE/QA-SHARE-TOKEN");
+    const initMetrika = await loadInitMetrika();
+
+    initMetrika();
+    vi.advanceTimersByTime(1_000);
+
+    expect(initCalls(ym)).toHaveLength(0);
+    expect(document.querySelector(`script[src="${TAG_SRC}"]`)).toBeNull();
+  });
+
+  it("does not load the tag while an invite token sits in the path", async () => {
+    vi.useFakeTimers();
+    setUrl("/invite/accept/QA-INVITE-TOKEN");
+    const initMetrika = await loadInitMetrika();
+
+    initMetrika();
+    vi.advanceTimersByTime(1_000);
+
+    expect(initCalls(ym)).toHaveLength(0);
+    expect(document.querySelector(`script[src="${TAG_SRC}"]`)).toBeNull();
   });
 
   it("does not load the tag while a one-time credential sits in the query string", async () => {
@@ -212,5 +257,99 @@ describe("initMetrika and the Supabase auth fragment", () => {
 
     expect(ym.mock.calls.filter((call) => call[1] === "init")).toHaveLength(0);
     expect(document.querySelector(`script[src="${TAG_SRC}"]`)).toBeNull();
+  });
+});
+
+describe("analyticsPageUrl path sanitising", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("replaces a share token in the path with the route template", async () => {
+    setUrl("/share/estimate/QA-SHARE-TOKEN");
+    const { analyticsPageUrl } = await loadAnalytics();
+
+    const url = analyticsPageUrl();
+
+    expect(url).toBe(`${window.location.origin}/share/estimate/:shareId`);
+    expect(url).not.toContain("QA-SHARE-TOKEN");
+  });
+
+  it("replaces a share token in the path when the path differs only in case", async () => {
+    setUrl("/SHARE/ESTIMATE/QA-SHARE-TOKEN");
+    const { analyticsPageUrl } = await loadAnalytics();
+
+    const url = analyticsPageUrl();
+
+    expect(url).toBe(`${window.location.origin}/share/estimate/:shareId`);
+    expect(url).not.toContain("QA-SHARE-TOKEN");
+  });
+
+  it("replaces an invite token in the path with the route template", async () => {
+    setUrl("/invite/accept/QA-INVITE-TOKEN?lang=ru");
+    const { analyticsPageUrl } = await loadAnalytics();
+
+    const url = analyticsPageUrl();
+
+    expect(url).toBe(`${window.location.origin}/invite/accept/:inviteToken?lang=ru`);
+    expect(url).not.toContain("QA-INVITE-TOKEN");
+  });
+
+  it("passes a safe dynamic route through verbatim, so per-project reports survive", async () => {
+    setUrl("/project/11111111-2222-3333-4444-555555555555/tasks");
+    const { analyticsPageUrl } = await loadAnalytics();
+
+    expect(analyticsPageUrl()).toBe(
+      `${window.location.origin}/project/11111111-2222-3333-4444-555555555555/tasks`,
+    );
+  });
+
+  it("prefers the static route over a dynamic one that also matches", async () => {
+    setUrl("/blog/admin");
+    const { analyticsPageUrl } = await loadAnalytics();
+
+    expect(analyticsPageUrl()).toBe(`${window.location.origin}/blog/admin`);
+  });
+
+  it("reports a path matching no known route as the unknown placeholder", async () => {
+    setUrl("/some/route/added/later");
+    const { analyticsPageUrl } = await loadAnalytics();
+
+    expect(analyticsPageUrl()).toBe(`${window.location.origin}/unknown`);
+  });
+});
+
+describe("ANALYTICS_ROUTES stays in step with App.tsx", () => {
+  // The whitelist fails closed, so drift costs reporting rather than a leak.
+  // This test makes the drift visible at the moment a route is added instead.
+  //
+  // It checks that every route App.tsx declares is *represented*, not that the
+  // prefix is right: a relative child only has to be the tail of some pattern.
+  // That catches "added a route and forgot this list", which is the failure
+  // this list can actually have. It does not check that a child sits under the
+  // right parent.
+  it("covers every path declared in App.tsx", () => {
+    const app = readFileSync(resolve(process.cwd(), "src/App.tsx"), "utf-8");
+    const declared = [...app.matchAll(/path="([^"]+)"/g)]
+      .map((match) => match[1])
+      .filter((path) => path !== "*");
+
+    expect(declared.length).toBeGreaterThan(20);
+
+    const patterns = ANALYTICS_ROUTES.map((route) => route.pattern);
+    const missing = declared.filter((path) =>
+      path.startsWith("/")
+        ? !patterns.includes(path)
+        : !patterns.some((pattern) => pattern.endsWith(`/${path}`)),
+    );
+
+    expect(missing).toEqual([]);
+  });
+
+  it("marks the two token-bearing routes, and only those, as secret", () => {
+    const secret = ANALYTICS_ROUTES.filter((route) => route.secret).map((route) => route.pattern);
+
+    expect(secret).toEqual(["/share/estimate/:shareId", "/invite/accept/:inviteToken"]);
   });
 });

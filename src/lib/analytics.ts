@@ -308,6 +308,124 @@ const ANALYTICS_QUERY_ALLOWED_KEYS = new Set(["lang", "from", "yclid", "ymclid",
 const ANALYTICS_QUERY_ALLOWED_PREFIXES = ["utm_"];
 
 /**
+ * Every route this app serves, with the ones whose path carries a bearer
+ * secret marked. Kept in step with `src/App.tsx`.
+ *
+ * A whitelist, for the same reason the query allowlist above is one. A path
+ * that matches a safe route is passed through verbatim, so existing Metrika
+ * reports keep their per-project and per-post breakdown; a path that matches a
+ * secret-bearing route is reported as its own template instead.
+ *
+ * An unmatched path is reported as `ANALYTICS_UNKNOWN_PATH` but is NOT treated
+ * as secret, so a token-bearing route missing from this list still loads the
+ * tag. Tracked in #105.
+ */
+export const ANALYTICS_ROUTES: readonly { pattern: string; secret?: boolean }[] = [
+  { pattern: "/" },
+  { pattern: "/onboarding" },
+  { pattern: "/promo/redeem" },
+  { pattern: "/theme" },
+  { pattern: "/share/estimate/:shareId", secret: true },
+  { pattern: "/invite/accept/:inviteToken", secret: true },
+  { pattern: "/blog" },
+  { pattern: "/blog/tag/:tag" },
+  { pattern: "/blog/:slug" },
+  { pattern: "/offer" },
+  { pattern: "/privacy" },
+  { pattern: "/refund" },
+  { pattern: "/contacts" },
+  { pattern: "/auth/login" },
+  { pattern: "/auth/signup" },
+  { pattern: "/auth/forgot" },
+  { pattern: "/auth/reset-password" },
+  { pattern: "/auth/confirm" },
+  { pattern: "/auth/email-sent" },
+  { pattern: "/auth/callback" },
+  { pattern: "/home" },
+  { pattern: "/home/catalogs/upload-review/:uploadId" },
+  { pattern: "/home/catalogs/:catalogId" },
+  { pattern: "/demo" },
+  { pattern: "/profile" },
+  { pattern: "/profile/upgrade" },
+  { pattern: "/settings" },
+  { pattern: "/billing/checkout" },
+  { pattern: "/billing/success" },
+  { pattern: "/billing/fail" },
+  { pattern: "/blog/admin" },
+  { pattern: "/blog/admin/new" },
+  { pattern: "/blog/admin/:id" },
+  { pattern: "/project/:id" },
+  { pattern: "/project/:id/dashboard" },
+  { pattern: "/project/:id/tasks" },
+  { pattern: "/project/:id/estimate" },
+  { pattern: "/project/:id/procurement" },
+  { pattern: "/project/:id/procurement/order/:orderId" },
+  { pattern: "/project/:id/procurement/:itemId" },
+  { pattern: "/project/:id/hr" },
+  { pattern: "/project/:id/gallery" },
+  { pattern: "/project/:id/documents" },
+  { pattern: "/project/:id/activity" },
+  { pattern: "/project/:id/participants" },
+];
+
+/** What an unrecognised path is reported as. */
+const ANALYTICS_UNKNOWN_PATH = "/unknown";
+
+function pathSegments(path: string): string[] {
+  return path.split("/").filter((segment) => segment !== "");
+}
+
+// Case-insensitive because the router is: react-router-dom 6.30.3 renders
+// /share/estimate/:shareId for /SHARE/ESTIMATE/<token> (measured), and a path
+// that matches no route here is not marked secret.
+function sameSegment(patternSegment: string, segment: string): boolean {
+  return patternSegment.toLowerCase() === segment.toLowerCase();
+}
+
+/**
+ * The route whose pattern matches `pathname`, preferring the most static one so
+ * `/blog/admin` resolves to itself rather than to `/blog/:slug`.
+ */
+function matchAnalyticsRoute(pathname: string): { pattern: string; secret?: boolean } | null {
+  const segments = pathSegments(pathname);
+  let best: { pattern: string; secret?: boolean } | null = null;
+  let bestParams = Number.POSITIVE_INFINITY;
+
+  for (const route of ANALYTICS_ROUTES) {
+    const patternSegments = pathSegments(route.pattern);
+    if (patternSegments.length !== segments.length) continue;
+
+    let params = 0;
+    let matches = true;
+    for (let i = 0; i < patternSegments.length; i += 1) {
+      const patternSegment = patternSegments[i];
+      if (patternSegment.startsWith(":")) {
+        params += 1;
+        continue;
+      }
+      if (!sameSegment(patternSegment, segments[i])) {
+        matches = false;
+        break;
+      }
+    }
+
+    if (matches && params < bestParams) {
+      best = route;
+      bestParams = params;
+    }
+  }
+
+  return best;
+}
+
+/** The path handed to Metrika: verbatim when safe, the route template when not. */
+function analyticsPathname(pathname: string): string {
+  const route = matchAnalyticsRoute(pathname);
+  if (!route) return ANALYTICS_UNKNOWN_PATH;
+  return route.secret ? route.pattern : pathname;
+}
+
+/**
  * The pageview URL handed to Metrika: origin + path + allowlisted query, never
  * the fragment. Metrika transmits the URL it is given verbatim.
  */
@@ -321,7 +439,7 @@ export function analyticsPageUrl(): string {
     if (allowed) kept.append(key, value);
   }
   const query = kept.toString();
-  return `${origin}${pathname}${query === "" ? "" : `?${query}`}`;
+  return `${origin}${analyticsPathname(pathname)}${query === "" ? "" : `?${query}`}`;
 }
 
 /**
@@ -347,8 +465,9 @@ function carriesCredential(params: URLSearchParams): boolean {
 }
 
 function urlCarriesAuthCredential(): boolean {
-  const { hash, search } = window.location;
+  const { hash, search, pathname } = window.location;
   return (
+    matchAnalyticsRoute(pathname)?.secret === true ||
     carriesCredential(new URLSearchParams(hash.replace(/^#/, ""))) ||
     carriesCredential(new URLSearchParams(search))
   );

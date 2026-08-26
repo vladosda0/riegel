@@ -54,4 +54,24 @@ describe("MetrikaPageviewTracker", () => {
     expect(hits[0][2]).not.toContain("access_token");
     expect(hits[0][2]).not.toContain("example.com");
   });
+
+  it("reports the route template, not the share token, in the hit url", async () => {
+    window.history.replaceState({}, "", "/home");
+    const { MetrikaPageviewTracker } = await import("./MetrikaPageviewTracker");
+
+    render(
+      <BrowserRouter>
+        <MetrikaPageviewTracker />
+        <Navigate to="/share/estimate/QA-SHARE-TOKEN" />
+      </BrowserRouter>,
+    );
+
+    await waitFor(() => expect(ym.mock.calls.some((call) => call[1] === "hit")).toBe(true));
+
+    const hits = ym.mock.calls.filter((call) => call[1] === "hit");
+    expect(hits).toHaveLength(1);
+    expect(window.location.pathname).toBe("/share/estimate/QA-SHARE-TOKEN");
+    expect(hits[0][2]).toBe(`${window.location.origin}/share/estimate/:shareId`);
+    expect(hits[0][2]).not.toContain("QA-SHARE-TOKEN");
+  });
 });
