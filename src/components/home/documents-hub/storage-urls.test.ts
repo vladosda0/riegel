@@ -119,9 +119,13 @@ describe("downloadStorageUrl", () => {
       createObjectURL: vi.fn(() => "blob:mock-object-url"),
       revokeObjectURL: vi.fn(),
     }));
+    // The revoke is scheduled 10s out, so under real timers it outlives the
+    // test that scheduled it and fires into a torn-down environment (#63).
+    vi.useFakeTimers();
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     clickSpy.mockRestore();
     vi.unstubAllGlobals();
   });
@@ -169,17 +173,23 @@ describe("downloadStorageUrl", () => {
   it("revokes the object URL only after Safari has had time to start the save", async () => {
     // A mutant making the revoke immediate survived until this pin existed;
     // an eagerly revoked URL breaks Safari saves and nothing else notices.
-    vi.useFakeTimers();
-    try {
-      signOk();
-      fetchMock.mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob(["x"])) });
-      await downloadStorageUrl("b", "p/x.pdf", "n.pdf");
-      expect(URL.revokeObjectURL).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(10_000);
-      expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock-object-url");
-    } finally {
-      vi.useRealTimers();
-    }
+    signOk();
+    fetchMock.mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob(["x"])) });
+    await downloadStorageUrl("b", "p/x.pdf", "n.pdf");
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(10_000);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock-object-url");
+  });
+
+  it("leaves no revoke timer that throws once the test's URL stub is torn down", async () => {
+    // Fake timers keep the leak out of this suite; the setup.ts polyfill is what
+    // keeps it harmless anywhere else, and this pins that second half (#63).
+    signOk();
+    fetchMock.mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob(["x"])) });
+    await downloadStorageUrl("b", "p/x.pdf", "n.pdf");
+
+    vi.unstubAllGlobals();
+    expect(() => vi.advanceTimersByTime(10_000)).not.toThrow();
   });
 
   it("never opens a window or navigates - the failure modes stay in this function", async () => {
