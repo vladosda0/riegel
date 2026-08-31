@@ -1,9 +1,14 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cacheWorkspaceUsers, __unsafeResetWorkspaceUserCacheForTests } from "@/data/workspace-profile-cache";
 import {
   __unsafeResetStoreForTests,
+  addComment,
   addProject,
+  addTask,
   getCurrentUser,
+  getEvents,
+  getNotifications,
+  getTasks,
   getProjects,
   getUserById,
 } from "@/data/store";
@@ -14,6 +19,7 @@ import {
   setAuthRole,
   setStoredAuthProfile,
 } from "@/lib/auth-state";
+import type { Task } from "@/types/entities";
 
 describe("store", () => {
   beforeEach(() => {
@@ -129,5 +135,83 @@ describe("store", () => {
       email: "alex@rovno.ai",
       name: "Алексей Петров",
     });
+  });
+});
+
+describe("store auto-minted ids", () => {
+  // Both ids are built from Date.now(). Pin the clock so these prove the disambiguating
+  // counter rather than the clock.
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    setAuthRole("guest");
+    clearStoredAuthProfile();
+    clearDemoSession();
+    __unsafeResetWorkspaceUserCacheForTests();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-31T00:00:00.000Z"));
+    __unsafeResetStoreForTests();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function task(id: string, projectId: string): Task {
+    return {
+      id,
+      project_id: projectId,
+      stage_id: "stage-loop",
+      title: id,
+      description: "",
+      status: "not_started",
+      assignee_id: "",
+      checklist: [],
+      comments: [],
+      attachments: [],
+      photos: [],
+      linked_estimate_item_ids: [],
+      created_at: "2026-08-31T00:00:00.000Z",
+    };
+  }
+
+  it("mints a distinct activity-event id for every task created in one loop", () => {
+    for (const id of ["t-1", "t-2", "t-3", "t-4", "t-5"]) {
+      addTask(task(id, "project-loop"));
+    }
+
+    const eventIds = getEvents("project-loop").map((event) => event.id);
+    expect(eventIds).toHaveLength(5);
+    expect(new Set(eventIds).size).toBe(eventIds.length);
+  });
+
+  it("mints a distinct comment id for every comment added in one loop", () => {
+    addTask(task("t-comments", "project-loop"));
+
+    for (const text of ["a", "b", "c"]) {
+      addComment("t-comments", text);
+    }
+
+    const commentIds = (getTasks("project-loop").find((entry) => entry.id === "t-comments")?.comments ?? [])
+      .map((comment) => comment.id);
+    expect(commentIds).toHaveLength(3);
+    expect(new Set(commentIds).size).toBe(commentIds.length);
+  });
+
+  it("mints a distinct notification id across events raised in the same millisecond", () => {
+    enterDemoSession("project-1");
+    __unsafeResetStoreForTests();
+
+    const before = new Set(getNotifications("user-2").map((notification) => notification.id));
+
+    addTask(task("t-notif-1", "project-1"));
+    addTask(task("t-notif-2", "project-1"));
+
+    const minted = getNotifications("user-2")
+      .map((notification) => notification.id)
+      .filter((id) => !before.has(id));
+
+    expect(minted).toHaveLength(2);
+    expect(new Set(minted).size).toBe(minted.length);
   });
 });
