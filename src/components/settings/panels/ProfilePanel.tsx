@@ -22,6 +22,7 @@ import { toast } from "@/hooks/use-toast";
 
 const TIMEZONES = [
   { value: "auto", labelKey: "profile.timezoneOption.auto" },
+  { value: "UTC", label: "UTC (UTC+0)" },
   { value: "Europe/Moscow", label: "Europe/Moscow (UTC+3)" },
   { value: "Europe/London", label: "Europe/London (UTC+0)" },
   { value: "America/New_York", label: "America/New York (UTC-5)" },
@@ -104,6 +105,17 @@ export function ProfilePanel() {
     setBio(contactInfo.bio ?? "");
     setSignature(contactInfo.signatureBlock ?? "");
   }, [contactInfo, user.id]);
+
+  // `<SelectValue />` has no placeholder, so a zone the list does not carry
+  // renders as an empty trigger (rovno #54). Carry BOTH the persisted zone and
+  // the selected one: either can be off the list, and either can change without
+  // the other.
+  const storedTimezone = user.timezone || "auto";
+  const extraZones = [storedTimezone, timezone].filter(
+    (value, i, all) => all.indexOf(value) === i && !TIMEZONES.some((tz) => tz.value === value),
+  );
+  const timezoneOptions: readonly ({ value: string; label: string } | { value: string; labelKey: string })[] =
+    [...TIMEZONES, ...extraZones.map((value) => ({ value, label: value }))];
 
   const initials = name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
   const saving = updateIdentity.isPending || updateContactInfo.isPending;
@@ -233,7 +245,7 @@ export function ProfilePanel() {
             <Select value={timezone} onValueChange={setTimezone}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                {TIMEZONES.map((tz) => (
+                {timezoneOptions.map((tz) => (
                   <SelectItem key={tz.value} value={tz.value}>
                     {"labelKey" in tz ? t(tz.labelKey) : tz.label}
                   </SelectItem>
