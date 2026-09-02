@@ -117,7 +117,7 @@ export function OverviewTab() {
                   size="icon"
                   className="h-8 w-8 shrink-0 text-accent"
                   onClick={() => navigate("/home?tab=projects")}
-                  aria-label="View all projects"
+                  aria-label={t("overview.viewAllProjectsAria")}
                 >
                   <ChevronRight className="h-4 w-4" />
                 </Button>
@@ -158,7 +158,7 @@ export function OverviewTab() {
                   size="icon"
                   className="h-8 w-8 shrink-0 text-accent"
                   onClick={() => navigate("/home?tab=tasks")}
-                  aria-label="View all tasks"
+                  aria-label={t("overview.viewAllTasksAria")}
                 >
                   <ChevronRight className="h-4 w-4" />
                 </Button>

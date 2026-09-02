@@ -36,7 +36,7 @@ export function DocsWidget({ documents, projectId, className }: Props) {
         <Link
           to={`/project/${projectId}/documents`}
           className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-accent hover:bg-accent/10 transition-colors"
-          aria-label="View all documents"
+          aria-label={t("docsWidget.viewAllAria")}
         >
           <ChevronRight className="h-4 w-4" />
         </Link>
