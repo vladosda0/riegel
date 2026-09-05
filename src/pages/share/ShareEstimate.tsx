@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -146,6 +147,11 @@ export default function ShareEstimate() {
   const approvalBlockedByPolicy = version?.shareApprovalPolicy === "disabled";
   const canApprove = Boolean(approvalEligible && authStatus === "authenticated" && !approvalBlockedByPolicy);
   const requiresRegistrationToApprove = Boolean(approvalEligible && authStatus === "guest" && !approvalBlockedByPolicy);
+  // "loading" satisfies neither of the two above, so the row would render empty
+  // until the session resolves. Hold the slot only when one of them is actually
+  // coming: under a disabled policy, or on a version that cannot be approved at
+  // all, no action ever arrives and a placeholder would promise one.
+  const approvalActionPending = Boolean(approvalEligible && authStatus === "loading" && !approvalBlockedByPolicy);
 
   if (shareStatus === "loading") {
     return (
@@ -299,6 +305,14 @@ export default function ShareEstimate() {
           {canApprove && <Button onClick={() => setApprovalModalOpen(true)}>{t("share.estimate.approveButton")}</Button>}
           {requiresRegistrationToApprove && (
             <Button onClick={handleRegisterToApprove}>{t("share.estimate.registerButton")}</Button>
+          )}
+          {approvalActionPending && (
+            <Skeleton
+              data-testid="approval-action-pending"
+              className="h-10 w-40"
+              role="status"
+              aria-label={t("app.loading")}
+            />
           )}
           {/* Disabled until a question has somewhere to go: the real channel is
               the project-events-notifications epic (#22). */}

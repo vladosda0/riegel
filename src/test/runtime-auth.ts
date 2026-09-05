@@ -17,3 +17,12 @@ export function guestRuntimeAuth(): void {
     profileId: null,
   });
 }
+
+export function loadingRuntimeAuth(): void {
+  __unsafeSetRuntimeAuthStateForTests({
+    status: "loading",
+    session: null,
+    user: null,
+    profileId: null,
+  });
+}

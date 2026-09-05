@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ShareEstimate from "@/pages/share/ShareEstimate";
 import {
+  approveVersion,
   createLine,
   createVersionSnapshot,
   getEstimateV2ProjectState,
@@ -12,7 +13,7 @@ import {
 } from "@/data/estimate-v2-store";
 import { clearDemoSession, enterDemoSession, setAuthRole } from "@/lib/auth-state";
 import { __unsafeResetRuntimeAuthForTests } from "@/hooks/use-runtime-auth";
-import { authenticateRuntimeAuth, guestRuntimeAuth } from "@/test/runtime-auth";
+import { authenticateRuntimeAuth, guestRuntimeAuth, loadingRuntimeAuth } from "@/test/runtime-auth";
 
 let shareScenarioCounter = 0;
 
@@ -52,7 +53,7 @@ function money(cents: number, currency: string): string {
 function createSubmittedShareVersion(
   projectMode: "contractor" | "build_myself" = "contractor",
   options?: Parameters<typeof submitVersion>[2],
-): { shareId: string; lineTitle: string; expectedClientTotal: string } {
+): { shareId: string; versionId: string; lineTitle: string; expectedClientTotal: string } {
   const projectId = "project-1";
   setAuthRole("owner");
   updateEstimateV2Project(projectId, { projectMode });
@@ -83,6 +84,7 @@ function createSubmittedShareVersion(
   expect(ok).toBe(true);
   return {
     shareId: created.shareId,
+    versionId: created.versionId,
     lineTitle,
     expectedClientTotal: money(projectMode === "contractor" ? 11_400 : 9_500, "RUB"),
   };
@@ -159,6 +161,68 @@ describe("ShareEstimate approval access", () => {
       screen.getByText("Approval is unavailable until project owner upgrades plan and adds client as participant."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+  });
+
+  it("holds the approval slot with a placeholder while the session is still resolving", () => {
+    const { shareId } = createSubmittedShareVersion();
+    loadingRuntimeAuth();
+
+    renderSharePage(shareId);
+
+    // Neither boolean is true at "loading", so without the placeholder the card
+    // renders its heading over an empty row and the client sees no call to action.
+    expect(screen.getByTestId("approval-action-pending")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Register to approve" })).not.toBeInTheDocument();
+  });
+
+  it("replaces the placeholder with the real action once the session resolves", () => {
+    const { shareId } = createSubmittedShareVersion("contractor");
+    setAuthRole("owner");
+    loadingRuntimeAuth();
+
+    renderSharePage(shareId);
+    expect(screen.getByTestId("approval-action-pending")).toBeInTheDocument();
+
+    act(() => authenticateRuntimeAuth());
+
+    expect(screen.queryByTestId("approval-action-pending")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
+  });
+
+  it("shows no placeholder while loading on a version that is already approved", () => {
+    const { shareId, versionId } = createSubmittedShareVersion("contractor");
+    expect(
+      approveVersion("project-1", versionId, {
+        name: "Ivan",
+        surname: "Petrov",
+        email: "ivan@example.com",
+        timestamp: new Date("2026-09-01T00:00:00Z").toISOString(),
+      }),
+    ).toBe(true);
+    loadingRuntimeAuth();
+
+    renderSharePage(shareId);
+
+    // Anchor the render: without this the absence below would also hold for a
+    // page that never got past its early returns.
+    expect(screen.getByRole("button", { name: "Ask questions (coming soon)" })).toBeInTheDocument();
+    // approvalEligible is already false, so no action is coming here either.
+    expect(screen.queryByTestId("approval-action-pending")).not.toBeInTheDocument();
+  });
+
+  it("shows no placeholder while loading when the policy will never offer an action", () => {
+    const { shareId } = createSubmittedShareVersion("contractor", {
+      shareApprovalPolicy: "disabled",
+      shareApprovalDisabledReason: "no_participant_slot",
+    });
+    loadingRuntimeAuth();
+
+    renderSharePage(shareId);
+
+    // A placeholder promises an action that is coming. Under a disabled policy
+    // none ever arrives, so the promise would be a lie.
+    expect(screen.queryByTestId("approval-action-pending")).not.toBeInTheDocument();
   });
 
   it("offers the question button as disabled, because nothing carries the question yet", () => {
