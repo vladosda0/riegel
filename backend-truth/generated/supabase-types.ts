@@ -2547,6 +2547,36 @@ export type Database = {
           }
           Relationships: []
         }
+        "document_shares": {
+          Row: {
+          "id": string
+          "document_id": string
+          "share_token": string
+          "created_by": string
+          "created_at": string
+          "revoked_at": string | null
+          "revoked_by": string | null
+          }
+          Insert: {
+          "id"?: string
+          "document_id": string
+          "share_token": string
+          "created_by": string
+          "created_at"?: string
+          "revoked_at"?: string | null
+          "revoked_by"?: string | null
+          }
+          Update: {
+          "id"?: string
+          "document_id"?: string
+          "share_token"?: string
+          "created_by"?: string
+          "created_at"?: string
+          "revoked_at"?: string | null
+          "revoked_by"?: string | null
+          }
+          Relationships: []
+        }
     }
     Views: {
       [_ in never]: never
@@ -2640,6 +2670,12 @@ export type Database = {
           }
           Returns: boolean
         }
+        "can_manage_document_share": {
+          Args: {
+          "p_document_id": string
+          }
+          Returns: boolean
+        }
         "can_manage_org": {
           Args: {
           "p_org_id": string
@@ -2702,6 +2738,12 @@ export type Database = {
           "p_new_status": string
           "p_comment_body": unknown
           "p_expected_status": unknown
+          }
+          Returns: Json
+        }
+        "create_document_share": {
+          Args: {
+          "p_document_id": string
           }
           Returns: Json
         }
@@ -2960,6 +3002,12 @@ export type Database = {
           }
           Returns: Json
         }
+        "list_document_shares": {
+          Args: {
+          "p_project_id": string
+          }
+          Returns: Json
+        }
         "list_estimate_templates": {
           Args: {
           "p_scope_filter": unknown
@@ -3080,6 +3128,12 @@ export type Database = {
           "p_project_id": string
           }
           Returns: string
+        }
+        "revoke_document_share": {
+          Args: {
+          "p_document_id": string
+          }
+          Returns: boolean
         }
         "search_canonical_library": {
           Args: {

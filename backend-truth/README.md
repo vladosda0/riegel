@@ -173,6 +173,7 @@ It is an allowlist-specific extractor for the source migrations below, not a gen
 - `supabase/migrations/20260806070000_can_access_storage_object_archived_documents.sql`
 - `supabase/migrations/20260825150000_profiles_column_scoped_write_grants.sql`
 - `supabase/migrations/20260825150100_harden_append_tutorial_completed.sql`
+- `supabase/migrations/20260908120000_document_shares.sql`
 
 ## Exclusions
 
