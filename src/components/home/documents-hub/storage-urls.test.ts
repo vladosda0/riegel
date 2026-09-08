@@ -9,6 +9,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 
 import {
+  downloadFromUrl,
   downloadStorageUrl,
   ensureFilenameExtension,
   openStorageUrlInNewTab,
@@ -243,5 +244,54 @@ describe("openStorageUrlInNewTab", () => {
     expect(fakeTab.close).toHaveBeenCalled();
     expect(fakeTab.location.href).toBe("");
     openSpy.mockRestore();
+  });
+});
+
+describe("downloadFromUrl", () => {
+  // The public share page holds a signed URL from the get-shared-document
+  // Edge Function and no storage client, so it uses the fetch-to-blob half of
+  // downloadStorageUrl on its own. Same guarantees, minus the signing.
+  let clickSpy: ReturnType<typeof vi.spyOn>;
+  let clickedDownloadNames: string[];
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockCreateSignedUrl.mockReset();
+    clickedDownloadNames = [];
+    clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        clickedDownloadNames.push(this.download);
+      });
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("URL", Object.assign(Object.create(URL), {
+      createObjectURL: vi.fn(() => "blob:mock-object-url"),
+      revokeObjectURL: vi.fn(),
+    }));
+  });
+
+  afterEach(() => {
+    clickSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  it("fetches the URL as given and saves under the sanitized name, never signing", async () => {
+    fetchMock.mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob(["x"])) });
+
+    const ok = await downloadFromUrl("https://signed.example/y?token=t", "Договор №5", "dogovor-5.pdf");
+
+    expect(ok).toBe(true);
+    expect(mockCreateSignedUrl).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith("https://signed.example/y?token=t");
+    expect(clickedDownloadNames).toEqual(["Договор №5.pdf"]);
+  });
+
+  it("returns false on a non-OK response and on a rejected fetch", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 404, blob: () => Promise.resolve(new Blob(["{}"])) });
+    expect(await downloadFromUrl("https://x", "n", "n.pdf")).toBe(false);
+    fetchMock.mockRejectedValueOnce(new TypeError("network down"));
+    expect(await downloadFromUrl("https://x", "n", "n.pdf")).toBe(false);
+    expect(clickSpy).not.toHaveBeenCalled();
   });
 });

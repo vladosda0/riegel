@@ -42,6 +42,31 @@ const SCRUB_RULES: ScrubRule[] = [
     replacement: "Bearer [TOKEN]",
   },
   {
+    // Credential-bearing PATH segments. On these routes the segment IS the
+    // credential, and the query-param rule below cannot see it because it is
+    // not a query param. Kept in step with the `secret: true` entries of
+    // ANALYTICS_ROUTES (src/lib/analytics.ts), which redact the same three
+    // routes for Metrika.
+    name: "credential-path-segment",
+    // %2f as well as /: the app itself percent-encodes these paths into a
+    // query param (InviteAccept builds /auth/login?next=%2Finvite%2Faccept%2F…),
+    // and the encoded form reached the tracker verbatim while this matched only
+    // literal separators. The `i` flag covers %2F and an upper-cased route.
+    pattern:
+      /((?:\/|%2f)(?:share(?:\/|%2f)document|share(?:\/|%2f)estimate|invite(?:\/|%2f)accept)(?:\/|%2f))[^/?#&\s"'<>]+/gi,
+    replacement: "$1[FILTERED]",
+  },
+  {
+    // A document-share token also travels OUTSIDE any URL: it is the second
+    // element of the react-query key, which the data-layer error reporter puts
+    // in `extra`. public.create_document_share mints it as
+    // encode(gen_random_bytes(24), 'hex'): exactly 48 lowercase hex chars.
+    // The \b anchors keep it from biting a 40- or 64-char digest.
+    name: "share-token",
+    pattern: /\b[0-9a-f]{48}\b/g,
+    replacement: "[TOKEN]",
+  },
+  {
     // Sensitive query-string params (keeps the param name, drops the value).
     name: "sensitive-query-param",
     pattern:

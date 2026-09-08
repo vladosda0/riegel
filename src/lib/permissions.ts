@@ -201,6 +201,19 @@ export function seamAllowsEstimateExportCsv(seam: ProjectAuthoritySeam): boolean
   return role === "owner" || role === "co_owner";
 }
 
+/**
+ * May this member mint or revoke a PUBLIC download link for a project document?
+ *
+ * Mirrors public.create_document_share / revoke_document_share in rovno-db:
+ * owner or co_owner of the project. The same rule as the CSV-export gate above,
+ * but a separate function on purpose: a public link is a different decision
+ * from an export, and the two must be able to diverge without a rename.
+ */
+export function seamAllowsDocumentPublicShare(seam: ProjectAuthoritySeam): boolean {
+  const role = getProjectRole(seam);
+  return role === "owner" || role === "co_owner";
+}
+
 /** How Supabase row loads should hydrate money-bearing tables vs operational RPCs. */
 export type FinanceRowLoadAccess = "full" | "operational_summary" | "none";
 

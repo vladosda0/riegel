@@ -286,6 +286,16 @@ describe("analyticsPageUrl path sanitising", () => {
     expect(url).not.toContain("QA-SHARE-TOKEN");
   });
 
+  it("replaces a document share token in the path with the route template", async () => {
+    setUrl("/share/document/QA-DOCUMENT-TOKEN");
+    const { analyticsPageUrl } = await loadAnalytics();
+
+    const url = analyticsPageUrl();
+
+    expect(url).toBe(`${window.location.origin}/share/document/:token`);
+    expect(url).not.toContain("QA-DOCUMENT-TOKEN");
+  });
+
   it("replaces an invite token in the path with the route template", async () => {
     setUrl("/invite/accept/QA-INVITE-TOKEN?lang=ru");
     const { analyticsPageUrl } = await loadAnalytics();
@@ -347,9 +357,41 @@ describe("ANALYTICS_ROUTES stays in step with App.tsx", () => {
     expect(missing).toEqual([]);
   });
 
-  it("marks the two token-bearing routes, and only those, as secret", () => {
+  it("lists no pattern App.tsx no longer declares", () => {
+    // The reverse direction of the check above. Without it a deleted route
+    // lingers here forever: nothing can match a dead pattern, so the cost is
+    // the comment above claiming a parity that does not hold, which the next
+    // session trusts instead of re-deriving. /project/:id/activity outlived
+    // its route exactly this way.
+    const app = readFileSync(resolve(process.cwd(), "src/App.tsx"), "utf-8");
+    const declared = [...app.matchAll(/path="([^"]+)"/g)]
+      .map((match) => match[1])
+      .filter((path) => path !== "*");
+    const relative = declared.filter((path) => !path.startsWith("/"));
+
+    const stale = ANALYTICS_ROUTES.map((route) => route.pattern).filter(
+      (pattern) =>
+        !declared.includes(pattern) &&
+        // The parent prefix must itself be a declared absolute route, or a
+        // stale `/org/:id/documents` would ride in on the `documents` child of
+        // `/project/:id`.
+        !relative.some(
+          (child) =>
+            pattern.endsWith(`/${child}`) &&
+            declared.includes(pattern.slice(0, -(child.length + 1))),
+        ),
+    );
+
+    expect(stale).toEqual([]);
+  });
+
+  it("marks the three token-bearing routes, and only those, as secret", () => {
     const secret = ANALYTICS_ROUTES.filter((route) => route.secret).map((route) => route.pattern);
 
-    expect(secret).toEqual(["/share/estimate/:shareId", "/invite/accept/:inviteToken"]);
+    expect(secret).toEqual([
+      "/share/estimate/:shareId",
+      "/share/document/:token",
+      "/invite/accept/:inviteToken",
+    ]);
   });
 });

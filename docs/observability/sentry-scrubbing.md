@@ -38,10 +38,19 @@ contexts, request url/query — recursively, keys included).
 |---|---|---|
 | `jwt` | `eyJ…​.…​.…​` three base64url segments | `[TOKEN]` |
 | `bearer` | `Bearer <opaque>` | `Bearer [TOKEN]` |
+| `credential-path-segment` | `/share/document/<t>`, `/share/estimate/<t>`, `/invite/accept/<t>`, and the same three percent-encoded (`%2Fshare%2Fdocument%2F<t>`, as the app writes them into `?next=`) | `…/[FILTERED]` |
+| `share-token` | a bare 48-lowercase-hex document-share token | `[TOKEN]` |
 | `sensitive-query-param` | `?…apikey/api_key/token/access_token/refresh_token/password/secret/code=VALUE` | `…=[FILTERED]` |
 | `email` | `local@domain.tld` | `[EMAIL]` |
 | `phone-ru` | `+7 / 8 / 7` + 10 digits with spaces/dashes/parens | `[PHONE]` |
 | `address-ru` | `ул.` `г.` `д.` `кв.` `город` `улица` … + following token | `[ADDRESS]` |
+
+A credential that is neither in a URL nor 48-hex (an estimate share id, an
+invite UUID) is not reachable by a text rule at all. Those are redacted at the
+source instead: `redactQueryKey` in `src/lib/query-client.ts` replaces the
+value elements of a credential-bearing react-query key before it is attached
+to an event as `extra.queryKey`. Keep its `CREDENTIAL_QUERY_KEYS` set in step
+with the `secret: true` routes in `src/lib/analytics.ts`.
 
 The exact regexes live in `SCRUB_RULES` in `scrub.ts` with inline comments —
 this table is the human-readable index, the code is the source of truth.
@@ -74,7 +83,7 @@ this table is the human-readable index, the code is the source of truth.
 
 ## How it's tested
 
-- `src/lib/observability/scrub.test.ts` (16 cases) — the load-bearing suite:
+- `src/lib/observability/scrub.test.ts` (21 cases) — the load-bearing suite:
   every rule, structural scrubbing, circular refs, depth cap, and the
   fail-closed drop.
 - `rovno-db/supabase/functions/_shared/scrub.test.ts` (Deno) — asserts the

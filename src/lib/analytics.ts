@@ -326,6 +326,7 @@ export const ANALYTICS_ROUTES: readonly { pattern: string; secret?: boolean }[] 
   { pattern: "/promo/redeem" },
   { pattern: "/theme" },
   { pattern: "/share/estimate/:shareId", secret: true },
+  { pattern: "/share/document/:token", secret: true },
   { pattern: "/invite/accept/:inviteToken", secret: true },
   { pattern: "/blog" },
   { pattern: "/blog/tag/:tag" },
@@ -364,7 +365,6 @@ export const ANALYTICS_ROUTES: readonly { pattern: string; secret?: boolean }[] 
   { pattern: "/project/:id/hr" },
   { pattern: "/project/:id/gallery" },
   { pattern: "/project/:id/documents" },
-  { pattern: "/project/:id/activity" },
   { pattern: "/project/:id/participants" },
 ];
 

@@ -43,6 +43,12 @@ export interface DeleteProjectDocumentInput {
   documentId: string;
 }
 
+export interface UpdateProjectDocumentVisibilityInput {
+  projectId: string;
+  documentId: string;
+  visibilityClass: DocMediaVisibilityClass;
+}
+
 export interface ProjectDocumentMutationResult {
   documentId: string;
   versionId: string;
@@ -110,6 +116,7 @@ export interface DocumentsMediaSource {
   createProjectDocumentVersion: (input: CreateProjectDocumentVersionInput) => Promise<ProjectDocumentMutationResult>;
   archiveProjectDocument: (input: ArchiveProjectDocumentInput) => Promise<ProjectDocumentMutationResult>;
   deleteProjectDocument: (input: DeleteProjectDocumentInput) => Promise<void>;
+  updateProjectDocumentVisibility: (input: UpdateProjectDocumentVisibilityInput) => Promise<void>;
   prepareDocumentUpload: (input: PrepareDocumentUploadInput) => Promise<PrepareUploadResult>;
   finalizeDocumentUpload: (uploadIntentId: string) => Promise<FinalizeDocumentUploadResult>;
   prepareMediaUpload: (input: PrepareMediaUploadInput) => Promise<PrepareUploadResult>;
@@ -230,6 +237,10 @@ function createBrowserDocumentsMediaSource(mode: WorkspaceMode["kind"]): Documen
         versionId,
         versionNumber,
       };
+    },
+    async updateProjectDocumentVisibility(input) {
+      getDocumentForMutation(input.projectId, input.documentId);
+      store.updateDocument(input.documentId, { visibility_class: input.visibilityClass });
     },
     async deleteProjectDocument(input) {
       store.deleteDocument(input.documentId);
@@ -693,6 +704,33 @@ export async function deleteSupabaseProjectDocument(
   }
 }
 
+/**
+ * Flip a document between 'shared_project' and 'internal'.
+ *
+ * A plain UPDATE: the documents_update policy admits project writers, and the
+ * guard_documents_visibility_class_change trigger additionally requires
+ * internal-doc visibility to change the class in either direction, so the
+ * backend rejects anyone the UI should not have offered this to. Flipping to
+ * 'internal' also revokes any public share of the document server-side
+ * (revoke_document_shares_on_internal_trigger). That happens in the database,
+ * where the share cache cannot see it, so the caller must invalidate the
+ * document-shares query afterwards; ProjectDocuments does this in
+ * applyVisibilityChange.
+ */
+export async function updateSupabaseProjectDocumentVisibility(
+  supabase: TypedSupabaseClient,
+  input: UpdateProjectDocumentVisibilityInput,
+): Promise<void> {
+  const { error } = await supabase
+    .from("documents")
+    .update({ visibility_class: input.visibilityClass })
+    .eq("id", input.documentId);
+
+  if (error) {
+    throw error;
+  }
+}
+
 export async function prepareSupabaseDocumentUpload(
   supabase: TypedSupabaseClient,
   input: PrepareDocumentUploadInput,
@@ -976,6 +1014,9 @@ export function createSupabaseDocumentsMediaSource(
     async archiveProjectDocument(input) {
       return archiveSupabaseProjectDocument(supabase, profileId, input);
     },
+    async updateProjectDocumentVisibility(input) {
+      return updateSupabaseProjectDocumentVisibility(supabase, input);
+    },
     async deleteProjectDocument(input) {
       return deleteSupabaseProjectDocument(supabase, input);
     },
@@ -1054,6 +1095,14 @@ export async function deleteProjectDocument(
 ): Promise<void> {
   const source = await getDocumentsMediaSource(mode);
   return source.deleteProjectDocument(input);
+}
+
+export async function updateProjectDocumentVisibility(
+  mode: WorkspaceMode,
+  input: UpdateProjectDocumentVisibilityInput,
+): Promise<void> {
+  const source = await getDocumentsMediaSource(mode);
+  return source.updateProjectDocumentVisibility(input);
 }
 
 export async function prepareDocumentUpload(
