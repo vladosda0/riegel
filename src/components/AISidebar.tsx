@@ -41,6 +41,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { MediaImage } from "@/components/MediaImage";
 import { WorkLog } from "@/components/ai/WorkLog";
+import { AssistantAvatar } from "@/components/ai/AssistantAvatar";
+import { AssistantWelcome } from "@/components/ai/AssistantWelcome";
 import { SuggestionChips } from "@/components/ai/SuggestionChips";
 import { EventFeedItem } from "@/components/ai/EventFeedItem";
 import { GroundingCallout } from "@/components/ai/GroundingCallout";
@@ -2859,13 +2861,15 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
           isUserMessage ? "bg-sidebar-accent/40" : "bg-muted/20"
         }`}>
           <div className="flex items-center gap-1.5">
-            <div className="flex h-5 w-5 items-center justify-center rounded-md bg-muted">
-              {isUserMessage
-                ? <User className="h-3 w-3 text-muted-foreground" />
-                : <Bot className="h-3 w-3 text-accent" />}
-            </div>
+            {isUserMessage ? (
+              <div className="flex h-5 w-5 items-center justify-center rounded-md bg-muted">
+                <User className="h-3 w-3 text-muted-foreground" />
+              </div>
+            ) : (
+              <AssistantAvatar className="h-5 w-5" iconClassName="h-3 w-3" decorative />
+            )}
             <p className="text-caption font-medium text-foreground">
-              {isUserMessage ? t("ai.sidebar.chat.you") : t("ai.sidebar.chat.ai")}
+              {isUserMessage ? t("ai.sidebar.chat.you") : t("ai.assistant.name")}
             </p>
             {isLearnMessage && (
               <span className="rounded-pill bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent">
@@ -3252,7 +3256,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
             {isGuest ? (
               <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
                 <div className="glass rounded-card p-sp-3 space-y-sp-2">
-                  <Bot className="mx-auto h-10 w-10 text-muted-foreground/40" />
+                  <AssistantAvatar className="mx-auto h-12 w-12" iconClassName="h-6 w-6" decorative />
                   <p className="text-body-sm font-semibold text-foreground">{t("ai.sidebar.guest.locked")}</p>
                   <p className="text-caption text-muted-foreground">{t("ai.sidebar.guest.loginHint")}</p>
                   <Button
@@ -3350,9 +3354,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
                     <ScrollArea ref={scrollRef} className="flex-1 min-h-0 min-w-0">
                       <div className="space-y-2 py-2 pr-1 min-w-0 max-w-full">
                         {streamRows.length === 0 && activeThreadMessages.length === 0 ? (
-                          <p className="text-caption text-muted-foreground text-center py-8">
-                            {t("ai.sidebar.archive.noActivity")}
-                          </p>
+                          <AssistantWelcome />
                         ) : (
                           <>
                             {streamRows.length > 0 ? (
@@ -3535,7 +3537,7 @@ export function AISidebar({ collapsed, onCollapsedChange }: AISidebarProps) {
                                                         }`}
                                                       >
                                                         <p className="text-[10px] font-medium text-muted-foreground mb-0.5">
-                                                          {m.role === "user" ? t("ai.sidebar.chat.you") : t("ai.sidebar.chat.ai")}
+                                                          {m.role === "user" ? t("ai.sidebar.chat.you") : t("ai.assistant.name")}
                                                         </p>
                                                         <p className="text-[11px] text-foreground whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                                                           {m.content}

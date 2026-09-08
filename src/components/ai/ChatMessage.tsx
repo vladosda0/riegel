@@ -1,6 +1,6 @@
-import { Bot } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { AIMessage } from "@/types/ai";
+import { AssistantAvatar } from "./AssistantAvatar";
 import { PreviewCard } from "./PreviewCard";
 import { ActionBar } from "./ActionBar";
 
@@ -19,11 +19,7 @@ export function ChatMessage({ message, onConfirm, onCancel, onNewVersion }: Chat
 
   return (
     <div className={`flex gap-2 w-full min-w-0 ${isUser ? "justify-end" : "justify-start"}`}>
-      {!isUser && (
-        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent/10 mt-0.5">
-          <Bot className="h-3.5 w-3.5 text-accent" />
-        </div>
-      )}
+      {!isUser && <AssistantAvatar className="h-6 w-6 mt-0.5" iconClassName="h-3.5 w-3.5" />}
       <div className={`min-w-0 space-y-1.5 ${isUser ? "max-w-[85%] items-end ml-auto" : "flex-1"}`}>
         <div
           className={`rounded-card px-3 py-2 text-body-sm break-words ${
