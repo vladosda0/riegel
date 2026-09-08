@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import ProjectDocuments from "@/pages/project/ProjectDocuments";
 import type { Document, MemberRole } from "@/types/entities";
@@ -72,6 +72,20 @@ vi.mock("@/hooks/use-orgs", () => ({
 
 vi.mock("@/hooks/use-workspace-documents-source", () => ({
   useWorkspaceDocuments: () => ({ data: [], isPending: false }),
+}));
+
+const { mockUseDocumentShares, mockShareCreate, mockShareRevoke } = vi.hoisted(() => ({
+  mockUseDocumentShares: vi.fn(),
+  mockShareCreate: vi.fn(),
+  mockShareRevoke: vi.fn(),
+}));
+
+vi.mock("@/hooks/use-document-shares", () => ({
+  useDocumentShares: (projectId: string, options?: { enabled?: boolean }) => mockUseDocumentShares(projectId, options),
+  useDocumentShareMutations: () => ({
+    create: { mutateAsync: mockShareCreate, isPending: false },
+    revoke: { mutateAsync: mockShareRevoke, isPending: false },
+  }),
 }));
 
 vi.mock("@tanstack/react-query", async () => {
@@ -163,6 +177,16 @@ describe("ProjectDocuments", () => {
       createDocument: vi.fn(),
       archiveDocument: vi.fn(),
       deleteDocument: vi.fn(),
+      updateDocumentVisibility: vi.fn().mockResolvedValue(undefined),
+    });
+    mockUseDocumentShares.mockReset();
+    mockUseDocumentShares.mockReturnValue({ sharesByDocumentId: new Map(), isLoading: false });
+    mockShareCreate.mockReset();
+    mockShareRevoke.mockReset();
+    mockShareCreate.mockResolvedValue({
+      documentId: "doc-1",
+      shareToken: "0123456789abcdef0123456789abcdef0123456789abcdef",
+      createdAt: "2026-09-08T00:00:00Z",
     });
     mockUseDocumentUploadMutations.mockReturnValue({
       prepareUpload: vi.fn(),
@@ -257,7 +281,7 @@ describe("ProjectDocuments", () => {
     expect(screen.getByText("Document preview")).toBeInTheDocument();
   });
 
-  it("shows print plus disabled download and share actions for Supabase preview", () => {
+  it("shows print plus disabled download and share actions for a Supabase document without a file", () => {
     mockUseWorkspaceMode.mockReturnValue({ kind: "supabase", profileId: "user-1" });
     mockUseProjectDocumentsState.mockReturnValue({
       documents: [createDocument({
@@ -278,9 +302,11 @@ describe("ProjectDocuments", () => {
     fireEvent.click(screen.getByRole("button", { name: /Supabase Document/ }));
 
     expect(screen.getByRole("button", { name: "Print" })).toBeInTheDocument();
+    // No storage object yet (upload not finalized): nothing to sign, nothing to
+    // link. Share is live for an owner in general, but not for this document.
     expect(screen.getByRole("button", { name: "Download" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Share" })).toBeDisabled();
-    expect(screen.getByText("Download and sharing are coming soon.")).toBeInTheDocument();
+    expect(screen.getByText("The file is not ready for download yet.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Comment/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Confirm acknowledgement/i })).not.toBeInTheDocument();
   });
@@ -569,5 +595,262 @@ describe("ProjectDocuments", () => {
     expect(screen.queryByRole("button", { name: "Generate" })).not.toBeInTheDocument();
     expect(screen.queryByTitle("Archive")).not.toBeInTheDocument();
     expect(screen.queryByTitle("Delete")).not.toBeInTheDocument();
+  });
+});
+
+describe("ProjectDocuments public links, downloads and visibility", () => {
+  function storedDocument(partial: Partial<Document> = {}): Document {
+    return createDocument({
+      versions: [{
+        id: "version-1",
+        document_id: "doc-1",
+        number: 1,
+        status: "draft",
+        content: "",
+        storage: {
+          id: "so-1",
+          bucket: "project-documents",
+          objectPath: "p/project-1/contract.pdf",
+          filename: "contract.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 1024,
+        },
+      }],
+      ...partial,
+    });
+  }
+
+  let clickSpy: ReturnType<typeof vi.spyOn>;
+  let clickedDownloadNames: string[];
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockUseCurrentUser.mockReset();
+    mockUseProject.mockReset();
+    mockUseWorkspaceMode.mockReset();
+    mockUseProjectDocumentsState.mockReset();
+    mockUseProjectDocumentMutations.mockReset();
+    mockUseDocumentUploadMutations.mockReset();
+    mockUsePermission.mockReset();
+    mockCreateSignedUrl.mockReset();
+    mockToast.mockReset();
+    mockUseCurrentUser.mockReturnValue({ id: "user-1" });
+    mockUseProject.mockReturnValue({ project: { title: "Apartment Renovation" } });
+    mockUsePermission.mockReturnValue(buildPermission("owner"));
+    mockUseWorkspaceMode.mockReturnValue({ kind: "supabase", profileId: "user-1" });
+    mockUseProjectDocumentMutations.mockReturnValue({
+      createDocument: vi.fn(),
+      archiveDocument: vi.fn(),
+      deleteDocument: vi.fn(),
+      updateDocumentVisibility: vi.fn().mockResolvedValue(undefined),
+    });
+    mockUseDocumentUploadMutations.mockReturnValue({
+      prepareUpload: vi.fn(),
+      uploadBytes: vi.fn(),
+      finalizeUpload: vi.fn(),
+    });
+    mockUseDocumentShares.mockReset();
+    mockUseDocumentShares.mockReturnValue({ sharesByDocumentId: new Map(), isLoading: false });
+    mockShareCreate.mockReset();
+    mockShareCreate.mockResolvedValue({
+      documentId: "doc-1",
+      shareToken: "0123456789abcdef0123456789abcdef0123456789abcdef",
+      createdAt: "2026-09-08T00:00:00Z",
+    });
+    mockCreateSignedUrl.mockResolvedValue({ data: { signedUrl: "https://signed.example/contract.pdf" }, error: null });
+
+    clickedDownloadNames = [];
+    clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        clickedDownloadNames.push(this.download);
+      });
+    fetchMock = vi.fn().mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob(["x"])) });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("URL", Object.assign(Object.create(URL), {
+      createObjectURL: vi.fn(() => "blob:mock-object-url"),
+      revokeObjectURL: vi.fn(),
+    }));
+    // Radix Select needs these jsdom polyfills (same pattern as OnboardingStepper.test.tsx).
+    class MockPointerEvent extends MouseEvent {
+      pointerType: string;
+      isPrimary: boolean;
+      constructor(type: string, params: MouseEventInit & { pointerType?: string; isPrimary?: boolean } = {}) {
+        super(type, params);
+        this.pointerType = params.pointerType ?? "mouse";
+        this.isPrimary = params.isPrimary ?? true;
+      }
+    }
+    Object.defineProperty(window, "PointerEvent", { configurable: true, writable: true, value: MockPointerEvent });
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, writable: true, value: () => {} });
+    Object.defineProperty(HTMLElement.prototype, "hasPointerCapture", { configurable: true, writable: true, value: () => false });
+    Object.defineProperty(HTMLElement.prototype, "setPointerCapture", { configurable: true, writable: true, value: () => {} });
+    Object.defineProperty(HTMLElement.prototype, "releasePointerCapture", { configurable: true, writable: true, value: () => {} });
+  });
+
+  afterEach(() => {
+    clickSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  it("gives an owner Download and Share on a shared document row, and asks for the project's shares", () => {
+    mockUseProjectDocumentsState.mockReturnValue({ documents: [storedDocument()], isLoading: false });
+
+    renderProjectDocuments();
+
+    expect(screen.getByTitle("Download")).toBeInTheDocument();
+    expect(screen.getByTitle("Share")).toBeInTheDocument();
+    expect(mockUseDocumentShares).toHaveBeenCalledWith("project-1", { enabled: true });
+  });
+
+  it("marks a row whose public link is already active", () => {
+    mockUseProjectDocumentsState.mockReturnValue({ documents: [storedDocument()], isLoading: false });
+    mockUseDocumentShares.mockReturnValue({
+      sharesByDocumentId: new Map([["doc-1", { documentId: "doc-1", shareToken: "t", createdAt: "2026-09-08T00:00:00Z" }]]),
+      isLoading: false,
+    });
+
+    renderProjectDocuments();
+
+    expect(screen.getByTitle("Public link is active")).toBeInTheDocument();
+    expect(screen.queryByTitle("Share")).not.toBeInTheDocument();
+  });
+
+  it("gives a client Download but never Share, and skips the shares query", () => {
+    mockUsePermission.mockReturnValue(buildPermission("viewer"));
+    mockUseProjectDocumentsState.mockReturnValue({ documents: [storedDocument()], isLoading: false });
+
+    renderProjectDocuments();
+
+    expect(screen.getByTitle("Download")).toBeInTheDocument();
+    expect(screen.queryByTitle("Share")).not.toBeInTheDocument();
+    expect(mockUseDocumentShares).toHaveBeenCalledWith("project-1", { enabled: false });
+  });
+
+  it("offers no Download on a row without a file", () => {
+    mockUseProjectDocumentsState.mockReturnValue({ documents: [createDocument({ versions: [{
+      id: "version-1", document_id: "doc-1", number: 1, status: "draft", content: "",
+    }] })], isLoading: false });
+
+    renderProjectDocuments();
+
+    expect(screen.queryByTitle("Download")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Share")).not.toBeInTheDocument();
+  });
+
+  it("downloads from the row: one signing, one fetch, saved under the stored filename", async () => {
+    mockUseProjectDocumentsState.mockReturnValue({ documents: [storedDocument()], isLoading: false });
+
+    renderProjectDocuments();
+    fireEvent.click(screen.getByTitle("Download"));
+
+    await waitFor(() => expect(clickedDownloadNames).toEqual(["contract.pdf"]));
+    expect(mockCreateSignedUrl).toHaveBeenCalledTimes(1);
+    expect(mockCreateSignedUrl).toHaveBeenCalledWith("p/project-1/contract.pdf", 3600);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mockToast).not.toHaveBeenCalled();
+  });
+
+  it("opens the share dialog from the row and mints the link", async () => {
+    mockUseProjectDocumentsState.mockReturnValue({ documents: [storedDocument()], isLoading: false });
+
+    renderProjectDocuments();
+    fireEvent.click(screen.getByTitle("Share"));
+
+    expect(await screen.findByText("Share document")).toBeInTheDocument();
+    await waitFor(() => expect(mockShareCreate).toHaveBeenCalledWith("doc-1"));
+  });
+
+  it("in the preview, an internal document shows the warning and Share stays live for the owner", async () => {
+    mockUseProjectDocumentsState.mockReturnValue({
+      documents: [storedDocument({ title: "Internal memo", visibility_class: "internal" })],
+      isLoading: false,
+    });
+
+    renderProjectDocuments();
+    fireEvent.click(screen.getByText("Internal memo"));
+
+    expect(await screen.findByText("Document preview")).toBeInTheDocument();
+    expect(screen.getByTestId("document-internal-share-warning")).toHaveTextContent("Internal documents cannot be shared.");
+    const share = screen.getByRole("button", { name: "Share" });
+    expect(share).toBeEnabled();
+
+    fireEvent.click(share);
+    expect(await screen.findByTestId("document-share-internal-warning")).toBeInTheDocument();
+    expect(mockShareCreate).not.toHaveBeenCalled();
+  });
+
+  it("in the preview, the owner gets a visibility switch and a client does not", async () => {
+    mockUseProjectDocumentsState.mockReturnValue({ documents: [storedDocument()], isLoading: false });
+
+    const { unmount } = renderProjectDocuments();
+    fireEvent.click(screen.getByText("Document One"));
+    expect(await screen.findByText("Document preview")).toBeInTheDocument();
+    expect(screen.getByTestId("document-visibility-select")).toBeInTheDocument();
+    unmount();
+
+    mockUsePermission.mockReturnValue(buildPermission("viewer"));
+    renderProjectDocuments();
+    fireEvent.click(screen.getByText("Document One"));
+    expect(await screen.findByText("Document preview")).toBeInTheDocument();
+    expect(screen.queryByTestId("document-visibility-select")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Share" })).not.toBeInTheDocument();
+  });
+
+  it("switching to Internal asks for confirmation, warns about the live link, then persists", async () => {
+    const updateDocumentVisibility = vi.fn().mockResolvedValue(undefined);
+    mockUseProjectDocumentMutations.mockReturnValue({
+      createDocument: vi.fn(),
+      archiveDocument: vi.fn(),
+      deleteDocument: vi.fn(),
+      updateDocumentVisibility,
+    });
+    mockUseDocumentShares.mockReturnValue({
+      sharesByDocumentId: new Map([["doc-1", { documentId: "doc-1", shareToken: "t", createdAt: "2026-09-08T00:00:00Z" }]]),
+      isLoading: false,
+    });
+    mockUseProjectDocumentsState.mockReturnValue({ documents: [storedDocument()], isLoading: false });
+
+    renderProjectDocuments();
+    fireEvent.click(screen.getByText("Document One"));
+    await screen.findByText("Document preview");
+
+    fireEvent.pointerDown(screen.getByTestId("document-visibility-select"));
+    fireEvent.click(await screen.findByRole("option", { name: "Internal" }));
+
+    expect(await screen.findByText("Make the document internal?")).toBeInTheDocument();
+    expect(screen.getByText(/The public link to this document will be revoked/)).toBeInTheDocument();
+    expect(updateDocumentVisibility).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Change" }));
+    });
+
+    await waitFor(() => expect(updateDocumentVisibility).toHaveBeenCalledWith({ documentId: "doc-1", visibilityClass: "internal" }));
+    expect(mockToast).toHaveBeenCalledWith(expect.objectContaining({ title: "Document visibility updated" }));
+  });
+
+  it("cancelling the confirmation changes nothing", async () => {
+    const updateDocumentVisibility = vi.fn().mockResolvedValue(undefined);
+    mockUseProjectDocumentMutations.mockReturnValue({
+      createDocument: vi.fn(),
+      archiveDocument: vi.fn(),
+      deleteDocument: vi.fn(),
+      updateDocumentVisibility,
+    });
+    mockUseProjectDocumentsState.mockReturnValue({ documents: [storedDocument()], isLoading: false });
+
+    renderProjectDocuments();
+    fireEvent.click(screen.getByText("Document One"));
+    await screen.findByText("Document preview");
+
+    fireEvent.pointerDown(screen.getByTestId("document-visibility-select"));
+    fireEvent.click(await screen.findByRole("option", { name: "Internal" }));
+    await screen.findByText("Make the document internal?");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    });
+
+    expect(updateDocumentVisibility).not.toHaveBeenCalled();
   });
 });

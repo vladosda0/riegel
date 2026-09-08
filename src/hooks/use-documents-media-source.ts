@@ -12,9 +12,11 @@ import {
   finalizeMediaUpload as finalizeMediaUploadSource,
   deleteProjectMedia as deleteProjectMediaSource,
   updateProjectMediaCaption as updateProjectMediaCaptionSource,
+  updateProjectDocumentVisibility as updateProjectDocumentVisibilitySource,
   uploadBytes as uploadBytesSource,
   getDocumentsMediaSource,
   type ArchiveProjectDocumentInput,
+  type UpdateProjectDocumentVisibilityInput,
   type CreateProjectDocumentInput,
   type CreateProjectDocumentVersionInput,
   type PrepareDocumentUploadInput,
@@ -216,11 +218,26 @@ export function useProjectDocumentMutations(projectId: string) {
     }
   }, [invalidateProjectDocuments, mode, projectId]);
 
+  const updateDocumentVisibility = useCallback(async (
+    input: Omit<UpdateProjectDocumentVisibilityInput, "projectId">,
+  ) => {
+    const resolvedMode = assertDocumentsMutationWorkspaceMode(mode);
+    await updateProjectDocumentVisibilitySource(resolvedMode, {
+      ...input,
+      projectId,
+    });
+
+    if (resolvedMode.kind === "supabase") {
+      await invalidateProjectDocuments(resolvedMode);
+    }
+  }, [invalidateProjectDocuments, mode, projectId]);
+
   return {
     createDocument,
     createDocumentVersion,
     archiveDocument,
     deleteDocument,
+    updateDocumentVisibility,
   };
 }
 

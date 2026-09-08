@@ -49,6 +49,7 @@ import { DocumentGridCard } from "@/components/documents/DocumentGridCard";
 import { DocumentListItem } from "@/components/documents/DocumentListItem";
 import { VisibilityClassBadge } from "@/components/documents/VisibilityClassBadge";
 import { DocumentsViewModeToggle, type DocumentViewMode } from "@/components/documents/DocumentsViewModeToggle";
+import { DocumentShareDialog } from "@/components/documents/DocumentShareDialog";
 import { PreviewCard } from "@/components/ai/PreviewCard";
 import { ActionBar } from "@/components/ai/ActionBar";
 import { ProjectWorkflowEmptyState } from "@/components/ProjectWorkflowEmptyState";
@@ -65,6 +66,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { useActiveOrg, useImportDocumentsToProject, useOrgDocuments } from "@/hooks/use-orgs";
 import { useWorkspaceDocuments } from "@/hooks/use-workspace-documents-source";
+import { useDocumentShares } from "@/hooks/use-document-shares";
 import { documentsMediaQueryKeys } from "@/hooks/use-documents-media-source";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
@@ -78,8 +80,10 @@ import {
 import {
   getProjectDomainAccess,
   projectDomainAllowsContribute,
+  seamAllowsDocumentPublicShare,
   usePermission,
 } from "@/lib/permissions";
+import { cn } from "@/lib/utils";
 import { resolveActionState } from "@/lib/permission-contract-actions";
 import {
   addDocument,
@@ -189,6 +193,7 @@ export default function ProjectDocuments() {
   const {
     archiveDocument,
     deleteDocument: deleteDocumentMutation,
+    updateDocumentVisibility,
   } = useProjectDocumentMutations(pid);
   const {
     prepareUpload,
@@ -201,6 +206,9 @@ export default function ProjectDocuments() {
   const canDeleteDocuments = resolveActionState(perm.role, "documents_media", "delete") === "enabled";
   const canManageDocuments = resolveActionState(perm.role, "documents_media", "rename_or_archive") === "enabled";
   const canCommentOnDocuments = !isSupabaseMode && projectDomainAllowsContribute(commentsAccess);
+  // Public links mirror create_document_share: owner / co_owner, Supabase only
+  // (a local or demo document has no storage object behind it to sign).
+  const canShareDocuments = isSupabaseMode && seamAllowsDocumentPublicShare(perm.seam);
 
   const [downloadingViewedDocument, setDownloadingViewedDocument] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -231,6 +239,14 @@ export default function ProjectDocuments() {
   const [viewMode, setViewMode] = useState<DocumentViewMode>("list");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [shareDoc, setShareDoc] = useState<DocType | null>(null);
+  const [downloadingRowIds, setDownloadingRowIds] = useState<Set<string>>(() => new Set());
+  const [pendingVisibility, setPendingVisibility] = useState<{
+    documentId: string;
+    next: DocMediaVisibilityClass;
+  } | null>(null);
+  const [changingVisibility, setChangingVisibility] = useState(false);
+  const { sharesByDocumentId } = useDocumentShares(pid, { enabled: canShareDocuments });
 
   const effectiveInternalDocs = useMemo(
     () => effectiveInternalDocsVisibilityForSeam(perm.seam.membership),
@@ -238,6 +254,9 @@ export default function ProjectDocuments() {
   );
   const canSelectInternalUpload = canViewInternalDocuments(effectiveInternalDocs);
   const showDocumentVisibilityBadges = canSelectInternalUpload;
+  // Mirrors the guard_documents_visibility_class_change trigger: a project
+  // writer with internal-doc visibility may flip a document in either direction.
+  const canChangeVisibility = canManageDocuments && canSelectInternalUpload;
 
   useEffect(() => {
     if (!canSelectInternalUpload && uploadVisibilityClass === "internal") {
@@ -663,6 +682,122 @@ export default function ProjectDocuments() {
     }
   }
 
+  function isDocumentArchived(document: DocType): boolean {
+    return document.versions[document.versions.length - 1]?.status === "archived";
+  }
+
+  /** Same fallback rule as `viewedStorage` below, for list rows. */
+  function documentStorage(document: DocType) {
+    const latest = document.versions[document.versions.length - 1];
+    return latest?.storage
+      ?? (isDocumentArchived(document)
+        ? [...document.versions].reverse().find((version) => version.storage)?.storage
+        : undefined);
+  }
+
+  function documentHasDownloadableFile(document: DocType): boolean {
+    if (isSupabaseMode) {
+      const storage = documentStorage(document);
+      return Boolean(storage?.bucket && storage.objectPath);
+    }
+    return Boolean(document.versions[document.versions.length - 1]?.content.trim());
+  }
+
+  /**
+   * The share dialog opens for any live document with a file. The class is
+   * deliberately NOT part of this gate: an internal document opens the dialog
+   * in its "why there is no link, and how to get one" state (see
+   * DocumentShareDialog), rather than hiding the affordance and leaving the
+   * user to guess.
+   */
+  function canOpenShare(document: DocType): boolean {
+    return canShareDocuments && !isDocumentArchived(document) && Boolean(documentStorage(document));
+  }
+
+  async function handleDownloadDocumentRow(document: DocType) {
+    if (downloadingRowIds.has(document.id)) return;
+    const latest = document.versions[document.versions.length - 1];
+
+    if (!isSupabaseMode) {
+      if (latest?.content.trim()) handleDownloadDocument(document, latest.content);
+      return;
+    }
+
+    const storage = documentStorage(document);
+    if (!storage?.bucket || !storage.objectPath) return;
+
+    // Same in-flight guard as the preview dialog's button (rovno #284).
+    setDownloadingRowIds((prev) => new Set(prev).add(document.id));
+    try {
+      const ok = await downloadStorageUrl(
+        storage.bucket,
+        storage.objectPath,
+        storage.filename?.trim() || document.title,
+      );
+      if (!ok) {
+        toast({ title: t("documents.preview.downloadFailed"), variant: "destructive" });
+      }
+    } finally {
+      setDownloadingRowIds((prev) => {
+        const next = new Set(prev);
+        next.delete(document.id);
+        return next;
+      });
+    }
+  }
+
+  /**
+   * Persist a class change and keep the open dialogs' snapshots in step.
+   * Throws on failure (after the toast) so the share dialog, which sequences
+   * "make shared" before "mint the link", stops instead of minting a link for
+   * a document that is still internal.
+   */
+  async function applyVisibilityChange(documentId: string, next: DocMediaVisibilityClass) {
+    setChangingVisibility(true);
+    try {
+      await updateDocumentVisibility({ documentId, visibilityClass: next });
+      setViewDoc((prev) => (prev && prev.id === documentId ? { ...prev, visibility_class: next } : prev));
+      setShareDoc((prev) => (prev && prev.id === documentId ? { ...prev, visibility_class: next } : prev));
+      toast({ title: t("documents.visibility.change.success") });
+    } catch (error) {
+      toast({
+        title: t("documents.visibility.change.failed"),
+        description: error instanceof Error ? error.message : undefined,
+        variant: "destructive",
+      });
+      throw error;
+    } finally {
+      setChangingVisibility(false);
+    }
+  }
+
+  function requestVisibilityChange(document: DocType, next: DocMediaVisibilityClass) {
+    if ((document.visibility_class ?? "shared_project") === next) return;
+    setPendingVisibility({ documentId: document.id, next });
+  }
+
+  async function confirmVisibilityChange() {
+    const pending = pendingVisibility;
+    setPendingVisibility(null);
+    if (!pending) return;
+    try {
+      await applyVisibilityChange(pending.documentId, pending.next);
+    } catch {
+      // Already surfaced by applyVisibilityChange.
+    }
+  }
+
+  const pendingVisibilityDescription = pendingVisibility
+    ? pendingVisibility.next === "internal"
+      ? [
+        t("documents.visibility.change.toInternalDescription"),
+        sharesByDocumentId.has(pendingVisibility.documentId)
+          ? t("documents.visibility.change.revokesShare")
+          : null,
+      ].filter(Boolean).join(" ")
+      : t("documents.visibility.change.toSharedDescription")
+    : "";
+
   const generatePreviewChanges: ProposalChange[] = [
     { entity_type: "document", action: "create", label: generateTitle || t("documents.generate.previewChangeFallback"), after: t("documents.generate.previewChangeAfter") },
   ];
@@ -751,12 +886,69 @@ export default function ProjectDocuments() {
     ));
   }
 
+  function renderDownloadAction(document: DocType) {
+    if (!documentHasDownloadableFile(document)) return null;
+    return (
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-7 w-7 p-0"
+        onClick={() => { void handleDownloadDocumentRow(document); }}
+        disabled={downloadingRowIds.has(document.id)}
+        title={t("documents.action.download")}
+        aria-label={t("documents.action.download")}
+      >
+        <Download className="h-3.5 w-3.5" />
+      </Button>
+    );
+  }
+
+  function renderShareAction(document: DocType) {
+    if (!canOpenShare(document)) return null;
+    const hasActiveShare = sharesByDocumentId.has(document.id);
+    const label = hasActiveShare ? t("documents.action.shareActive") : t("documents.action.share");
+    return (
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-7 w-7 p-0"
+        onClick={() => setShareDoc(document)}
+        title={label}
+        aria-label={label}
+      >
+        <Share2
+          className={cn(
+            "h-3.5 w-3.5",
+            hasActiveShare
+              ? "text-accent"
+              : document.visibility_class === "internal"
+                ? "text-muted-foreground"
+                : undefined,
+          )}
+        />
+      </Button>
+    );
+  }
+
+  function renderArchivedDocumentActions(document: DocType) {
+    return (
+      <div className="flex gap-1">
+        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setViewDoc(document)} title={t("documents.action.preview")}>
+          <Eye className="h-3.5 w-3.5" />
+        </Button>
+        {renderDownloadAction(document)}
+      </div>
+    );
+  }
+
   function renderActiveDocumentActions(document: DocType) {
     return (
       <div className="flex gap-1">
         <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setViewDoc(document)} title={t("documents.action.preview")}>
           <Eye className="h-3.5 w-3.5" />
         </Button>
+        {renderDownloadAction(document)}
+        {renderShareAction(document)}
         {canManageDocuments && (
           <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setArchiveDocId(document.id)} title={t("documents.action.archive")}>
             <Archive className="h-3.5 w-3.5" />
@@ -788,11 +980,7 @@ export default function ProjectDocuments() {
               ) : undefined}
               onOpen={() => setViewDoc(document)}
               muted={archived}
-              actions={archived ? (
-                <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setViewDoc(document)} title={t("documents.action.preview")}>
-                  <Eye className="h-3.5 w-3.5" />
-                </Button>
-              ) : renderActiveDocumentActions(document)}
+              actions={archived ? renderArchivedDocumentActions(document) : renderActiveDocumentActions(document)}
               meta={renderDocumentMeta(document, archived)}
             />
           ))}
@@ -815,11 +1003,7 @@ export default function ProjectDocuments() {
               muted={archived}
               details={renderDocumentMeta(document, archived)}
               onOpen={() => setViewDoc(document)}
-              trailing={archived ? (
-                <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setViewDoc(document)} title={t("documents.action.preview")}>
-                  <Eye className="h-3.5 w-3.5" />
-                </Button>
-              ) : renderActiveDocumentActions(document)}
+              trailing={archived ? renderArchivedDocumentActions(document) : renderActiveDocumentActions(document)}
             />
           ))}
         </div>
@@ -1231,7 +1415,25 @@ export default function ProjectDocuments() {
               <DialogHeader className="border-b border-border px-5 py-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <DialogTitle className="flex-1 min-w-0">{viewDoc.title}</DialogTitle>
-                  {showDocumentVisibilityBadges ? (
+                  {canChangeVisibility && !viewedDocumentIsArchived ? (
+                    <Select
+                      value={viewDoc.visibility_class ?? "shared_project"}
+                      onValueChange={(value) => requestVisibilityChange(viewDoc, value as DocMediaVisibilityClass)}
+                      disabled={changingVisibility}
+                    >
+                      <SelectTrigger
+                        className="h-8 w-auto gap-1 text-caption"
+                        aria-label={t("documents.visibility.label")}
+                        data-testid="document-visibility-select"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="shared_project">{t("documents.visibility.shared")}</SelectItem>
+                        <SelectItem value="internal">{t("documents.visibility.internal")}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : showDocumentVisibilityBadges ? (
                     <VisibilityClassBadge visibilityClass={viewDoc.visibility_class} />
                   ) : null}
                 </div>
@@ -1278,19 +1480,32 @@ export default function ProjectDocuments() {
                   >
                     <Download className="h-3.5 w-3.5 mr-1.5" /> {t("documents.preview.action.download")}
                   </Button>
-                  <Button size="sm" variant="outline" disabled>
-                    <Share2 className="h-3.5 w-3.5 mr-1.5" /> {t("documents.preview.action.share")}
-                  </Button>
+                  {canShareDocuments && !viewedDocumentIsArchived && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setShareDoc(viewDoc)}
+                      disabled={!viewedStorage?.bucket || !viewedStorage?.objectPath}
+                    >
+                      <Share2 className="h-3.5 w-3.5 mr-1.5" /> {t("documents.preview.action.share")}
+                    </Button>
+                  )}
                 </div>
-                <p className="text-caption text-muted-foreground">
-                  {isSupabaseMode
-                    ? previewUrl
-                      ? t("documents.preview.footnote.shareOnly")
-                      : t("documents.preview.footnote.supabase")
-                    : canDownloadViewedDocument
-                      ? t("documents.preview.footnote.shareOnly")
-                      : t("documents.preview.footnote.bothComingSoon")}
-                </p>
+                {canShareDocuments && !viewedDocumentIsArchived && viewDoc.visibility_class === "internal" && (
+                  <div
+                    className="rounded-md border border-warning/40 bg-warning/10 p-2 text-caption text-foreground"
+                    data-testid="document-internal-share-warning"
+                  >
+                    {t("documents.share.internalWarning")}
+                  </div>
+                )}
+                {!canDownloadViewedDocument && !previewLoading && (
+                  <p className="text-caption text-muted-foreground">
+                    {isSupabaseMode
+                      ? t("documents.preview.footnote.supabase")
+                      : t("documents.preview.footnote.downloadUnavailable")}
+                  </p>
+                )}
               </div>
               <DialogFooter className="border-t border-border px-5 py-4 flex-wrap gap-2 sm:justify-between sm:space-x-0">
                 <div className="flex flex-wrap gap-2">
@@ -1351,6 +1566,30 @@ export default function ProjectDocuments() {
         onConfirm={handleDelete}
         onCancel={() => setDeleteDocId(null)}
       />
+
+      <ConfirmModal
+        open={pendingVisibility !== null}
+        onOpenChange={(open) => !open && setPendingVisibility(null)}
+        title={pendingVisibility?.next === "internal"
+          ? t("documents.visibility.change.toInternalTitle")
+          : t("documents.visibility.change.toSharedTitle")}
+        description={pendingVisibilityDescription}
+        confirmLabel={t("documents.visibility.change.confirm")}
+        onConfirm={() => { void confirmVisibilityChange(); }}
+        onCancel={() => setPendingVisibility(null)}
+      />
+
+      {shareDoc && (
+        <DocumentShareDialog
+          open={shareDoc !== null}
+          onOpenChange={(open) => { if (!open) setShareDoc(null); }}
+          projectId={pid}
+          document={{ id: shareDoc.id, title: shareDoc.title, visibilityClass: shareDoc.visibility_class ?? null }}
+          existingShare={sharesByDocumentId.get(shareDoc.id) ?? null}
+          canChangeVisibility={canChangeVisibility}
+          onMakeShared={(documentId) => applyVisibilityChange(documentId, "shared_project")}
+        />
+      )}
 
       {importDialog && (
         <ImportDocumentsDialog
