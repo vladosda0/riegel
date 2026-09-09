@@ -6,49 +6,7 @@ import { getEventGroupTimestampMs } from "@/lib/event-activity-timestamp";
 import { getUserById } from "@/data/store";
 import type { Event } from "@/types/entities";
 import { isAIEvent } from "@/components/ai/event-utils";
-import {
-  ClipboardList, Calculator, ShoppingCart, FileText, Image,
-  Users, MessageSquare, GitBranch, CheckCircle2, Plus, Activity, XCircle, Bot,
-} from "lucide-react";
-
-const typeIcons: Record<string, typeof Activity> = {
-  task_created: Plus,
-  task_updated: ClipboardList,
-  task_completed: CheckCircle2,
-  task_moved: GitBranch,
-  estimate_created: Calculator,
-  estimate_approved: CheckCircle2,
-  estimate_archived: Calculator,
-  "estimate.version_submitted": Calculator,
-  "estimate.version_approved": CheckCircle2,
-  "estimate.status_changed": Activity,
-  "estimate.tax_changed": Calculator,
-  "estimate.discount_changed": Calculator,
-  "estimate.dependency_added": GitBranch,
-  "estimate.dependency_removed": XCircle,
-  "estimate.viewer_regime_set": Users,
-  "estimate.project_mode_set": Activity,
-  procurement_created: ShoppingCart,
-  procurement_updated: ShoppingCart,
-  document_created: FileText,
-  document_uploaded: FileText,
-  document_version_created: FileText,
-  document_archived: FileText,
-  document_acknowledged: FileText,
-  photo_uploaded: Image,
-  photo_deleted: Image,
-  member_added: Users,
-  comment_added: MessageSquare,
-  stage_created: Plus,
-  stage_completed: CheckCircle2,
-  stage_deleted: Activity,
-  proposal_confirmed: CheckCircle2,
-  proposal_cancelled: XCircle,
-  project_created: Plus,
-  contractor_proposal_submitted: Calculator,
-  contractor_proposal_accepted: CheckCircle2,
-  contractor_proposal_rejected: Activity,
-};
+import { getEventCaption, getEventIcon, isFallbackActor } from "@/lib/event-catalog";
 
 function getEventRoute(evt: Event): string | null {
   const base = `/project/${evt.project_id}`;
@@ -79,8 +37,10 @@ export function EventFeedItem({ event, compact, highlighted }: EventFeedItemProp
   });
   const route = getEventRoute(event);
   const isAiOrigin = isAIEvent(event);
-  const Icon = isAiOrigin ? Bot : (typeIcons[event.type] ?? Activity);
+  const Icon = getEventIcon(event.type, isAiOrigin);
+  const fallbackActor = isFallbackActor(isAiOrigin, Boolean(actor));
   const actorLabel = isAiOrigin ? t("ai.event.actorAI") : (actor?.name ?? t("ai.event.actorSystem"));
+  const caption = getEventCaption(t, event.type, fallbackActor);
 
   const handleClick = () => {
     if (route) navigate(route);
@@ -103,7 +63,7 @@ export function EventFeedItem({ event, compact, highlighted }: EventFeedItemProp
       <div className="flex-1 min-w-0">
         <p className="text-caption leading-tight">
           <span className="font-medium text-foreground">{actorLabel}</span>
-          <span className="text-muted-foreground"> {event.type.replace(/[._]/g, " ")}</span>
+          <span className="text-muted-foreground"> {caption}</span>
         </p>
         {detail && <p className="text-caption text-muted-foreground truncate">{detail}</p>}
       </div>

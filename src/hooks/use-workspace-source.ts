@@ -348,7 +348,9 @@ export function useWorkspaceProjectState(projectId: string): {
 
   return {
     project: projectQuery.data,
-    isLoading: projectQuery.isPending,
+    // A disabled query stays "pending" with nothing in flight, so without this it
+    // reports loading forever. Guarded the way the sibling projects hook already is.
+    isLoading: Boolean(supabaseMode && projectId) && projectQuery.isPending,
   };
 }
 

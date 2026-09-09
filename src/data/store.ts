@@ -192,6 +192,15 @@ let demoState = sanitizeDemoState(loadPersistedDemoState() ?? createSeededDemoSt
 let localState = createEmptyLocalState(getStoredAuthProfile());
 let localProfileId = localState.user.id;
 
+// Several entities can be written in one loop, so Date.now() repeats across them and every
+// event, notification and comment would share an id; all three are keyed on it in the UI.
+let eventSeq = 0;
+
+function nextAutoId(prefix: string): string {
+  eventSeq += 1;
+  return `${prefix}-${Date.now()}-${eventSeq}`;
+}
+
 type Listener = () => void;
 const listeners = new Set<Listener>();
 
@@ -250,8 +259,8 @@ function addEventToState(state: BrowserWorkspaceState, event: Event) {
   const projectMembers = state.members.filter((member) => member.project_id === event.project_id);
   const newNotifications: Notification[] = projectMembers
     .filter((member) => member.user_id !== event.actor_id)
-    .map((member, index) => ({
-      id: `notif-auto-${Date.now()}-${index}`,
+    .map((member) => ({
+      id: nextAutoId("notif-auto"),
       user_id: member.user_id,
       project_id: event.project_id,
       event_id: event.id,
@@ -400,7 +409,7 @@ export function updateTask(id: string, partial: Partial<Task>) {
 
     const eventType = partial.status === "done" ? "task_completed" : "task_updated";
     addEventToState(state, {
-      id: `evt-auto-${Date.now()}`,
+      id: nextAutoId("evt-auto"),
       project_id: task.project_id,
       actor_id: state.user.id,
       type: eventType,
@@ -421,7 +430,7 @@ export function addTask(task: Task, options: AddTaskOptions = {}) {
   updateWorkspaceState((state) => {
     state.tasks = [...state.tasks, task];
     addEventToState(state, {
-      id: `evt-auto-${Date.now()}`,
+      id: nextAutoId("evt-auto"),
       project_id: task.project_id,
       actor_id: options.actorId ?? state.user.id,
       type: "task_created",
@@ -706,7 +715,7 @@ export function addStage(stage: Stage) {
   updateWorkspaceState((state) => {
     state.stages = [...state.stages, stage];
     addEventToState(state, {
-      id: `evt-auto-${Date.now()}`,
+      id: nextAutoId("evt-auto"),
       project_id: stage.project_id,
       actor_id: state.user.id,
       type: "stage_created",
@@ -724,7 +733,7 @@ export function deleteStage(stageId: string) {
     if (!stage) return;
     state.stages = state.stages.filter((entry) => entry.id !== stageId);
     addEventToState(state, {
-      id: `evt-auto-${Date.now()}`,
+      id: nextAutoId("evt-auto"),
       project_id: stage.project_id,
       actor_id: state.user.id,
       type: "stage_deleted",
@@ -744,7 +753,7 @@ export function completeStage(stageId: string) {
       entry.id === stageId ? { ...entry, status: "completed" as const } : entry,
     );
     addEventToState(state, {
-      id: `evt-auto-${Date.now()}`,
+      id: nextAutoId("evt-auto"),
       project_id: stage.project_id,
       actor_id: state.user.id,
       type: "stage_completed",
@@ -764,7 +773,7 @@ export function moveTask(taskId: string, newStageId: string) {
     state.tasks = state.tasks.map((entry) => (entry.id === taskId ? { ...entry, stage_id: newStageId } : entry));
     moveEstimateItemToStage(taskId, newStageId);
     addEventToState(state, {
-      id: `evt-auto-${Date.now()}`,
+      id: nextAutoId("evt-auto"),
       project_id: task.project_id,
       actor_id: state.user.id,
       type: "task_moved",
@@ -781,7 +790,7 @@ export function addComment(taskId: string, text: string) {
     const task = state.tasks.find((entry) => entry.id === taskId);
     if (!task) return;
     const comment = {
-      id: `com-${Date.now()}`,
+      id: nextAutoId("com"),
       author_id: state.user.id,
       text,
       created_at: new Date().toISOString(),
@@ -790,7 +799,7 @@ export function addComment(taskId: string, text: string) {
       entry.id === taskId ? { ...entry, comments: [...entry.comments, comment] } : entry,
     );
     addEventToState(state, {
-      id: `evt-auto-${Date.now()}`,
+      id: nextAutoId("evt-auto"),
       project_id: task.project_id,
       actor_id: state.user.id,
       type: "comment_added",

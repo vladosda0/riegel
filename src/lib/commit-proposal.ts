@@ -16,6 +16,7 @@ import {
   addProject, addMember, addStage,
 } from "@/data/store";
 import type { ProjectAuthoritySeam } from "@/lib/project-authority-seam";
+import type { Translator } from "@/lib/participant-role-policy";
 import { PROPOSAL_TYPE_TO_CONTRACT_ACTION, PROPOSAL_TYPE_TO_PROJECT_DOMAIN } from "@/lib/ai-engine";
 
 export interface CommitResultItem {
@@ -45,6 +46,8 @@ export interface CommitProposalOptions {
    * Omit only for browser-only paths where the store is the same source as the shell (demo/local).
    */
   authoritySeam?: ProjectAuthoritySeam;
+  /** Localises the text this writes into created tasks and documents. */
+  t?: Translator;
 }
 
 export type PhotoConsultApplyKind = "create_task" | "task_comment" | "task_status_done";
@@ -448,7 +451,13 @@ export function commitProposal(proposal: AIProposal, options: CommitProposalOpti
           project_id: pid,
           stage_id: currentStage?.id ?? "",
           title: change.label,
-          description: `AI-generated task for ${currentStage?.title ?? "project"}`,
+          description: options.t
+            ? options.t("ai.sidebar.proposal.demo.taskDescription", {
+                stage:
+                  currentStage?.title ??
+                  options.t("ai.sidebar.proposal.demo.currentStageFallback"),
+              })
+            : `AI-generated task for ${currentStage?.title ?? "project"}`,
           status: "not_started",
           assignee_id: user.id,
           checklist: [],
@@ -494,7 +503,9 @@ export function commitProposal(proposal: AIProposal, options: CommitProposalOpti
             document_id: docId,
             number: 1,
             status: "draft",
-            content: `AI-generated draft for ${change.label}`,
+            content: options.t
+              ? options.t("ai.sidebar.proposal.demo.documentDraftBody", { title: change.label })
+              : `AI-generated draft for ${change.label}`,
           }],
         });
         const documentEvtId = `evt-doc-ai-${Date.now()}-${count}`;

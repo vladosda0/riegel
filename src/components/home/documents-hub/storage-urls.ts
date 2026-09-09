@@ -155,15 +155,33 @@ export async function downloadStorageUrl(bucket: string, objectPath: string, fil
   try {
     const { data, error } = await supabase.storage.from(bucket).createSignedUrl(objectPath, SIGNED_URL_TTL_SECONDS);
     if (error || !data?.signedUrl) return false;
+    return await downloadFromUrl(data.signedUrl, filename, objectPath);
+  } catch {
+    // Signing rejection. The caller gets a false and can surface it; nothing
+    // has navigated anywhere.
+    return false;
+  }
+}
 
-    const response = await fetch(data.signedUrl);
+/**
+ * The fetch-to-blob half of `downloadStorageUrl`, for callers that already
+ * hold a URL they may fetch: the public share page receives a signed URL from
+ * the get-shared-document Edge Function and has no storage client of its own.
+ *
+ * `extensionSource` is any path or filename that carries the real extension
+ * (the storage object path for project documents, the stored filename for a
+ * shared one); see `ensureFilenameExtension`.
+ */
+export async function downloadFromUrl(url: string, filename: string, extensionSource: string): Promise<boolean> {
+  try {
+    const response = await fetch(url);
     if (!response.ok) return false;
     const blob = await response.blob();
 
     const objectUrl = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = objectUrl;
-    link.download = sanitizeDownloadFilename(ensureFilenameExtension(filename.trim(), objectPath));
+    link.download = sanitizeDownloadFilename(ensureFilenameExtension(filename.trim(), extensionSource));
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -171,8 +189,8 @@ export async function downloadStorageUrl(bucket: string, objectPath: string, fil
     setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
     return true;
   } catch {
-    // Signing rejection or a network-level fetch failure. Either way the caller
-    // gets a false and can surface it; nothing has navigated anywhere.
+    // Network-level fetch failure. Either way the caller gets a false and can
+    // surface it; nothing has navigated anywhere.
     return false;
   }
 }

@@ -8,7 +8,7 @@ import {
 import type { AIProposal, ProposalChange } from "@/types/ai";
 import type { ProjectAuthoritySeam } from "@/lib/project-authority-seam";
 import type { FinanceVisibility, MemberRole } from "@/types/entities";
-import { __unsafeResetStoreForTests, getCurrentUser, getEvents } from "@/data/store";
+import { __unsafeResetStoreForTests, getCurrentUser, getEvents, getTasks, getDocuments } from "@/data/store";
 import { clearDemoSession, enterDemoSession, setAuthRole } from "@/lib/auth-state";
 
 // ---------------------------------------------------------------------------
@@ -153,6 +153,65 @@ describe("commitProposal — enabled actions succeed", () => {
     });
     expect(result.success).toBe(true);
     expect(result.created.length).toBeGreaterThan(0);
+  });
+
+  it("writes the task description through t when one is supplied", () => {
+    const result = commitProposal(makeProposal("add_task"), {
+      authoritySeam: seamForRole("owner", "detail"),
+      t: (key, options) => `[${key}|${String((options ?? {}).stage ?? "")}]`,
+    });
+
+    expect(result.success).toBe(true);
+    const task = getTasks("project-1").find((candidate) => candidate.title === "Test task");
+    expect(task?.description).toContain("ai.sidebar.proposal.demo.taskDescription");
+    expect(task?.description).not.toContain("AI-generated task for");
+  });
+
+  // A project created in demo/local mode is seeded with no stages at all
+  // (workspace-source.createProject), so `stages[0]` is undefined here.
+  it("falls back to the stage placeholder when the project has no stage", () => {
+    const proposal = { ...makeProposal("add_task"), project_id: "project-without-stages" };
+    const result = commitProposal(proposal, {
+      authoritySeam: seamForRole("owner", "detail"),
+      t: (key, options) => `[${key}|${String((options ?? {}).stage ?? "MISSING")}]`,
+    });
+
+    expect(result.success).toBe(true);
+    const task = getTasks("project-without-stages").find((candidate) => candidate.title === "Test task");
+    expect(task?.description).toContain("ai.sidebar.proposal.demo.currentStageFallback");
+    expect(task?.description).not.toContain("|]");
+  });
+
+  it("writes the document draft body through t when one is supplied", () => {
+    const result = commitProposal(makeProposal("generate_document"), {
+      authoritySeam: seamForRole("owner", "detail"),
+      t: (key, options) => `[${key}|${String((options ?? {}).title ?? "")}]`,
+    });
+
+    expect(result.success).toBe(true);
+    const document = getDocuments("project-1").find((candidate) => candidate.title === "Contract");
+    expect(document?.versions[0]?.content).toContain("ai.sidebar.proposal.demo.documentDraftBody");
+    expect(document?.versions[0]?.content).not.toContain("AI-generated draft for");
+  });
+
+  it("keeps the English document draft body when no t is supplied", () => {
+    const result = commitProposal(makeProposal("generate_document"), {
+      authoritySeam: seamForRole("owner", "detail"),
+    });
+
+    expect(result.success).toBe(true);
+    const document = getDocuments("project-1").find((candidate) => candidate.title === "Contract");
+    expect(document?.versions[0]?.content).toContain("AI-generated draft for");
+  });
+
+  it("keeps the English default when no t is supplied", () => {
+    const result = commitProposal(makeProposal("add_task"), {
+      authoritySeam: seamForRole("owner", "detail"),
+    });
+
+    expect(result.success).toBe(true);
+    const task = getTasks("project-1").find((candidate) => candidate.title === "Test task");
+    expect(task?.description).toContain("AI-generated task for");
   });
 
   it("add_procurement reports unavailable instead of writing to a store nobody reads", () => {

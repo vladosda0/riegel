@@ -5,6 +5,7 @@ import { Loader2 } from "lucide-react";
 import { AuthCard } from "@/components/auth/AuthCard";
 import { supabase } from "@/integrations/supabase/client";
 import { clearAiSidebarSessionPreference } from "@/lib/ai-sidebar-session";
+import { clearWorkspaceUserCache } from "@/data/workspace-profile-cache";
 import { clearDemoSession, setAuthRole } from "@/lib/auth-state";
 import { trackEvent } from "@/lib/analytics";
 
@@ -48,6 +49,7 @@ export default function AuthCallback() {
 
       clearDemoSession();
       clearAiSidebarSessionPreference();
+      clearWorkspaceUserCache();
       setAuthRole("guest");
       navigate("/auth/login?confirmed=1", { replace: true });
     };

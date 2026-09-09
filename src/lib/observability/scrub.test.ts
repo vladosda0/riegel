@@ -2,6 +2,52 @@ import { describe, expect, it } from "vitest";
 import { scrubDeep, scrubErrorEvent, scrubEventSafe, scrubText } from "./scrub";
 
 describe("scrubText", () => {
+  it("redacts the credential segment of the token-bearing routes", () => {
+    const token = "a".repeat(48);
+    expect(scrubText(`https://rovno.ai/share/document/${token}`)).toBe(
+      "https://rovno.ai/share/document/[FILTERED]",
+    );
+    expect(scrubText("https://rovno.ai/share/estimate/QA-SHARE-TOKEN")).toBe(
+      "https://rovno.ai/share/estimate/[FILTERED]",
+    );
+    expect(scrubText("https://rovno.ai/invite/accept/QA-INVITE?lang=ru")).toBe(
+      "https://rovno.ai/invite/accept/[FILTERED]?lang=ru",
+    );
+  });
+
+  it("redacts a credential path the app percent-encoded into a query param", () => {
+    // InviteAccept builds /auth/login?next=<encoded /invite/accept/:token>, and
+    // ShareEstimate does the same, so the encoded form is one the app emits.
+    expect(
+      scrubText("https://rovno.ai/auth/login?next=%2Finvite%2Faccept%2F1f0c2d3e-4a5b-6c7d-8e9f-0a1b"),
+    ).toBe("https://rovno.ai/auth/login?next=%2Finvite%2Faccept%2F[FILTERED]");
+    expect(
+      scrubText("https://rovno.ai/auth/signup?next=%2Fshare%2Fdocument%2Fdeadbeef&lang=ru"),
+    ).toBe("https://rovno.ai/auth/signup?next=%2Fshare%2Fdocument%2F[FILTERED]&lang=ru");
+    expect(scrubText("/auth/login?next=%2Fshare%2Festimate%2FQA-SHARE")).toBe(
+      "/auth/login?next=%2Fshare%2Festimate%2F[FILTERED]",
+    );
+  });
+
+  it("redacts a bare share token, which travels outside any URL", () => {
+    // The react-query key reported in `extra` is ["document-share", <token>].
+    const token = "0123456789abcdef0123456789abcdef0123456789abcdef";
+    expect(scrubText(`key document-share ${token} failed`)).toBe(
+      "key document-share [TOKEN] failed",
+    );
+    expect(scrubDeep(["document-share", token])).toEqual([
+      "document-share",
+      "[TOKEN]",
+    ]);
+  });
+
+  it("leaves ordinary digests alone: the share-token rule is 48 hex exactly", () => {
+    const sha256 = "b".repeat(64);
+    const sha1 = "c".repeat(40);
+    expect(scrubText(`sha256 ${sha256}`)).toBe(`sha256 ${sha256}`);
+    expect(scrubText(`sha1 ${sha1}`)).toBe(`sha1 ${sha1}`);
+  });
+
   it("replaces emails with [EMAIL]", () => {
     expect(scrubText("user ivan.petrov+test@example.co.uk failed login")).toBe(
       "user [EMAIL] failed login",
@@ -39,6 +85,26 @@ describe("scrubText", () => {
     );
     expect(scrubText("url?a=1&refresh_token=r3fr3sh#frag")).toBe(
       "url?a=1&refresh_token=[FILTERED]#frag",
+    );
+  });
+
+  it("filters token_hash, which `token` alone does not cover", () => {
+    // /auth/confirm's fallback link. On the error path AuthConfirm only sets
+    // state, so the live hash sits in the address bar for as long as the user
+    // does, and any event fired meanwhile carries request.url.
+    expect(scrubText("https://rovno.ai/auth/confirm?token_hash=pkce_abc123&type=signup")).toBe(
+      "https://rovno.ai/auth/confirm?token_hash=[FILTERED]&type=signup",
+    );
+  });
+
+  it("filters an email carried as a query param, including percent-encoded", () => {
+    // Signup navigates to /auth/email-sent?email=<encodeURIComponent(email)>,
+    // so the `@` the email rule needs has become %40 by the time it is scrubbed.
+    expect(scrubText("https://rovno.ai/auth/email-sent?email=user%40example.com")).toBe(
+      "https://rovno.ai/auth/email-sent?email=[FILTERED]",
+    );
+    expect(scrubText("https://rovno.ai/auth/email-sent?email=user@example.com&x=1")).toBe(
+      "https://rovno.ai/auth/email-sent?email=[FILTERED]&x=1",
     );
   });
 

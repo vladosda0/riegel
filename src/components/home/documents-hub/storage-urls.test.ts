@@ -9,6 +9,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 
 import {
+  downloadFromUrl,
   downloadStorageUrl,
   ensureFilenameExtension,
   openStorageUrlInNewTab,
@@ -119,9 +120,13 @@ describe("downloadStorageUrl", () => {
       createObjectURL: vi.fn(() => "blob:mock-object-url"),
       revokeObjectURL: vi.fn(),
     }));
+    // The revoke is scheduled 10s out, so under real timers it outlives the
+    // test that scheduled it and fires into a torn-down environment (#63).
+    vi.useFakeTimers();
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     clickSpy.mockRestore();
     vi.unstubAllGlobals();
   });
@@ -169,17 +174,23 @@ describe("downloadStorageUrl", () => {
   it("revokes the object URL only after Safari has had time to start the save", async () => {
     // A mutant making the revoke immediate survived until this pin existed;
     // an eagerly revoked URL breaks Safari saves and nothing else notices.
-    vi.useFakeTimers();
-    try {
-      signOk();
-      fetchMock.mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob(["x"])) });
-      await downloadStorageUrl("b", "p/x.pdf", "n.pdf");
-      expect(URL.revokeObjectURL).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(10_000);
-      expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock-object-url");
-    } finally {
-      vi.useRealTimers();
-    }
+    signOk();
+    fetchMock.mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob(["x"])) });
+    await downloadStorageUrl("b", "p/x.pdf", "n.pdf");
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(10_000);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock-object-url");
+  });
+
+  it("leaves no revoke timer that throws once the test's URL stub is torn down", async () => {
+    // Fake timers keep the leak out of this suite; the setup.ts polyfill is what
+    // keeps it harmless anywhere else, and this pins that second half (#63).
+    signOk();
+    fetchMock.mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob(["x"])) });
+    await downloadStorageUrl("b", "p/x.pdf", "n.pdf");
+
+    vi.unstubAllGlobals();
+    expect(() => vi.advanceTimersByTime(10_000)).not.toThrow();
   });
 
   it("never opens a window or navigates - the failure modes stay in this function", async () => {
@@ -233,5 +244,54 @@ describe("openStorageUrlInNewTab", () => {
     expect(fakeTab.close).toHaveBeenCalled();
     expect(fakeTab.location.href).toBe("");
     openSpy.mockRestore();
+  });
+});
+
+describe("downloadFromUrl", () => {
+  // The public share page holds a signed URL from the get-shared-document
+  // Edge Function and no storage client, so it uses the fetch-to-blob half of
+  // downloadStorageUrl on its own. Same guarantees, minus the signing.
+  let clickSpy: ReturnType<typeof vi.spyOn>;
+  let clickedDownloadNames: string[];
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockCreateSignedUrl.mockReset();
+    clickedDownloadNames = [];
+    clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        clickedDownloadNames.push(this.download);
+      });
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("URL", Object.assign(Object.create(URL), {
+      createObjectURL: vi.fn(() => "blob:mock-object-url"),
+      revokeObjectURL: vi.fn(),
+    }));
+  });
+
+  afterEach(() => {
+    clickSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  it("fetches the URL as given and saves under the sanitized name, never signing", async () => {
+    fetchMock.mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob(["x"])) });
+
+    const ok = await downloadFromUrl("https://signed.example/y?token=t", "Договор №5", "dogovor-5.pdf");
+
+    expect(ok).toBe(true);
+    expect(mockCreateSignedUrl).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith("https://signed.example/y?token=t");
+    expect(clickedDownloadNames).toEqual(["Договор №5.pdf"]);
+  });
+
+  it("returns false on a non-OK response and on a rejected fetch", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 404, blob: () => Promise.resolve(new Blob(["{}"])) });
+    expect(await downloadFromUrl("https://x", "n", "n.pdf")).toBe(false);
+    fetchMock.mockRejectedValueOnce(new TypeError("network down"));
+    expect(await downloadFromUrl("https://x", "n", "n.pdf")).toBe(false);
+    expect(clickSpy).not.toHaveBeenCalled();
   });
 });

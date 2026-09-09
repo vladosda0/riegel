@@ -1,6 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getEventGroupTimestampMs } from "@/lib/event-activity-timestamp";
 import {
+  __unsafeResetWorkspaceUserCacheForTests,
+  cacheWorkspaceUsers,
+  clearWorkspaceUserCache,
+  getCachedWorkspaceUser,
+} from "@/data/workspace-profile-cache";
+import {
+  __unsafeResetActorLookupsForTests,
   getActivitySource,
   mapActivityEventRowToEvent,
   mapNotificationRowToActivityNotification,
@@ -165,6 +172,11 @@ describe("supabase activity source getProjectEvents", () => {
     const chain = {
       select: vi.fn(() => chain),
       eq: vi.fn(() => chain),
+      // The source also reads `profiles` to fill in actor names. Without `in`
+      // here the cases below would reach getProjectEvents through a thrown
+      // TypeError swallowed by the actor lookup's guard, rather than through
+      // the code they are about to assert on.
+      in: vi.fn(() => chain),
       order: vi.fn(() => chain),
       limit: vi.fn(() => chain),
       then: (resolve: (value: { data: unknown; error: null }) => unknown) =>
@@ -173,6 +185,217 @@ describe("supabase activity source getProjectEvents", () => {
 
     return chain;
   }
+
+  // The cache is module state shared by every test in the process; without this
+  // the id filter below would find it already warm and the assertions would pass
+  // without the code under test running at all.
+  beforeEach(() => {
+    __unsafeResetWorkspaceUserCacheForTests();
+    __unsafeResetActorLookupsForTests();
+  });
+
+  function profileRow(id: string, fullName: string) {
+    return {
+      id,
+      email: `${id}@example.test`,
+      full_name: fullName,
+      avatar_url: null,
+      locale: "ru",
+      timezone: "Europe/Moscow",
+      plan: "free",
+      credits_free: 0,
+      credits_paid: 0,
+    };
+  }
+
+  function createProfilesChain(rows: ReturnType<typeof profileRow>[]) {
+    const chain = {
+      select: vi.fn(() => chain),
+      in: vi.fn((_column: string, _values: string[]) => chain),
+      then: (resolve: (value: { data: unknown; error: null }) => unknown) =>
+        Promise.resolve({ data: rows, error: null }).then(resolve),
+    };
+
+    return chain;
+  }
+
+  it("resolves actor names without the member screens having been opened", async () => {
+    const eventsChain = createEventsChain([
+      activityEventRow({ id: "evt-1", actor_profile_id: "profile-7" }),
+      activityEventRow({ id: "evt-2", actor_profile_id: "profile-7" }),
+      activityEventRow({ id: "evt-3", actor_profile_id: "profile-9" }),
+    ]);
+    const profilesChain = createProfilesChain([
+      profileRow("profile-7", "Анна Петрова"),
+      profileRow("profile-9", "Иван Смирнов"),
+    ]);
+    setMockSupabase({
+      from: vi.fn((table: string) => (table === "profiles" ? profilesChain : eventsChain)),
+    });
+
+    const source = await getActivitySource({ kind: "supabase", profileId: "profile-1" });
+    await source.getProjectEvents("project-1");
+
+    // One request per distinct actor, each asked for once, and the names are
+    // there for the first render rather than after a visit to the participants
+    // screen. Two events share profile-7, so it is fetched once, not twice.
+    expect(profilesChain.in).toHaveBeenCalledTimes(2);
+    expect(profilesChain.in.mock.calls.map((call) => call[1])).toEqual([
+      ["profile-7"],
+      ["profile-9"],
+    ]);
+    expect(getCachedWorkspaceUser("profile-7")?.name).toBe("Анна Петрова");
+    expect(getCachedWorkspaceUser("profile-9")?.name).toBe("Иван Смирнов");
+  });
+
+  it("asks once when several feeds want the same actor at the same time", async () => {
+    // Home's real shape: one feed per project, each with its own actors, and a
+    // shared one between them. A key built from the whole id list would only
+    // dedup projects whose actor sets are byte-identical, which is not this.
+    const sharedActor = activityEventRow({ id: "evt-a", actor_profile_id: "profile-7" });
+    const otherActor = activityEventRow({ id: "evt-b", actor_profile_id: "profile-9" });
+    const profilesChain = createProfilesChain([
+      profileRow("profile-7", "Анна Петрова"),
+      profileRow("profile-9", "Иван Смирнов"),
+    ]);
+    let feed = 0;
+    const chains = [
+      createEventsChain([sharedActor]),
+      createEventsChain([sharedActor, otherActor]),
+    ];
+    setMockSupabase({
+      from: vi.fn((table: string) => (table === "profiles" ? profilesChain : chains[feed++ % 2])),
+    });
+
+    const source = await getActivitySource({ kind: "supabase", profileId: "profile-1" });
+    await Promise.all([
+      source.getProjectEvents("project-1"),
+      source.getProjectEvents("project-2"),
+    ]);
+
+    // profile-7 is wanted by both feeds and asked for once; profile-9 once.
+    expect(profilesChain.in).toHaveBeenCalledTimes(2);
+    expect(profilesChain.in.mock.calls.map((c) => c[1])).toEqual([["profile-7"], ["profile-9"]]);
+  });
+
+  it("stops asking for an actor the server will not return", async () => {
+    const eventsChain = createEventsChain([activityEventRow({ actor_profile_id: "profile-8" })]);
+    // profiles_select does not expose one member's profile to another, so the
+    // row simply does not come back; asking again cannot change that.
+    const profilesChain = createProfilesChain([]);
+    setMockSupabase({
+      from: vi.fn((table: string) => (table === "profiles" ? profilesChain : eventsChain)),
+    });
+
+    const source = await getActivitySource({ kind: "supabase", profileId: "profile-1" });
+    await source.getProjectEvents("project-1");
+    await source.getProjectEvents("project-1");
+
+    expect(profilesChain.in).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a lookup that lands after the account changed", async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const eventsChain = createEventsChain([activityEventRow({ actor_profile_id: "profile-7" })]);
+    const profilesChain = {
+      select: vi.fn(() => profilesChain),
+      in: vi.fn(() => profilesChain),
+      then: (resolve: (value: { data: unknown; error: null }) => unknown) =>
+        gate.then(() => resolve({ data: [profileRow("profile-7", "Прошлый Аккаунт")], error: null })),
+    };
+    setMockSupabase({
+      from: vi.fn((table: string) => (table === "profiles" ? profilesChain : eventsChain)),
+    });
+
+    const source = await getActivitySource({ kind: "supabase", profileId: "profile-1" });
+    const pending = source.getProjectEvents("project-1");
+    // Wait until the profile request has actually gone out, so the sign-out
+    // below lands mid-flight rather than before the lookup started.
+    await vi.waitFor(() => expect(profilesChain.in).toHaveBeenCalled());
+
+    // The user signs out while the profile request is still in the air.
+    clearWorkspaceUserCache();
+    release?.();
+    await pending;
+
+    // The answer belongs to an account that is no longer signed in.
+    expect(getCachedWorkspaceUser("profile-7")).toBeUndefined();
+  });
+
+  it("keeps asking after a lookup fails, rather than stranding the id", async () => {
+    const eventsChain = createEventsChain([activityEventRow({ actor_profile_id: "profile-7" })]);
+    // A client that throws the moment the query is built: the failure must not
+    // leave a settled promise registered under the id and disable the lookup
+    // for the rest of the tab's life.
+    const throwingChain = {
+      select: vi.fn(() => throwingChain),
+      in: vi.fn(() => { throw new Error("profiles unreachable"); }),
+    };
+    const healthyChain = createProfilesChain([profileRow("profile-7", "Анна Петрова")]);
+    let profilesCall = 0;
+    setMockSupabase({
+      from: vi.fn((table: string) =>
+        table === "profiles" ? (profilesCall++ === 0 ? throwingChain : healthyChain) : eventsChain),
+    });
+
+    const source = await getActivitySource({ kind: "supabase", profileId: "profile-1" });
+    await source.getProjectEvents("project-1");
+    await source.getProjectEvents("project-1");
+
+    expect(healthyChain.in).toHaveBeenCalledTimes(1);
+    expect(getCachedWorkspaceUser("profile-7")?.name).toBe("Анна Петрова");
+  });
+
+  it("does not re-request an actor the cache already holds", async () => {
+    cacheWorkspaceUsers([
+      { id: "profile-7", email: "a@b.test", name: "Анна Петрова", locale: "ru",
+        timezone: "Europe/Moscow", plan: "free", credits_free: 0, credits_paid: 0 },
+    ]);
+
+    const eventsChain = createEventsChain([activityEventRow({ actor_profile_id: "profile-7" })]);
+    const profilesChain = createProfilesChain([]);
+    setMockSupabase({
+      from: vi.fn((table: string) => (table === "profiles" ? profilesChain : eventsChain)),
+    });
+
+    const source = await getActivitySource({ kind: "supabase", profileId: "profile-1" });
+    await source.getProjectEvents("project-1");
+
+    expect(profilesChain.in).not.toHaveBeenCalled();
+  });
+
+  // The lookup is a second network call, and it must never be able to take the
+  // feed down with it.
+  function createFailingProfilesChain(behaviour: "throws" | "errors") {
+    const chain = {
+      select: vi.fn(() => chain),
+      in: vi.fn(() => {
+        if (behaviour === "throws") throw new Error("profiles unreachable");
+        return chain;
+      }),
+      then: (resolve: (value: { data: unknown; error: unknown }) => unknown) =>
+        Promise.resolve({ data: null, error: { message: "denied" } }).then(resolve),
+    };
+
+    return chain;
+  }
+
+  it.each(["throws", "errors"] as const)(
+    "still returns the feed when the actor-name lookup %s",
+    async (behaviour) => {
+      const eventsChain = createEventsChain([activityEventRow()]);
+      const profilesChain = createFailingProfilesChain(behaviour);
+      setMockSupabase({
+        from: vi.fn((table: string) => (table === "profiles" ? profilesChain : eventsChain)),
+      });
+
+      const source = await getActivitySource({ kind: "supabase", profileId: "profile-1" });
+      const events = await source.getProjectEvents("project-1");
+
+      expect(events).toHaveLength(1);
+    },
+  );
 
   it("pushes the caller cap into the query instead of transferring every project event", async () => {
     const chain = createEventsChain([activityEventRow()]);

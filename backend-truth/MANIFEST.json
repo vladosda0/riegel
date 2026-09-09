@@ -563,6 +563,18 @@
     {
       "path": "supabase/migrations/20260806070000_can_access_storage_object_archived_documents.sql",
       "sha256": "72b71f5972a9d312ab839144d399717e66a5a720b13c60cce6afa2b299e0edd3"
+    },
+    {
+      "path": "supabase/migrations/20260825150000_profiles_column_scoped_write_grants.sql",
+      "sha256": "9da88b7896860966f9d331e3ffc4429d9cf4a32de25a782b42d6fc141b9c2d07"
+    },
+    {
+      "path": "supabase/migrations/20260825150100_harden_append_tutorial_completed.sql",
+      "sha256": "a46d0c3ddb1ea78e36fff076a4b7c2ebc238c91c3a4f95bf75945930b1915af1"
+    },
+    {
+      "path": "supabase/migrations/20260908120000_document_shares.sql",
+      "sha256": "a11bd9a5e74bf5dda6f2f929d0dc92316b20ac767804191129560ccb289a1798"
     }
   ],
   "generated_artifacts": [

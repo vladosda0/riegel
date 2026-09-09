@@ -40,9 +40,9 @@ const ProjectProcurement = lazy(() => import("@/pages/project/ProjectProcurement
 const ProjectHR = lazy(() => import("@/pages/project/ProjectHR"));
 const ProjectGallery = lazy(() => import("@/pages/project/ProjectGallery"));
 const ProjectDocuments = lazy(() => import("@/pages/project/ProjectDocuments"));
-const ProjectActivity = lazy(() => import("@/pages/project/ProjectActivity"));
 const ProjectParticipants = lazy(() => import("@/pages/project/ProjectParticipants"));
 const ShareEstimate = lazy(() => import("@/pages/share/ShareEstimate"));
+const ShareDocument = lazy(() => import("@/pages/share/ShareDocument"));
 const InviteAccept = lazy(() => import("@/pages/invite/InviteAccept"));
 const ThemeDemo = lazy(() => import("@/pages/ThemeDemo"));
 const BlogIndex = lazy(() => import("@/pages/blog/BlogIndex"));
@@ -85,6 +85,7 @@ const App = () => (
           <Route path="/promo/redeem" element={routeElement(<PromoRedeem />)} />
           <Route path="/theme" element={routeElement(<ThemeDemo />)} />
           <Route path="/share/estimate/:shareId" element={routeElement(<ShareEstimate />)} />
+          <Route path="/share/document/:token" element={routeElement(<ShareDocument />)} />
           <Route path="/invite/accept/:inviteToken" element={routeElement(<InviteAccept />)} />
 
           {/* Public blog (SEO surface; static prerender covers these routes) */}
@@ -147,7 +148,6 @@ const App = () => (
               <Route path="hr" element={routeElement(<ProjectHR />)} />
               <Route path="gallery" element={routeElement(<ProjectGallery />)} />
               <Route path="documents" element={routeElement(<ProjectDocuments />)} />
-              <Route path="activity" element={routeElement(<ProjectActivity />)} />
               <Route path="participants" element={routeElement(<ProjectParticipants />)} />
             </Route>
           </Route>

@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { clearWorkspaceUserCache } from "@/data/workspace-profile-cache";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -90,7 +91,16 @@ async function ensureRuntimeAuthInitialized(): Promise<void> {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      const previousProfileId = currentState.profileId;
       currentState = toRuntimeAuthState(session);
+      // The only place that sees EVERY identity change: the logout button, an
+      // expiring or revoked session, a sign-out in another tab, and the
+      // magic-link and reset routes that sign a user in directly. Module-level
+      // caches keyed by profile id and not by account have to be dropped here,
+      // or the next account on this tab reads the previous one's data.
+      if (currentState.profileId !== previousProfileId) {
+        clearWorkspaceUserCache();
+      }
       emitChange();
     });
 

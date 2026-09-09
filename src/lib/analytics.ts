@@ -137,7 +137,19 @@ export type AnalyticsEventName =
   // bridge (feeds the landing_view → registration_start composite funnel).
   | "demo_entered"
   | "demo_exited"
-  | "demo_signup_cta_clicked";
+  | "demo_signup_cta_clicked"
+  // ─── Grounded sidebar opener, phase 0 baseline (2026-08). Fires once per AI
+  // thread, on the message that starts it, carrying whether that message came
+  // from a suggestion chip or was typed. Collected for two weeks BEFORE the
+  // opener ships so its own click-through has a comparison point; see
+  // rovno-docs/specs/rovno-ai-sidebar-opener-prd.md requirement 6.10.
+  | "ai_thread_first_move"
+  // ─── Grounded sidebar opener (2026-08). One per appearance of the block, so
+  // `ai_thread_first_move` divided by this is its click-through. The first-move
+  // event carries the same `opener_shown_id`, which is what links the two; it is
+  // deliberately the SAME event the phase-0 baseline collected, so before and
+  // after are one series rather than two.
+  | "ai_opener_shown";
 
 export type AnalyticsEventPayload = Record<string, unknown>;
 
@@ -287,6 +299,223 @@ export function trackEventOncePerSession(
 }
 
 /**
+ * Query parameters allowed through to Metrika, by exact name or by prefix.
+ * An allowlist rather than a denylist: this app puts one-time credentials,
+ * e-mail addresses and promo codes in the query string, and a denylist would
+ * leak the next such parameter by default.
+ */
+const ANALYTICS_QUERY_ALLOWED_KEYS = new Set(["lang", "from", "yclid", "ymclid", "gclid", "_openstat"]);
+const ANALYTICS_QUERY_ALLOWED_PREFIXES = ["utm_"];
+
+/**
+ * Every route this app serves, with the ones whose path carries a bearer
+ * secret marked. Kept in step with `src/App.tsx`.
+ *
+ * A whitelist, for the same reason the query allowlist above is one. A path
+ * that matches a safe route is passed through verbatim, so existing Metrika
+ * reports keep their per-project and per-post breakdown; a path that matches a
+ * secret-bearing route is reported as its own template instead.
+ *
+ * An unmatched path is reported as `ANALYTICS_UNKNOWN_PATH` but is NOT treated
+ * as secret, so a token-bearing route missing from this list still loads the
+ * tag. Tracked in #105.
+ */
+export const ANALYTICS_ROUTES: readonly { pattern: string; secret?: boolean }[] = [
+  { pattern: "/" },
+  { pattern: "/onboarding" },
+  { pattern: "/promo/redeem" },
+  { pattern: "/theme" },
+  { pattern: "/share/estimate/:shareId", secret: true },
+  { pattern: "/share/document/:token", secret: true },
+  { pattern: "/invite/accept/:inviteToken", secret: true },
+  { pattern: "/blog" },
+  { pattern: "/blog/tag/:tag" },
+  { pattern: "/blog/:slug" },
+  { pattern: "/offer" },
+  { pattern: "/privacy" },
+  { pattern: "/refund" },
+  { pattern: "/contacts" },
+  { pattern: "/auth/login" },
+  { pattern: "/auth/signup" },
+  { pattern: "/auth/forgot" },
+  { pattern: "/auth/reset-password" },
+  { pattern: "/auth/confirm" },
+  { pattern: "/auth/email-sent" },
+  { pattern: "/auth/callback" },
+  { pattern: "/home" },
+  { pattern: "/home/catalogs/upload-review/:uploadId" },
+  { pattern: "/home/catalogs/:catalogId" },
+  { pattern: "/demo" },
+  { pattern: "/profile" },
+  { pattern: "/profile/upgrade" },
+  { pattern: "/settings" },
+  { pattern: "/billing/checkout" },
+  { pattern: "/billing/success" },
+  { pattern: "/billing/fail" },
+  { pattern: "/blog/admin" },
+  { pattern: "/blog/admin/new" },
+  { pattern: "/blog/admin/:id" },
+  { pattern: "/project/:id" },
+  { pattern: "/project/:id/dashboard" },
+  { pattern: "/project/:id/tasks" },
+  { pattern: "/project/:id/estimate" },
+  { pattern: "/project/:id/procurement" },
+  { pattern: "/project/:id/procurement/order/:orderId" },
+  { pattern: "/project/:id/procurement/:itemId" },
+  { pattern: "/project/:id/hr" },
+  { pattern: "/project/:id/gallery" },
+  { pattern: "/project/:id/documents" },
+  { pattern: "/project/:id/participants" },
+];
+
+/** What an unrecognised path is reported as. */
+const ANALYTICS_UNKNOWN_PATH = "/unknown";
+
+function pathSegments(path: string): string[] {
+  return path.split("/").filter((segment) => segment !== "");
+}
+
+// Case-insensitive because the router is: react-router-dom 6.30.3 renders
+// /share/estimate/:shareId for /SHARE/ESTIMATE/<token> (measured), and a path
+// that matches no route here is not marked secret.
+function sameSegment(patternSegment: string, segment: string): boolean {
+  return patternSegment.toLowerCase() === segment.toLowerCase();
+}
+
+/**
+ * The route whose pattern matches `pathname`, preferring the most static one so
+ * `/blog/admin` resolves to itself rather than to `/blog/:slug`.
+ */
+function matchAnalyticsRoute(pathname: string): { pattern: string; secret?: boolean } | null {
+  const segments = pathSegments(pathname);
+  let best: { pattern: string; secret?: boolean } | null = null;
+  let bestParams = Number.POSITIVE_INFINITY;
+
+  for (const route of ANALYTICS_ROUTES) {
+    const patternSegments = pathSegments(route.pattern);
+    if (patternSegments.length !== segments.length) continue;
+
+    let params = 0;
+    let matches = true;
+    for (let i = 0; i < patternSegments.length; i += 1) {
+      const patternSegment = patternSegments[i];
+      if (patternSegment.startsWith(":")) {
+        params += 1;
+        continue;
+      }
+      if (!sameSegment(patternSegment, segments[i])) {
+        matches = false;
+        break;
+      }
+    }
+
+    if (matches && params < bestParams) {
+      best = route;
+      bestParams = params;
+    }
+  }
+
+  return best;
+}
+
+/** The path handed to Metrika: verbatim when safe, the route template when not. */
+function analyticsPathname(pathname: string): string {
+  const route = matchAnalyticsRoute(pathname);
+  if (!route) return ANALYTICS_UNKNOWN_PATH;
+  return route.secret ? route.pattern : pathname;
+}
+
+/**
+ * The pageview URL handed to Metrika: origin + path + allowlisted query, never
+ * the fragment. Metrika transmits the URL it is given verbatim.
+ */
+export function analyticsPageUrl(): string {
+  const { origin, pathname, search } = window.location;
+  const kept = new URLSearchParams();
+  for (const [key, value] of new URLSearchParams(search)) {
+    const allowed =
+      ANALYTICS_QUERY_ALLOWED_KEYS.has(key) ||
+      ANALYTICS_QUERY_ALLOWED_PREFIXES.some((prefix) => key.startsWith(prefix));
+    if (allowed) kept.append(key, value);
+  }
+  const query = kept.toString();
+  return `${origin}${analyticsPathname(pathname)}${query === "" ? "" : `?${query}`}`;
+}
+
+/**
+ * Parameter names that can establish a session. Supabase carries them in the
+ * fragment (implicit grant) or in the query (`/auth/confirm?token_hash=…`, the
+ * fallback link in the confirmation e-mail template), and `parseParametersFromURL`
+ * reads both.
+ *
+ * `code` is deliberately absent: PKCE is not in use, and `code` is also the
+ * promo-redeem parameter, which must not stall analytics forever.
+ */
+const AUTH_CREDENTIAL_KEYS = [
+  "access_token",
+  "refresh_token",
+  "provider_token",
+  "provider_refresh_token",
+  "token_hash",
+  "token",
+] as const;
+
+function carriesCredential(params: URLSearchParams): boolean {
+  return AUTH_CREDENTIAL_KEYS.some((key) => (params.get(key) ?? "") !== "");
+}
+
+/**
+ * A credential also travels as the VALUE of a redirect parameter, where
+ * carriesCredential() cannot see it: InviteAccept builds
+ * /auth/login?next=%2Finvite%2Faccept%2F<token> and ShareEstimate the
+ * signup equivalent, so the login page boots the tag with a live token in the
+ * address bar. Dropping `next` from the URL we report is not enough — tag.js
+ * reads location.href itself for its clickmap and heatmap beacons, so the raw
+ * percent-encoded token leaves the browser whatever we pass to ym().
+ *
+ * Only path-shaped values are considered, so an ordinary
+ * /billing/checkout?next=/home never stalls analytics.
+ */
+function carriesSecretRouteValue(params: URLSearchParams): boolean {
+  for (const value of params.values()) {
+    if (!value) continue;
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(value);
+    } catch {
+      // A malformed escape is not a redirect this app produced; fall back to
+      // the raw value rather than letting the throw escape into a page view.
+      decoded = value;
+    }
+    if (!decoded.startsWith("/")) continue;
+    if (matchAnalyticsRoute(decoded.split(/[?#]/, 1)[0])?.secret === true) return true;
+  }
+  return false;
+}
+
+function urlCarriesAuthCredential(): boolean {
+  const { hash, search, pathname } = window.location;
+  const hashParams = new URLSearchParams(hash.replace(/^#/, ""));
+  const searchParams = new URLSearchParams(search);
+  return (
+    matchAnalyticsRoute(pathname)?.secret === true ||
+    carriesCredential(hashParams) ||
+    carriesCredential(searchParams) ||
+    carriesSecretRouteValue(searchParams) ||
+    carriesSecretRouteValue(hashParams)
+  );
+}
+
+const AUTH_CREDENTIAL_POLL_INTERVAL_MS = 100;
+/**
+ * When to stop waiting for the credential to leave the address bar. A failed
+ * landing never clears it, so the wait needs an end. `ensureMetrikaStarted()`
+ * is what recovers from here, so giving up costs the current page view rather
+ * than the whole session.
+ */
+const AUTH_CREDENTIAL_POLL_TIMEOUT_MS = 10_000;
+
+/**
  * Bootstrap the Yandex Metrika tag. Call exactly once at app startup
  * (`main.tsx`), before the first render.
  *
@@ -294,33 +523,97 @@ export function trackEventOncePerSession(
  * build time, so when no counter is configured esbuild dead-code-eliminates
  * this whole loader from the bundle — no `mc.yandex.ru` request, no init.
  *
- * Session replay is deliberately disabled below: it records PII and is gated
- * behind a separate consent + field-masking workstream (152-ФЗ). Only
- * clickmap / accurateTrackBounce / trackLinks remain on.
+ * Sanitising the `url` we pass is not enough on its own while the credential is
+ * still in the address bar: `tag.js` reads `location.href` itself for clickmap
+ * beacons (v2610, module `clm.p`: `p = kd(a).href`, sent as `page-url` to
+ * `mc.yandex.ru/clmap/<id>`), a value the `url` option does not feed. So the tag
+ * is not loaded at all until the credential is gone.
+ *
+ * Polled rather than driven by `hashchange`, so that the check does not depend
+ * on how the credential is removed or on which part of the URL holds it.
  */
 export function initMetrika(): void {
   if (!import.meta.env.VITE_METRIKA_COUNTER_ID) return;
   if (METRIKA_COUNTER_ID === null) return;
   if (typeof window === "undefined" || typeof document === "undefined") return;
 
-  const counterId = METRIKA_COUNTER_ID;
-  const src = `https://mc.yandex.ru/metrika/tag.js?id=${counterId}`;
+  // Install the command queue immediately, even while waiting: it makes no
+  // network call, and without it trackEvent() drops every event fired before
+  // the tag loads (AuthCallback fires email_verified in exactly that window).
+  ensureYmQueue();
 
-  // Don't bootstrap twice (HMR / an accidental second call).
-  const existingScripts = document.getElementsByTagName("script");
-  for (let i = 0; i < existingScripts.length; i++) {
-    if (existingScripts[i].src === src) return;
+  if (!urlCarriesAuthCredential()) {
+    bootstrapMetrika();
+    return;
   }
 
-  // Define the ym() command queue exactly as the official snippet does, so
-  // calls issued before tag.js finishes loading are buffered, not dropped.
+  const startedAt = Date.now();
+  const timer = window.setInterval(() => {
+    if (!urlCarriesAuthCredential()) {
+      window.clearInterval(timer);
+      bootstrapMetrika();
+      return;
+    }
+    if (Date.now() - startedAt >= AUTH_CREDENTIAL_POLL_TIMEOUT_MS) {
+      window.clearInterval(timer);
+    }
+  }, AUTH_CREDENTIAL_POLL_INTERVAL_MS);
+}
+
+/**
+ * Start Metrika if it is not running yet and the address bar is clean. Called on
+ * every SPA navigation, so a landing whose credential never cleared costs that
+ * page view rather than the rest of the session.
+ */
+export function ensureMetrikaStarted(): void {
+  if (!import.meta.env.VITE_METRIKA_COUNTER_ID) return;
+  if (METRIKA_COUNTER_ID === null) return;
+  if (typeof window === "undefined" || typeof document === "undefined") return;
+  if (metrikaStarted) return;
+  if (urlCarriesAuthCredential()) return;
+
+  bootstrapMetrika();
+}
+
+function ensureYmQueue(): YandexMetrikaFn {
   const w = window;
-  const ym: YandexMetrikaFn = (w.ym =
+  // The official snippet's queue, so calls issued before tag.js finishes
+  // loading are buffered rather than dropped.
+  return (w.ym =
     w.ym ||
     function (...args: unknown[]) {
       (w.ym!.a = w.ym!.a || []).push(args);
     });
+}
+
+let metrikaStarted = false;
+
+/**
+ * Session replay is deliberately disabled below: it records PII and is gated
+ * behind a separate consent + field-masking workstream (152-ФЗ). Only
+ * clickmap / accurateTrackBounce / trackLinks remain on.
+ */
+function bootstrapMetrika(): void {
+  if (METRIKA_COUNTER_ID === null) return;
+  if (metrikaStarted) return;
+
+  const counterId = METRIKA_COUNTER_ID;
+  const src = `https://mc.yandex.ru/metrika/tag.js?id=${counterId}`;
+
+  // The module-scope flag resets on an HMR reload, so still check the DOM.
+  const existingScripts = document.getElementsByTagName("script");
+  for (let i = 0; i < existingScripts.length; i++) {
+    if (existingScripts[i].src === src) return;
+  }
+  metrikaStarted = true;
+
+  const ym = ensureYmQueue();
   ym.l = Date.now();
+
+  // tag.js replays the queue in order, so anything buffered while we waited has
+  // to be re-queued behind init or it lands on a counter that does not exist.
+  const buffered = (ym.a ?? []) as unknown[][];
+  ym.a = [];
 
   const script = document.createElement("script");
   script.async = true;
@@ -338,6 +631,10 @@ export function initMetrika(): void {
     accurateTrackBounce: true,
     trackLinks: true,
     referrer: document.referrer,
-    url: location.href,
+    url: analyticsPageUrl(),
   });
+
+  for (const args of buffered) {
+    (ym as (...a: unknown[]) => void)(...args);
+  }
 }

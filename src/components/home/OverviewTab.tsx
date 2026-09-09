@@ -16,6 +16,8 @@ import { OrgBlock } from "@/components/home/OrgBlock";
 import { PendingInvitationsBlock } from "@/components/home/PendingInvitationsBlock";
 import { useWorkspaceProjectsSensitiveDetailMap } from "@/hooks/use-home-sensitive-detail-map";
 import { getActivityDisplayDetailForHome } from "@/lib/activity-display";
+import { getEventCaption, isFallbackActor } from "@/lib/event-catalog";
+import { isAIEvent } from "@/components/ai/event-utils";
 
 function getStatusColor(progress: number): string {
   if (progress >= 100) return "bg-success/15 text-success";
@@ -115,7 +117,7 @@ export function OverviewTab() {
                   size="icon"
                   className="h-8 w-8 shrink-0 text-accent"
                   onClick={() => navigate("/home?tab=projects")}
-                  aria-label="View all projects"
+                  aria-label={t("overview.viewAllProjectsAria")}
                 >
                   <ChevronRight className="h-4 w-4" />
                 </Button>
@@ -156,7 +158,7 @@ export function OverviewTab() {
                   size="icon"
                   className="h-8 w-8 shrink-0 text-accent"
                   onClick={() => navigate("/home?tab=tasks")}
-                  aria-label="View all tasks"
+                  aria-label={t("overview.viewAllTasksAria")}
                 >
                   <ChevronRight className="h-4 w-4" />
                 </Button>
@@ -248,7 +250,14 @@ export function OverviewTab() {
                     const line = getActivityDisplayDetailForHome(evt, activityRedactionByProject, {
                       canViewFinanceDetail: false,
                     });
-                    const summary = line ?? evt.type.replace(/[._]/g, " ");
+                    // Same rule as the sidebar row, from the same function, so the two
+                    // surfaces cannot disagree about one event.
+                    const summary = line
+                      ?? getEventCaption(
+                        t,
+                        evt.type,
+                        isFallbackActor(isAIEvent(evt), Boolean(store.getUserById(evt.actor_id))),
+                      );
                     return (
                       <div key={evt.id} className="flex items-center gap-2 p-1.5 text-caption text-muted-foreground">
                         <span className="h-1.5 w-1.5 rounded-full bg-accent shrink-0" />

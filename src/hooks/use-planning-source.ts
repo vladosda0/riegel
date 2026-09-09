@@ -132,6 +132,9 @@ export function usePlanningProjectTasksState(projectId: string): { tasks: Task[]
   const estimateState = useEstimateV2Project(projectId);
   const estimateSync = estimateState.sync;
   const supabaseMode = mode.kind === "supabase" ? mode : null;
+  // useWorkspaceModeState builds a fresh object literal every render, so the
+  // memo below depends on the profile id rather than on `supabaseMode` itself.
+  const supabaseProfileId = supabaseMode?.profileId ?? null;
   const getTasks = useCallback(() => store.getTasks(projectId), [projectId]);
   const demoTasks = useStoreValue(
     getTasks,
@@ -171,7 +174,7 @@ export function usePlanningProjectTasksState(projectId: string): { tasks: Task[]
       ? demoTasks
       : remoteTasks;
 
-    if (!supabaseMode || rawTasks.length === 0) {
+    if (!supabaseProfileId || rawTasks.length === 0) {
       return rawTasks;
     }
 
@@ -201,7 +204,7 @@ export function usePlanningProjectTasksState(projectId: string): { tasks: Task[]
         assignees,
       };
     });
-  }, [demoTasks, estimateState.lines, mode.kind, remoteTasks, supabaseMode]);
+  }, [demoTasks, estimateState.lines, mode.kind, remoteTasks, supabaseProfileId]);
 
   if (mode.kind === "demo" || mode.kind === "local") {
     return { tasks: derivedTasks, isLoading: false };

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   deriveEstimateTaskAssignees,
   getPlanningSource,
@@ -8,6 +8,7 @@ import {
   syncProjectTasksFromEstimate,
   TaskNoLongerAvailableError,
 } from "@/data/planning-source";
+import { getEvents } from "@/data/store";
 import type { Task } from "@/types/entities";
 
 type MockSupabaseClient = {
@@ -722,5 +723,53 @@ describe("changeTaskStatus (supabase source)", () => {
       .catch((e) => e);
     expect(err).not.toBeInstanceOf(Error);
     expect(commentInsert).not.toHaveBeenCalled();
+  });
+});
+
+describe("createProjectStage (browser source)", () => {
+  // Both ids are built from Date.now(). Pin the clock so these prove the disambiguating
+  // counter rather than the clock.
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-19T00:00:00.000Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("mints a distinct id for every stage created in one loop", async () => {
+    const source = await getPlanningSource({ kind: "local" });
+    const ids: string[] = [];
+
+    for (const title of ["A", "B", "C", "D", "E"]) {
+      const stage = await source.createProjectStage({
+        projectId: "project-loop",
+        title,
+        description: "",
+        order: ids.length + 1,
+        status: "open",
+      });
+      ids.push(stage.id);
+    }
+
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("mints a distinct activity-event id for every stage created in one loop", async () => {
+    const source = await getPlanningSource({ kind: "local" });
+
+    for (const title of ["A", "B", "C", "D", "E"]) {
+      await source.createProjectStage({
+        projectId: "project-events",
+        title,
+        description: "",
+        order: 1,
+        status: "open",
+      });
+    }
+
+    const eventIds = getEvents("project-events").map((event) => event.id);
+    expect(eventIds).toHaveLength(5);
+    expect(new Set(eventIds).size).toBe(eventIds.length);
   });
 });

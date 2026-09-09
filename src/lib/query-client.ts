@@ -3,6 +3,26 @@ import { captureException } from "@/lib/observability/sentry";
 import { shouldReportDataLayerError } from "@/lib/observability/data-layer-errors";
 
 /**
+ * Query keys whose REMAINING elements are a credential, not an id. On these
+ * routes the token in the key IS the thing that grants access, so the key must
+ * never reach the error tracker whole. The generic SCRUB_RULES cannot help
+ * here: the value arrives outside any URL, and only the document-share token
+ * has a shape distinctive enough to match on (48 lowercase hex). An estimate
+ * share id and an invite token are an ordinary id and a UUID.
+ *
+ * Add a key here whenever a route's path segment is its credential — the same
+ * set as the `secret: true` entries of ANALYTICS_ROUTES.
+ */
+const CREDENTIAL_QUERY_KEYS = new Set(["document-share", "estimate-share", "invite-token"]);
+
+/** The key with its credential elements replaced, safe to attach to an event. */
+export function redactQueryKey(queryKey: readonly unknown[]): unknown[] {
+  const head = queryKey[0];
+  if (typeof head !== "string" || !CREDENTIAL_QUERY_KEYS.has(head)) return [...queryKey];
+  return [head, ...queryKey.slice(1).map(() => "[FILTERED]")];
+}
+
+/**
  * App-wide QueryClient singleton. Lives outside App.tsx so non-React session
  * hygiene (auth identity change → clear all cached account data) can reach it
  * without an import cycle through the component tree.
@@ -23,7 +43,7 @@ export const queryClient = new QueryClient({
           kind: "query",
           query_key: typeof keyHead === "string" ? keyHead : "unknown",
         },
-        extra: { queryKey: query.queryKey },
+        extra: { queryKey: redactQueryKey(query.queryKey) },
       });
     },
   }),

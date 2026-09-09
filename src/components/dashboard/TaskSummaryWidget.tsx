@@ -48,7 +48,7 @@ export function TaskSummaryWidget({ tasks, projectId, className }: Props) {
         <Link
           to={`/project/${projectId}/tasks`}
           className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-accent hover:bg-accent/10 transition-colors"
-          aria-label="View all tasks"
+          aria-label={t("taskSummary.viewAllAria")}
         >
           <ChevronRight className="h-4 w-4" />
         </Link>
