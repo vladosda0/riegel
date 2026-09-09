@@ -12,12 +12,12 @@ import { LandingSeo } from "@/components/landing/LandingSeo";
 import i18n from "@/i18n";
 
 /** The head tags index.html actually ships, recreated for jsdom. */
-const SHELL_TITLE = "Ровно ИИ";
+const SHELL_TITLE = "Ровно ИИ — управление строительными проектами";
 const SHELL_META: [string, string, string][] = [
-  ["name", "description", "Управление строительными проектами"],
-  ["property", "og:title", "Ровно ИИ"],
-  ["property", "og:description", "Управление строительными проектами"],
-  ["name", "twitter:title", "Ровно ИИ"],
+  ["name", "description", "Управляйте строительными проектами: сметы, задачи, закупки, фото и документы в одном пространстве с ИИ."],
+  ["property", "og:title", "Ровно ИИ — управление строительными проектами"],
+  ["property", "og:description", "Управляйте строительными проектами: сметы, задачи, закупки, фото и документы в одном пространстве с ИИ."],
+  ["name", "twitter:title", "Ровно ИИ — управление строительными проектами"],
   // index.html ships og:locale, and LandingSeo overwrites it — so it must be
   // seeded here, or the restore test silently exercises the create-and-remove
   // path instead of the snapshot-and-restore one it exists to guard.

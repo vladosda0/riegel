@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { renderHook } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { useDocumentHead } from "./seo";
+
+/** Read from the shell rather than hand-copied, so it cannot go stale in silence. */
+const SHELL_OG_TITLE =
+  /<meta property="og:title" content="([^"]*)"/.exec(
+    readFileSync(resolve(__dirname, "../../../index.html"), "utf8"),
+  )?.[1] ?? "";
 
 function getMeta(attr: "name" | "property", key: string): string | null {
   return document.head.querySelector(`meta[${attr}="${key}"]`)?.getAttribute("content") ?? null;
@@ -231,15 +239,16 @@ describe("prerendered head tags do not leak across a client-side navigation", ()
   });
 
   it("og:title and description ARE restored — index.html really does ship those", () => {
+    expect(SHELL_OG_TITLE).not.toBe("");
     const og = document.createElement("meta");
     og.setAttribute("property", "og:title");
-    og.setAttribute("content", "Ровно ИИ"); // the app-shell default, verbatim from index.html
+    og.setAttribute("content", SHELL_OG_TITLE);
     document.head.appendChild(og);
 
     const { unmount } = renderHook(() => useDocumentHead({ title: "Статья" }));
     expect(og.getAttribute("content")).toBe("Статья");
     unmount();
-    expect(og.getAttribute("content")).toBe("Ровно ИИ");
+    expect(og.getAttribute("content")).toBe(SHELL_OG_TITLE);
     og.remove();
   });
 

@@ -14,8 +14,6 @@ export default function AuthLayout() {
   // tag. Since a crawler is always a guest, this layout is where the tag has to
   // live to be seen by one.
   //
-  // SITE_NAME is index.html's own <title>, so this changes nothing a visitor sees.
-  //
   // This layout is the first PERSISTENT caller of the hook; the others are leaf
   // pages. So do not add useDocumentHead to an /auth/* child page: on the first
   // child route change its effect clears this tag (seo.ts, the robots else-branch),
