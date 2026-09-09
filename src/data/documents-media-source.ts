@@ -721,13 +721,30 @@ export async function updateSupabaseProjectDocumentVisibility(
   supabase: TypedSupabaseClient,
   input: UpdateProjectDocumentVisibilityInput,
 ): Promise<void> {
-  const { error } = await supabase
+  // `.select()` is what makes a no-op UPDATE observable. Without it PostgREST
+  // answers 204 with no error when the documents_update USING clause matches
+  // zero rows, so a caller whose authority has lapsed (removed from the
+  // project, demoted, internal-doc visibility withdrawn, row deleted
+  // elsewhere) is told the flip succeeded. The trigger is NOT a backstop for
+  // this: guard_documents_visibility_class_change only fires once a row is
+  // reached, so a USING failure never gets there.
+  //
+  // Reading the row back cannot itself fail spuriously: both the
+  // documents_update WITH CHECK and the guard trigger require
+  // can_view_internal_documents() to change the class in EITHER direction, so
+  // any update that lands satisfies the second conjunct of documents_select
+  // for the new value, and can_write_project_content() implies membership.
+  const { data, error } = await supabase
     .from("documents")
     .update({ visibility_class: input.visibilityClass })
-    .eq("id", input.documentId);
+    .eq("id", input.documentId)
+    .select("id");
 
   if (error) {
     throw error;
+  }
+  if (!data || data.length === 0) {
+    throw new Error("Document visibility was not changed: no matching row.");
   }
 }
 

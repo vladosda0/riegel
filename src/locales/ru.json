@@ -2516,6 +2516,7 @@
   "documents.share.revoked": "Публичная ссылка отозвана",
   "documents.share.creating": "Готовим ссылку…",
   "documents.share.createFailed": "Не удалось создать публичную ссылку",
+  "documents.share.revokeFailed": "Не удалось отозвать публичную ссылку",
   "documents.share.internalWarning": "Внутренними документами нельзя поделиться. Чтобы поделиться, переведите документ в класс «Общий». Внимание: документ станет доступен для просмотра всем участникам проекта и всем, кто получит публичную ссылку.",
   "documents.share.makeSharedAndShare": "Перевести в «Общий» и поделиться",
   "documents.visibility.label": "Видимость",

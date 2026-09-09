@@ -16,6 +16,24 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/EmptyState";
 import { toast } from "@/hooks/use-toast";
 import { useDocumentHead } from "@/lib/blog/seo";
+
+/**
+ * Types the storage response serves INLINE. Mirrors INLINE_SAFE_MIME_TYPES in
+ * rovno-db supabase/functions/_shared/sharedDocument.ts: get-shared-document
+ * signs the URL with `download` — i.e. Content-Disposition: attachment — for
+ * every type outside this list. A top-level navigation to an attachment
+ * response opens a blank tab and starts a download instead, so "open in a new
+ * tab" is only offered where the browser will actually render the file. The
+ * broader `image/*` check below stays as it is: an <img> is a subresource and
+ * the header does not apply to it.
+ */
+const INLINE_SAFE_MIME_TYPES: ReadonlySet<string> = new Set([
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+]);
 import { fetchSharedDocument, type SharedDocumentFile } from "@/data/document-share-source";
 import { downloadFromUrl } from "@/components/home/documents-hub/storage-urls";
 import { formatFileSize } from "@/lib/format-file-size";
@@ -34,6 +52,7 @@ export default function ShareDocument() {
   const { token = "" } = useParams<{ token: string }>();
   const { t, i18n } = useTranslation();
   const [downloading, setDownloading] = useState(false);
+  const [openingTab, setOpeningTab] = useState(false);
 
   const query = useQuery({
     queryKey: ["document-share", token],
@@ -80,21 +99,27 @@ export default function ShareDocument() {
   }
 
   async function handleOpenInNewTab() {
+    if (openingTab) return;
+    setOpeningTab(true);
     // Open synchronously inside the click so the popup blocker stays quiet,
     // then point the tab once a fresh URL is known (same shape as
     // openStorageUrlInNewTab).
     const tab = window.open("about:blank", "_blank");
     if (tab) tab.opener = null;
-    const fresh = await resolveFreshFile();
-    if (!fresh) {
-      tab?.close();
-      toast({ title: t("share.document.downloadFailed"), variant: "destructive" });
-      return;
-    }
-    if (tab) {
-      tab.location.href = fresh.signedUrl;
-    } else {
-      window.open(fresh.signedUrl, "_blank", "noopener,noreferrer");
+    try {
+      const fresh = await resolveFreshFile();
+      if (!fresh) {
+        tab?.close();
+        toast({ title: t("share.document.downloadFailed"), variant: "destructive" });
+        return;
+      }
+      if (tab) {
+        tab.location.href = fresh.signedUrl;
+      } else {
+        window.open(fresh.signedUrl, "_blank", "noopener,noreferrer");
+      }
+    } finally {
+      setOpeningTab(false);
     }
   }
 
@@ -135,6 +160,7 @@ export default function ShareDocument() {
 
   const isImage = file.mimeType?.startsWith("image/") ?? false;
   const isPdf = file.mimeType === "application/pdf";
+  const canOpenInline = !!file.mimeType && INLINE_SAFE_MIME_TYPES.has(file.mimeType);
 
   return (
     <div className="mx-auto max-w-3xl p-sp-3 space-y-sp-2">
@@ -163,10 +189,16 @@ export default function ShareDocument() {
             <Download className="h-4 w-4 mr-1.5" />
             {t("share.document.download")}
           </Button>
-          <Button variant="outline" onClick={() => { void handleOpenInNewTab(); }}>
-            <ExternalLink className="h-4 w-4 mr-1.5" />
-            {t("share.document.openInNewTab")}
-          </Button>
+          {canOpenInline && (
+            <Button
+              variant="outline"
+              onClick={() => { void handleOpenInNewTab(); }}
+              disabled={openingTab}
+            >
+              <ExternalLink className="h-4 w-4 mr-1.5" />
+              {t("share.document.openInNewTab")}
+            </Button>
+          )}
         </div>
       </div>
 

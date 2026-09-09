@@ -181,7 +181,7 @@ export function DocumentShareDialog({
       onOpenChange(false);
     } catch (error) {
       toast({
-        title: t("documents.share.createFailed"),
+        title: t("documents.share.revokeFailed"),
         description: errorMessage(error, ""),
         variant: "destructive",
       });

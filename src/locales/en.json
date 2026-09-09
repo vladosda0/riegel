@@ -2488,6 +2488,7 @@
   "documents.share.revoked": "Public link revoked",
   "documents.share.creating": "Preparing the link…",
   "documents.share.createFailed": "Could not create the public link",
+  "documents.share.revokeFailed": "Could not revoke the public link",
   "documents.share.internalWarning": "Internal documents cannot be shared. To share it, change the document class to Shared. Note: the document will become visible to every project participant and to anyone who receives the public link.",
   "documents.share.makeSharedAndShare": "Make Shared and share",
   "documents.visibility.label": "Visibility",
