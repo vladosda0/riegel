@@ -3,6 +3,25 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <script>
+      // www.rovno.ai -> rovno.ai. Timeweb App Platform serves the same app on
+      // every attached domain and offers no edge redirect, so without this www
+      // answers with a duplicate of the whole site. Inline and first in <head>
+      // so it fires before the icon/manifest fetches and the SPA boot below.
+      // Plain ES3: this script is served untranspiled.
+      (function () {
+        var host = location.host;
+        if (host.slice(0, 4) !== "www.") return;
+        var bare = host.slice(4);
+        // Leave hosts with no registrable domain left alone (e.g. www.localhost).
+        if (bare.indexOf(".") < 1) return;
+        location.replace(
+          location.protocol + "//" + bare + location.pathname + location.search + location.hash
+        );
+      })();
+    </script>
+
     <title>Ровно ИИ — управление строительными проектами</title>
     <meta name="description" content="Управляйте строительными проектами: сметы, задачи, закупки, фото и документы в одном пространстве с ИИ." />
     <meta name="author" content="rovno.ai" />
