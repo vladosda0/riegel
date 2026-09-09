@@ -88,6 +88,26 @@ describe("scrubText", () => {
     );
   });
 
+  it("filters token_hash, which `token` alone does not cover", () => {
+    // /auth/confirm's fallback link. On the error path AuthConfirm only sets
+    // state, so the live hash sits in the address bar for as long as the user
+    // does, and any event fired meanwhile carries request.url.
+    expect(scrubText("https://rovno.ai/auth/confirm?token_hash=pkce_abc123&type=signup")).toBe(
+      "https://rovno.ai/auth/confirm?token_hash=[FILTERED]&type=signup",
+    );
+  });
+
+  it("filters an email carried as a query param, including percent-encoded", () => {
+    // Signup navigates to /auth/email-sent?email=<encodeURIComponent(email)>,
+    // so the `@` the email rule needs has become %40 by the time it is scrubbed.
+    expect(scrubText("https://rovno.ai/auth/email-sent?email=user%40example.com")).toBe(
+      "https://rovno.ai/auth/email-sent?email=[FILTERED]",
+    );
+    expect(scrubText("https://rovno.ai/auth/email-sent?email=user@example.com&x=1")).toBe(
+      "https://rovno.ai/auth/email-sent?email=[FILTERED]&x=1",
+    );
+  });
+
   it("replaces RU address fragments with [ADDRESS]", () => {
     expect(scrubText("живу на ул. Ленина 15, кв. 3")).toBe("живу на [ADDRESS], [ADDRESS]");
     expect(scrubText("г. Москва, дом 5")).toBe("[ADDRESS], [ADDRESS]");

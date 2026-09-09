@@ -2,6 +2,11 @@
 # and ignores every other, so each named group below must repeat the shared
 # Disallow rules. Omitting them from a named group grants that crawler access.
 #
+# /share/ and /invite/ carry the credential IN THE PATH: the share or invite
+# token IS the URL. Only /share/document sets a noindex, and a meta tag is
+# injected by JS, which a non-rendering crawler never runs - and every AI
+# crawler named below is in that class. So the directive has to live here too.
+#
 # No group carries "Allow: /". Everything is allowed by default, so that line
 # adds nothing, and placing it above a Disallow makes the file's meaning depend
 # on the parser: under longest-match (RFC 9309 2.2.2, what Google/Bing/Yandex
@@ -12,35 +17,57 @@
 
 User-agent: Googlebot
 Disallow: /blog/admin
+Disallow: /share/
+Disallow: /invite/
 
 User-agent: Bingbot
 Disallow: /blog/admin
+Disallow: /share/
+Disallow: /invite/
 
 User-agent: Twitterbot
 Disallow: /blog/admin
+Disallow: /share/
+Disallow: /invite/
 
 User-agent: facebookexternalhit
 Disallow: /blog/admin
+Disallow: /share/
+Disallow: /invite/
 
 User-agent: GPTBot
 Disallow: /blog/admin
+Disallow: /share/
+Disallow: /invite/
 
 User-agent: OAI-SearchBot
 Disallow: /blog/admin
+Disallow: /share/
+Disallow: /invite/
 
 User-agent: ChatGPT-User
 Disallow: /blog/admin
+Disallow: /share/
+Disallow: /invite/
 
 User-agent: ClaudeBot
 Disallow: /blog/admin
+Disallow: /share/
+Disallow: /invite/
 
 User-agent: PerplexityBot
 Disallow: /blog/admin
+Disallow: /share/
+Disallow: /invite/
 
 User-agent: YandexBot
 Disallow: /blog/admin
+Disallow: /share/
+Disallow: /invite/
 
 User-agent: *
 Disallow: /blog/admin
+Disallow: /share/
+Disallow: /invite/
 
 Sitemap: https://rovno.ai/sitemap.xml

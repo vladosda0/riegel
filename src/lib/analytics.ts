@@ -464,12 +464,45 @@ function carriesCredential(params: URLSearchParams): boolean {
   return AUTH_CREDENTIAL_KEYS.some((key) => (params.get(key) ?? "") !== "");
 }
 
+/**
+ * A credential also travels as the VALUE of a redirect parameter, where
+ * carriesCredential() cannot see it: InviteAccept builds
+ * /auth/login?next=%2Finvite%2Faccept%2F<token> and ShareEstimate the
+ * signup equivalent, so the login page boots the tag with a live token in the
+ * address bar. Dropping `next` from the URL we report is not enough — tag.js
+ * reads location.href itself for its clickmap and heatmap beacons, so the raw
+ * percent-encoded token leaves the browser whatever we pass to ym().
+ *
+ * Only path-shaped values are considered, so an ordinary
+ * /billing/checkout?next=/home never stalls analytics.
+ */
+function carriesSecretRouteValue(params: URLSearchParams): boolean {
+  for (const value of params.values()) {
+    if (!value) continue;
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(value);
+    } catch {
+      // A malformed escape is not a redirect this app produced; fall back to
+      // the raw value rather than letting the throw escape into a page view.
+      decoded = value;
+    }
+    if (!decoded.startsWith("/")) continue;
+    if (matchAnalyticsRoute(decoded.split(/[?#]/, 1)[0])?.secret === true) return true;
+  }
+  return false;
+}
+
 function urlCarriesAuthCredential(): boolean {
   const { hash, search, pathname } = window.location;
+  const hashParams = new URLSearchParams(hash.replace(/^#/, ""));
+  const searchParams = new URLSearchParams(search);
   return (
     matchAnalyticsRoute(pathname)?.secret === true ||
-    carriesCredential(new URLSearchParams(hash.replace(/^#/, ""))) ||
-    carriesCredential(new URLSearchParams(search))
+    carriesCredential(hashParams) ||
+    carriesCredential(searchParams) ||
+    carriesSecretRouteValue(searchParams) ||
+    carriesSecretRouteValue(hashParams)
   );
 }
 

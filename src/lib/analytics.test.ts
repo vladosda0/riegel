@@ -258,6 +258,41 @@ describe("initMetrika and the Supabase auth fragment", () => {
     expect(ym.mock.calls.filter((call) => call[1] === "init")).toHaveLength(0);
     expect(document.querySelector(`script[src="${TAG_SRC}"]`)).toBeNull();
   });
+
+  // The credential also arrives as the VALUE of `next`, where the
+  // parameter-NAME check cannot see it. Dropping `next` from the URL we report
+  // does not help: tag.js reads location.href itself for its clickmap beacons,
+  // so booting here ships the token to Yandex whatever we pass to ym().
+  it.each([
+    ["an invite token", `/auth/login?next=%2Finvite%2Faccept%2F${"a".repeat(32)}`],
+    ["a share-estimate id", "/auth/signup?next=%2Fshare%2Festimate%2Fsome-share-id"],
+    ["a share-document token", `/auth/login?next=%2Fshare%2Fdocument%2F${"b".repeat(48)}`],
+  ])("does not start when `next` carries %s", async (_label, url) => {
+    vi.useFakeTimers();
+    setUrl(url);
+    vi.resetModules();
+    vi.stubEnv("VITE_METRIKA_COUNTER_ID", COUNTER_ID);
+    const analytics = await import("./analytics");
+
+    analytics.initMetrika();
+    vi.advanceTimersByTime(30_000);
+    analytics.ensureMetrikaStarted();
+
+    expect(ym.mock.calls.filter((call) => call[1] === "init")).toHaveLength(0);
+    expect(document.querySelector(`script[src="${TAG_SRC}"]`)).toBeNull();
+  });
+
+  it("still starts on an ordinary redirect that carries no credential", async () => {
+    vi.useFakeTimers();
+    setUrl("/auth/login?next=%2Fbilling%2Fcheckout");
+    vi.resetModules();
+    vi.stubEnv("VITE_METRIKA_COUNTER_ID", COUNTER_ID);
+    const analytics = await import("./analytics");
+
+    analytics.initMetrika();
+
+    expect(ym.mock.calls.filter((call) => call[1] === "init")).toHaveLength(1);
+  });
 });
 
 describe("analyticsPageUrl path sanitising", () => {

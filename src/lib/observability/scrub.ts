@@ -68,9 +68,21 @@ const SCRUB_RULES: ScrubRule[] = [
   },
   {
     // Sensitive query-string params (keeps the param name, drops the value).
+    //
+    // The list is kept in step with AUTH_CREDENTIAL_KEYS in src/lib/analytics.ts,
+    // which decides when Metrika is allowed to start. The two had drifted:
+    // `token_hash` was covered there and missing here, so /auth/confirm's
+    // fallback link — which stays in the address bar indefinitely on the error
+    // path — reached Sentry verbatim. Note `token` alone does NOT cover it: the
+    // alternative matches, then the pattern demands `=` and finds `_`.
+    //
+    // `email` is here because the value is dropped whatever its encoding. The
+    // email rule below needs a literal `@`, and Signup navigates to
+    // /auth/email-sent?email=<percent-encoded>, where the address survives every
+    // other rule. Personal data under 152-ФЗ, which is what this module is for.
     name: "sensitive-query-param",
     pattern:
-      /([?&](?:apikey|api[_-]?key|token|access[_-]?token|refresh[_-]?token|password|secret|code)=)[^&#\s]+/gi,
+      /([?&](?:apikey|api[_-]?key|access[_-]?token|refresh[_-]?token|provider_refresh_token|provider_token|token_hash|token|password|secret|code|email)=)[^&#\s]+/gi,
     replacement: "$1[FILTERED]",
   },
   {
